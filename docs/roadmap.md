@@ -1,0 +1,223 @@
+# Roadmap — Insurance Partners (IPA)
+
+Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
+status. En fase markeres først som gennemført efter eksplicit besked.
+
+**Aktuel status:** Fase 1–4 er gennemført og **låst**. Fase 5 — Grundplatform er åbnet og
+implementeres i Claude Code i projektets Git-repository.
+
+---
+
+## Faseoversigt
+
+| Fase | Navn | Status | Leverance |
+|------|------|--------|-----------|
+| 1 | Produktdefinition | 🔒 Gennemført og låst | `docs/01-product-definition.md` |
+| 2 | Informationsarkitektur | 🔒 Gennemført og låst | `docs/02-information-architecture.md` |
+| 3 | Teknisk arkitektur | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
+| 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
+| 5 | Grundplatform | 🔄 Åbnet — implementeres i Claude Code | `docs/05-foundation-implementation.md` |
+| 6+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+
+---
+
+## Fase 1 — Produktdefinition
+
+**Status:** 🔒 Gennemført og låst.
+
+**Leverance:** `docs/01-product-definition.md`
+
+Fastlagt i denne fase:
+
+- [x] Hvad Insurance Partners er: AI-baseret platform til erhvervsforsikringsrådgivere
+- [x] To overordnede formål: uddannelse og udvikling, samt AI-baseret arbejds- og sparringsværktøj
+- [x] Fire centrale moduler: Learn, Copilot, Practice, Advise
+- [x] Øvrige moduler: Assessment, Min profil, Admin, Analytics, Knowledge Engine
+- [x] Knowledge Engine som fælles autoritativt grundlag for alle centrale AI-funktioner
+- [x] Indholdstyper i Knowledge Engine
+- [x] Principper for faglige AI-svar: kildedokumentation, intet opfundet indhold, kommunikeret usikkerhed
+- [x] Nummererede krav (KRAV-AI-001 til KRAV-ADV-001)
+- [x] Advise behandler potentielt virksomheds- og kundedata; compliancekrav henvist til fase 3
+- [x] Tre brugerroller: Rådgiver, Leder og Administrator, med lederadgang og administratoradgang som adskilte rettigheder
+- [x] Krav om at rollemodellen skal kunne udvides uden større arkitekturændringer
+
+---
+
+## Fase 2 — Informationsarkitektur
+
+**Status:** 🔒 Gennemført og låst.
+
+**Leverance:** `docs/02-information-architecture.md`
+
+Dokumenteret i denne fase:
+
+- [x] Forholdet mellem moduler og navigationsområder
+- [x] Komplet sitemap over ni hovedområder
+- [x] Formål med hver hovedsektion
+- [x] Learn-hierarki: Produktbibliotek → Produkt → Produktforløb → elleve moduler
+- [x] Practice som fem sideordnede træningsformer, med AI-rollespil som både form og mekanisme
+- [x] Advise som syv arbejdsområder med fleksibel navigation mellem trinene
+- [x] Knowledge Engine som fælles grundlag under Learn, Copilot, Practice og Advise
+- [x] Copilot som globalt AI-lag, herunder kontekst, kilder og sporbarhed
+- [x] Domænebegreber med flere anvendelser og kravet om entydige interne navne
+- [x] Primære brugerflows mellem sektionerne (flow A–G)
+- [x] Informationsflow mellem modulerne
+- [x] Analytics som selvstændigt hovedområde med rollebaseret adgang
+- [x] Adgangsmodel for Rådgiver, Leder og Administrator
+- [x] Copilot deaktiveret under aktiv Assessment og under AI-rollespil, tilgængelig før og efter
+
+**Udestående:** ingen blokerende punkter. De fem emner i dokumentets afsnit 11 er bevidst
+overladt til fase 3.
+
+---
+
+## Fase 3 — Teknisk arkitektur
+
+**Status:** 🔒 Gennemført og låst.
+
+**Leverance:** `docs/03-technical-architecture.md`
+
+Stack fastlagt i denne fase:
+
+- [x] Frontend: Next.js, TypeScript, Tailwind CSS, shadcn/ui
+- [x] Backend: Next.js server-side API-lag
+- [x] Database: PostgreSQL via Supabase, vektorsøgning med pgvector
+- [x] Auth: Supabase Auth; authorization via permissions med scope
+- [x] Storage: Supabase Storage
+- [x] AI: Claude API, kaldt server-side gennem fælles AI-gateway
+- [x] Knowledge Engine: RAG-arkitektur med versioneret, tidsbestemt viden
+- [x] Hosting: Vercel og Supabase, EU-region hvor muligt
+- [x] Versionsstyring: Git og GitHub
+
+Modelversioner, embedding-model og reranker er bevidst ikke låst og behandles som
+konfiguration.
+
+Dokumenteret i denne fase:
+
+- [x] Arkitekturoverblik, systemdiagram og lagdeling
+- [x] Domænearkitektur med ni adskilte dataområder
+- [x] Konceptuel datamodel pr. domæne
+- [x] Knowledge Engine-arkitektur og RAG-flow med retrieval-profiler pr. workflow
+- [x] Dokumentpipeline med fejltilstande
+- [x] AI-arkitektur med workflow-profiler og server-side gating
+- [x] Rolle- og permission-model med scope
+- [x] Datasikkerhed, privacy og dataklassifikation
+- [x] Versionsstyring af faglig viden med to tidsakser
+- [x] Observability og kvalitetsmåling
+- [x] Deployment-arkitektur
+- [x] Fremtidige integrationer via source-adaptere
+- [x] Tekniske risici og tradeoffs
+
+Låst i denne fase ud over stacken:
+
+- [x] Ingestion som asynkron worker/job-arkitektur, uafhængig af request-levetid
+- [x] Teknisk behandling og faglig godkendelse adskilt; kun mennesker aktiverer viden
+- [x] AI Gateway som centralt policy-lag med dataminimering, redaction, permission-tjek, modelvalg og regler pr. modul
+- [x] Kundedata ikke tilladt til ekstern AI-leverandør som standard; Advise designet privacy-first
+- [x] Lederen ser både aggregeret og individniveau inden for autoriseret scope
+- [x] Hierarkiske teams med flere medlemskaber og eksplicit leader scope
+- [x] Kundecases med én ejer, deling, overdragelse, adgang pr. case og plads til four-eyes
+- [x] Retention konfigurerbar pr. datakategori, ingen global periode
+- [x] Dokumentadgang permission-baseret frem for faste access levels
+- [x] Historiske dokumenter tilgængelige for autoriserede, altid markeret, aldrig blandet ind i aktuelle svar
+- [x] Reranking som fast trin i Knowledge Engine fra V1
+- [x] Multilingual-ready datamodel, dansk som eneste sprog i V1
+- [x] Eksplicit status på sagsindhold: AI-forslag, arbejdsnote, valideret konklusion, autoritativ information
+- [x] Dokumentkonflikter afgøres aldrig automatisk
+
+**Udestående:** ingen blokerende. Ti non-blocking beslutninger står i dokumentets afsnit 17
+og handler om leverandørvalg, tal og indhold inden for de låste rammer.
+
+Input, der var defineret før fasen:
+
+- Den præcise permission-model for Analytics, herunder afgrænsning af et team og
+  skellet mellem individniveau og aggregeret visning
+- Datatyper, adgangskrav, sikkerhed, GDPR, retention og øvrige compliancekrav for Advise
+- Entydige interne navne til de domænebegreber, der har flere anvendelser i brugerfladen
+- Versionsstyring af vidensgrundlaget, så et svar kan spores til den version, der gjaldt
+- En rolle- og rettighedsmodel, der kan udvides uden større arkitekturændringer
+
+---
+
+## Fase 4 — UI/UX-design
+
+**Status:** 🔒 Gennemført og låst.
+
+**Leverance:** `docs/04-ui-ux-design.md`
+
+Dokumenteret i denne fase:
+
+- [x] UX- og designprincipper
+- [x] Designsystem med semantiske tokens, herunder syv faglige statusroller
+- [x] App shell med sidebar, topbar, kontekstpanel og global søgning
+- [x] Navigation, herunder fuldskærmstilstand for Assessment og AI-rollespil
+- [x] Home, Learn, Copilot, Practice, Advise, Assessment, Analytics, Min profil, Admin
+- [x] Global Copilot med kontekst og låst tilstand
+- [x] AI-states, herunder adskillelse af "utilstrækkeligt grundlag" fra systemfejl
+- [x] Kilde- og citation-UX i tre niveauer
+- [x] Visuel adskillelse af AI-forslag, arbejdsnote, valideret konklusion og kildegrundlag
+- [x] Synlighedsfane i Min profil: hvad lederen kan og ikke kan se
+- [x] Dokumentpipeline med synligt brud mellem teknisk behandling og faglig godkendelse
+- [x] Loading, error, empty og success states
+- [x] Responsivt design og accessibility (WCAG 2.2 AA)
+- [x] Rollebaserede UI-forskelle, centrale flows, skærmliste og komponentliste
+
+Låst i denne fase:
+
+- [x] Selvstændig visuel identitet med mørk marineblå som primær brandrolle og lys flade
+- [x] AI-signatur: stiplet kant, tonet baggrund, tydelig label — stiplet kant kun til AI
+- [x] Copilot som skubbende sidepanel på desktop, overlay/fuldskærm på mindre skærme
+- [x] Ledertransparens om datakategorier, ingen visning af konkrete opslag
+- [x] Assessment på mobil med enhedspolitik pr. prøve
+- [x] Assessment med og uden tidsgrænse, altid synlig resterende tid
+- [x] Tabeltæthed Comfortable og Compact
+- [x] Ingen dark mode i V1, men tokenarkitektur der ikke spærrer for det
+- [x] AI i Advise on demand; kvalitetssignaler proaktive og visuelt adskilt fra forslag
+- [x] Lucide Icons med faste betydninger
+- [x] Konfigurerbare tastaturgenveje
+
+**Udestående:** ingen blokerende. Otte non-blocking punkter i dokumentets afsnit 25.2.
+
+---
+
+## Fase 5 — Grundplatform
+
+**Status:** 🔄 Åbnet. Ikke gennemført.
+
+**Leverance:** Kørende grundplatform samt `docs/05-foundation-implementation.md`
+
+Første implementeringsfase. Etablerer platformens fundament uden rigtig AI, data eller
+authentication.
+
+Omfang:
+
+- [ ] Applikationsfundament: Next.js, TypeScript, Tailwind CSS, shadcn/ui, Lucide Icons
+- [ ] Design system med konkrete V1-tokens og valgt skrifttype
+- [ ] App shell: sidebar, topbar, brugerområde, breadcrumbs, responsiv navigation
+- [ ] Routes: /home, /learn, /copilot, /practice, /advise, /assessment, /analytics, /profile, /admin
+- [ ] Grundsider med realistiske danske mock-data — ingen "coming soon"
+- [ ] Home-cockpit med mock-data
+- [ ] Global Copilot som UI-shell med mock-samtale og kildekomponenter
+- [ ] Statussystem for de syv faglige statusser
+- [ ] Development-only rolle-switcher: Rådgiver, Leder, Administrator
+- [ ] Reusable komponenter
+- [ ] Keyboard, focus, kontrast, reduced motion
+- [ ] Lint, typecheck og build består
+- [ ] Routes og responsivt grundlayout kontrolleret
+- [ ] Ingen secrets i repository
+
+**Uden for omfang:** Claude API, RAG, embeddings, vector retrieval, dokument-ingestion,
+Knowledge Engine-logik, produktionsdatabase, rigtig authentication, kundedata,
+AI-generering.
+
+**Udviklingsmiljø:** Implementeringen sker i Claude Code direkte i projektets
+Git-repository, hvor afhængigheder kan installeres, og lint, typecheck og build kan køres.
+Fra fase 5 er repositoryet den autoritative kilde til både kode og dokumentation.
+
+Fasen markeres først som gennemført, når alle relevante checks består.
+
+---
+
+## Fase 6 og frem
+
+Ikke fastlagt.
