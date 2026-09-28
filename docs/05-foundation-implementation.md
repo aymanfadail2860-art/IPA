@@ -375,6 +375,11 @@ Følgende er bekræftet som bevidste antagelser i fase 5. De er ikke krav:
 
 ## 12. Kom i gang lokalt
 
+**Demo:** https://ipa-alpha-self.vercel.app — Vercel-projektet `ipa`, koblet til `main`, så
+hvert push til `main` deployes automatisk. Miljøvariablen `NEXT_PUBLIC_IPA_DEV_TOOLS=true` er
+sat, så rolle-switcheren er aktiv. Alle data er fiktive udviklingsdata.
+
+
 Kræver Node.js 20.9 eller nyere (udviklet på Node 22).
 
 ```bash
