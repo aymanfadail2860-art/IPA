@@ -87,7 +87,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/02-information-architecture.md` | 2 | Oprettet |
 | `docs/03-technical-architecture.md` | 3 | Oprettet |
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
-| `docs/05-foundation-implementation.md` | 5 | Ikke oprettet — skrives når implementeringen er verificeret |
+| `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/decisions.md` | Løbende | Ikke oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

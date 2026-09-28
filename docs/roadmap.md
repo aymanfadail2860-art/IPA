@@ -3,8 +3,9 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–4 er gennemført og **låst**. Fase 5 — Grundplatform er åbnet og
-implementeres i Claude Code i projektets Git-repository.
+**Aktuel status:** Fase 1–4 er gennemført og **låst**. Fase 5 — Grundplatform er
+implementeret, og alle checks består. Fasen afventer eksplicit godkendelse, før den
+markeres som gennemført.
 
 ---
 
@@ -16,7 +17,7 @@ implementeres i Claude Code i projektets Git-repository.
 | 2 | Informationsarkitektur | 🔒 Gennemført og låst | `docs/02-information-architecture.md` |
 | 3 | Teknisk arkitektur | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
-| 5 | Grundplatform | 🔄 Åbnet — implementeres i Claude Code | `docs/05-foundation-implementation.md` |
+| 5 | Grundplatform | ✅ Implementeret — afventer godkendelse | `docs/05-foundation-implementation.md` |
 | 6+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
@@ -182,7 +183,8 @@ Låst i denne fase:
 
 ## Fase 5 — Grundplatform
 
-**Status:** 🔄 Åbnet. Ikke gennemført.
+**Status:** ✅ Implementeret. Lint, typecheck, tests og build består. Afventer eksplicit
+godkendelse, før fasen markeres som gennemført.
 
 **Leverance:** Kørende grundplatform samt `docs/05-foundation-implementation.md`
 
@@ -191,20 +193,27 @@ authentication.
 
 Omfang:
 
-- [ ] Applikationsfundament: Next.js, TypeScript, Tailwind CSS, shadcn/ui, Lucide Icons
-- [ ] Design system med konkrete V1-tokens og valgt skrifttype
-- [ ] App shell: sidebar, topbar, brugerområde, breadcrumbs, responsiv navigation
-- [ ] Routes: /home, /learn, /copilot, /practice, /advise, /assessment, /analytics, /profile, /admin
-- [ ] Grundsider med realistiske danske mock-data — ingen "coming soon"
-- [ ] Home-cockpit med mock-data
-- [ ] Global Copilot som UI-shell med mock-samtale og kildekomponenter
-- [ ] Statussystem for de syv faglige statusser
-- [ ] Development-only rolle-switcher: Rådgiver, Leder, Administrator
-- [ ] Reusable komponenter
-- [ ] Keyboard, focus, kontrast, reduced motion
-- [ ] Lint, typecheck og build består
-- [ ] Routes og responsivt grundlayout kontrolleret
-- [ ] Ingen secrets i repository
+- [x] Applikationsfundament: Next.js, TypeScript, Tailwind CSS, shadcn/ui, Lucide Icons
+- [x] Design system med konkrete V1-tokens og valgt skrifttype (Inter og JetBrains Mono via `next/font`)
+- [x] App shell: sidebar, topbar, brugerområde, breadcrumbs, responsiv navigation
+- [x] Routes: /home, /learn, /copilot, /practice, /advise, /assessment, /analytics, /profile, /admin
+- [x] Grundsider med realistiske danske mock-data — ingen "coming soon"
+- [x] Home-cockpit med mock-data
+- [x] Global Copilot som UI-shell med mock-samtale og kildekomponenter
+- [x] Statussystem for de syv faglige statusser
+- [x] Development-only rolle-switcher: Rådgiver, Leder, Administrator
+- [x] Reusable komponenter
+- [x] Keyboard, focus, kontrast, reduced motion
+- [x] Lint, typecheck og build består (samt 26 automatiserede tests)
+- [x] Routes og responsivt grundlayout kontrolleret
+- [x] Ingen secrets i repository
+
+**Udestående (non-blocking, se `docs/05-foundation-implementation.md` afsnit 11):**
+
+- Administratorens adgang til Advise: `docs/02`/`docs/04` giver adgang, eksempeltabellen i
+  `docs/03` §10 gør ikke. Afklares med det fulde permission-katalog.
+- Koblingen mellem Synlighedsfanens datakategorier og permissions er udledt og skal bekræftes.
+- Administratorens Analytics-scope ("efter rettigheder") er i mock-data sat til `all`.
 
 **Uden for omfang:** Claude API, RAG, embeddings, vector retrieval, dokument-ingestion,
 Knowledge Engine-logik, produktionsdatabase, rigtig authentication, kundedata,
