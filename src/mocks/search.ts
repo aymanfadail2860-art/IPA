@@ -2,7 +2,8 @@
  * ⚠ MOCK DATA — DEVELOPMENT ONLY. Fictional global search index.
  * Must never be used as or mixed with production data.
  */
-export type MockSearchGroup = "Produkter" | "Dokumenter" | "Læringsmoduler" | "Egne kundecases" | "Handlinger" | "Administration";
+// Customer cases are not listed here: the search derives them per user from mockCases.
+export type MockSearchGroup = "Produkter" | "Dokumenter" | "Læringsmoduler" | "Handlinger" | "Administration";
 
 export interface MockSearchResult {
   id: string;
@@ -21,8 +22,6 @@ export const mockSearchIndex: readonly MockSearchResult[] = [
   { id: "s4", group: "Dokumenter", title: "Betingelser for Erhvervsansvar", detail: "Version 3 · Gældende", href: "/copilot" },
   { id: "s5", group: "Dokumenter", title: "Acceptregler Erhverv", detail: "Version 2 · Gældende", href: "/copilot" },
   { id: "s6", group: "Læringsmoduler", title: "Erhvervsansvar · Dækninger", detail: "Modul 3", href: "/learn/erhvervsansvar/daekninger" },
-  { id: "s7", group: "Egne kundecases", title: "Nordjysk Entreprise A/S", detail: "Risikoanalyse", href: "/advise/nordjysk-entreprise" },
-  { id: "s8", group: "Egne kundecases", title: "Bagerhuset ApS", detail: "Afventer kunde", href: "/advise" },
   { id: "s9", group: "Handlinger", title: "Start træning", detail: "Practice", href: "/practice" },
   { id: "s10", group: "Handlinger", title: "Se min kompetenceprofil", detail: "Min profil", href: "/profile" },
   { id: "s11", group: "Administration", title: "Dokumenter klar til review", detail: "2 afventer", href: "/admin/documents", adminOnly: true },

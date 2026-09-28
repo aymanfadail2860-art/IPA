@@ -204,7 +204,7 @@ Omfang:
 - [x] Development-only rolle-switcher: Rådgiver, Leder, Administrator
 - [x] Reusable komponenter
 - [x] Keyboard, focus, kontrast, reduced motion
-- [x] Lint, typecheck og build består (samt 35 automatiserede tests)
+- [x] Lint, typecheck og build består (samt 40 automatiserede tests)
 - [x] Routes og responsivt grundlayout kontrolleret
 - [x] Ingen secrets i repository
 

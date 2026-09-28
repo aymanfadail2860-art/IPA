@@ -26,7 +26,7 @@ hvor de ligger, og hvad der bevidst ikke er bygget endnu.
 | Development-only rolle-switcher | Rådgiver, Leder, Administrator. Styrer kun mock-UI |
 | Mock-data | Samlet i `src/mocks/`, tydeligt markeret, isoleret fra genbrugelig kode |
 | Tilgængelighed | Skip-link, synlig fokusring, semantisk markup, labels, live regions, reduced motion, `lang="da"` |
-| Tests | 35 automatiserede tests (Vitest) af permissions, sagsadgang, Advise pr. enhed, genveje, statussystem, kontrast og guardrails |
+| Tests | 40 automatiserede tests (Vitest) af permissions, sagsadgang i oversigt og søgning, Advise pr. enhed, genveje, statussystem, kontrast og guardrails |
 
 ---
 
@@ -250,8 +250,8 @@ ud fra rollenavnet. Navigationspunkter erklærer et krav (`requires`) i
 Rolle-switcheren (`src/dev/`) skifter mellem tre mock-sessioner med permissions efter
 eksempeltabellen i `docs/03` §10. Alle tre roller har `advise.case.read` og
 `advise.case.write` med scope `own`. Adgang til en kundecase afgøres pr. sag af
-sagsdeltagerne (`src/lib/auth/case-access.ts`): sagsoversigt og Home viser kun egne og
-tildelte sager, og en direkte URL til en anden sag giver en adgangsbesked. I mock-data er
+sagsdeltagerne (`src/lib/auth/case-access.ts`): sagsoversigt, Home og global søgning viser
+kun egne og tildelte sager, og en direkte URL til en anden sag giver en adgangsbesked. I mock-data er
 lederen tildelt Bagerhuset ApS og administratoren Vestkyst Logistik ApS. Rolle-switcheren er:
 
 - markeret "DEV · ikke adgangskontrol" i UI og som `DEVELOPMENT ONLY` i koden
@@ -299,7 +299,7 @@ kontrol sker server-side og i RLS i en senere fase.
 |-------|----------|
 | `npm run lint` (ESLint, next/core-web-vitals + TypeScript) | Består, 0 fejl, 0 advarsler |
 | `npm run typecheck` (`next typegen` + `tsc --noEmit`, strict) | Består |
-| `npm test` (Vitest) | 35 af 35 tests består |
+| `npm test` (Vitest) | 40 af 40 tests består |
 | `npm run build` | Består |
 | Routes | Alle 24 routes og undersider svarer 200 i produktionsbuild, `/` viderestiller til `/home`, ukendte slugs viser dansk 404-side |
 | Responsivt grundlayout | Kontrolleret i Chromium ved 390, 820, 1280 og 1440 px. Ingen vandret scroll på mobil |
@@ -313,6 +313,7 @@ kontrol sker server-side og i RLS i en senere fase.
 - `status.test.ts` — præcis syv faglige statusser, hver med farve + ikon + tekst, unikke ikoner; Synlighed dannes af lederens permissions
 - `design-tokens.test.ts` — WCAG-kontrast: tekst ≥ 4,5:1 på alle flader, statusfarver på egen tone, fokusring og stærk kant ≥ 3:1
 - `guardrails.test.ts` — stiplet kant kun i AI-forslag, ingen kursiv, mock-isolation, ingen secrets
+- `search-access.test.ts` — global søgning viser kun egne og tildelte sager for alle tre roller, samme resultat som sagsoversigten
 - `advise-access.test.ts` — Advise pr. enhed (mobil kun læsning, tablet læsning og noter, desktop alt), reglen er koblet i case-workspace; `advise.case.*` er `own` for alle roller, og hver bruger ser kun egne og tildelte sager
 
 Testene fangede undervejs én reel fejl: `border.strong` havde kun 2,7:1 kontrast og er
@@ -325,8 +326,6 @@ rettet til `#7C889B`.
 - Kun én lektion (Erhvervsansvar · Dækninger) og ét case-workspace (Nordjysk Entreprise)
   er fuldt udfyldt. Øvrige moduler viser en ærlig tom tilstand.
 - Intet gemmes. Accept, forkast, noter, feedback og filtre lever kun i browserens hukommelse.
-- Den globale søgning viser faste mock-resultater under "Egne kundecases" og er ikke
-  filtreret efter sagstildeling.
 - Foldet sidebar og panelbredde huskes i browserens `localStorage` — ikke pr. bruger. Tabeltæthed huskes ikke.
 - Ukendte slugs viser 404-siden med HTTP-status 200, fordi `loading.tsx` streamer svaret,
   før siden afgør, at indholdet ikke findes. Siden får `noindex`.

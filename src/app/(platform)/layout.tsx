@@ -6,7 +6,7 @@ import { DevSessionProvider } from "@/dev/dev-session-provider";
 import { DEV_ROLE_COOKIE, isMockRoleId } from "@/dev/dev-tools";
 import { RoleSwitcher } from "@/dev/role-switcher";
 // PHASE 5: all shell data is mock data. Replaced by server-side data access later.
-import { MOCK_DATA_NOTICE, mockChanges, mockCopilotConversations, mockSearchIndex } from "@/mocks";
+import { MOCK_DATA_NOTICE, mockChanges, mockCases, mockCopilotConversations, mockSearchIndex } from "@/mocks";
 
 export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -29,6 +29,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
         <AppShell
           notifications={notifications}
           searchEntries={mockSearchIndex}
+          cases={mockCases}
           copilotConversation={mockCopilotConversations[0]}
           mockNotice={MOCK_DATA_NOTICE}
         >

@@ -5,9 +5,11 @@ import { useCallback, type ReactNode } from "react";
 
 import { CopilotPanel } from "@/components/copilot/copilot-panel";
 import { useShortcut } from "@/hooks/use-shortcut";
-import type { CopilotConversation } from "@/types/domain";
 
-import { GlobalSearch, type SearchEntry } from "./global-search";
+import type { SearchEntry } from "@/lib/search";
+import type { CustomerCase, CopilotConversation } from "@/types/domain";
+
+import { GlobalSearch } from "./global-search";
 import { MobileNav } from "./mobile-nav";
 import type { NotificationEntry } from "./notifications";
 import { useShell } from "./shell-context";
@@ -24,12 +26,15 @@ export function AppShell({
   children,
   notifications,
   searchEntries,
+  cases,
   copilotConversation,
   mockNotice,
 }: {
   children: ReactNode;
   notifications: readonly NotificationEntry[];
   searchEntries: readonly SearchEntry[];
+  /** Customer cases; the search shows only those the user owns or is assigned to. */
+  cases: readonly CustomerCase[];
   copilotConversation: CopilotConversation;
   mockNotice: string;
 }) {
@@ -66,7 +71,7 @@ export function AppShell({
         </main>
       </div>
       {pathname.startsWith("/copilot") ? null : <CopilotPanel conversation={copilotConversation} />}
-      <GlobalSearch entries={searchEntries} />
+      <GlobalSearch entries={searchEntries} cases={cases} />
     </div>
   );
 }
