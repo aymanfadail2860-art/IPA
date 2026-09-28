@@ -1,7 +1,9 @@
 "use client";
 
 import { BadgeCheck, Undo2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+
+import { DisabledActionNote } from "@/components/common/disabled-action-note";
 
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
@@ -22,6 +24,7 @@ export function ValidatedConclusion({
   validatedAt,
   sources,
   onUndo,
+  undoDisabledReason,
   className,
 }: {
   title: string;
@@ -30,8 +33,10 @@ export function ValidatedConclusion({
   validatedAt: string;
   sources?: readonly SourceReference[];
   onUndo?: () => void;
+  undoDisabledReason?: string;
   className?: string;
 }) {
+  const noteId = useId();
   const label = `Valideret af ${validatedBy} · ${formatDate(validatedAt)}`;
   return (
     <article
@@ -56,11 +61,18 @@ export function ValidatedConclusion({
         </div>
       ) : null}
       {onUndo ? (
-        <div className="mt-4">
-          <Button size="sm" variant="ghost" onClick={onUndo}>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onUndo}
+            disabled={Boolean(undoDisabledReason)}
+            aria-describedby={undoDisabledReason ? noteId : undefined}
+          >
             <Undo2 aria-hidden />
             Fortryd validering
           </Button>
+          {undoDisabledReason ? <DisabledActionNote id={noteId} reason={undoDisabledReason} /> : null}
         </div>
       ) : null}
     </article>

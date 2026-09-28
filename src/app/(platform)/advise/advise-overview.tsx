@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/states/empty-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { CASE_STATUS } from "@/config/domain-status";
+import { casesForUser } from "@/lib/auth/case-access";
 import { hasPermission } from "@/lib/auth/permissions";
 import { useSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format";
@@ -57,11 +58,13 @@ const columns: DataTableColumn<CustomerCase>[] = [
 
 /** Case overview (Sagsoversigt). Access to a case is granted per case, never through the role. */
 export function AdviseOverview({ cases }: { cases: readonly CustomerCase[] }) {
-  const { grants } = useSession();
+  const { user, grants } = useSession();
   const router = useRouter();
   const canRead = hasPermission(grants, "advise.case.read");
-  const open = cases.filter((entry) => entry.status !== "closed");
-  const closed = cases.filter((entry) => entry.status === "closed");
+  // Only cases the user owns or is assigned to — the same rule for every role.
+  const assigned = casesForUser(cases, user.id);
+  const open = assigned.filter((entry) => entry.status !== "closed");
+  const closed = assigned.filter((entry) => entry.status === "closed");
 
   return (
     <PageContainer>
@@ -89,7 +92,7 @@ export function AdviseOverview({ cases }: { cases: readonly CustomerCase[] }) {
               getRowId={(row) => row.id}
               getRowLabel={(row) => row.companyName}
               rowActions={[{ label: "Åbn sag", onSelect: (row) => router.push(`/advise/${row.id}`) }]}
-              emptyState={<EmptyState icon={BriefcaseBusiness} title="Ingen aktive sager">Opret en kundecase for at komme i gang.</EmptyState>}
+              emptyState={<EmptyState icon={BriefcaseBusiness} title="Ingen aktive sager">Du har ingen egne eller tildelte kundecases. Adgang til en sag gives pr. sag af sagens ejer.</EmptyState>}
             />
           </Section>
           <Section title="Afsluttede">

@@ -141,6 +141,8 @@ export interface WorkArea {
 }
 
 export interface CaseParticipant {
+  /** User id — case access is granted per case through participants (docs/03 §10). */
+  userId: string;
   name: string;
   initials: string;
   access: "Ejer" | "Kan redigere" | "Kan læse";

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, FileText, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
@@ -18,11 +19,16 @@ import { WorkingNote } from "@/components/knowledge/working-note";
 import { PageBreadcrumbs } from "@/components/shell/breadcrumbs";
 import { useShell } from "@/components/shell/shell-context";
 import { EmptyState } from "@/components/states/empty-state";
+import { ErrorState } from "@/components/states/error-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CASE_STATUS } from "@/config/domain-status";
+import { ADVISE_CAPABILITIES, ADVISE_DISABLED_REASONS } from "@/config/advise-capabilities";
+import { useDeviceClass } from "@/hooks/use-device-class";
+import { isCaseParticipant } from "@/lib/auth/case-access";
 import { useSession } from "@/lib/auth/session";
+
 import type { CaseContentItem, CustomerCase } from "@/types/domain";
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
@@ -43,6 +49,11 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
   const area = customerCase.workAreas.find((entry) => entry.id === areaId)!;
   const isSummary = area.id === "opsummering";
   const status = CASE_STATUS[customerCase.status];
+  const deviceClass = useDeviceClass();
+  const capabilities = ADVISE_CAPABILITIES[deviceClass];
+  const reviewDisabledReason = capabilities.reviewSuggestions ? undefined : ADVISE_DISABLED_REASONS.desktopOnly;
+  const requestDisabledReason = capabilities.requestSuggestions ? undefined : ADVISE_DISABLED_REASONS.desktopOnly;
+  const noteReadOnlyReason = capabilities.editNotes ? undefined : ADVISE_DISABLED_REASONS.notesTabletOrDesktop;
 
   const [requested, setRequested] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -87,6 +98,25 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
         .map((source) => [source.id, source]),
     ).values(),
   ];
+
+  // Access is per case: participants only — never through a role (docs/03 §10).
+  if (!isCaseParticipant(customerCase, user.id)) {
+    return (
+      <div className="px-4 py-10 md:px-8">
+        <ErrorState
+          variant="access"
+          title="Du har ikke adgang til denne sag"
+          actions={
+            <Button asChild variant="secondary">
+              <Link href="/advise">Gå til Advise</Link>
+            </Button>
+          }
+        >
+          Adgang til en kundecase gives pr. sag af sagens ejer.
+        </ErrorState>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-[calc(100dvh-var(--topbar-height))] flex-col @5xl/main:flex-row">
@@ -176,6 +206,7 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
                     validatedAt={item.validatedAt ?? TODAY()}
                     sources={item.sources}
                     onUndo={isSummary ? undefined : () => undoValidation(item)}
+                    undoDisabledReason={reviewDisabledReason}
                   >
                     <p>{item.text}</p>
                   </ValidatedConclusion>
@@ -209,6 +240,7 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
                     description={`AI-forslag til ${area.name.toLowerCase()} vises først, når du beder om dem. Tænk selv først — brug AI som sparring.`}
                     loading={loading}
                     onRequest={requestSuggestions}
+                    disabledReason={requestDisabledReason}
                   />
                 ) : suggestions.length > 0 ? (
                   <div className="space-y-4">
@@ -242,6 +274,7 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
                           onAccept={() => accept(item)}
                           onEditAndAccept={() => setEditing({ id: item.id, text: item.text })}
                           onReject={() => reject(item)}
+                          actionsDisabledReason={reviewDisabledReason}
                         >
                           <p>{item.text}</p>
                         </AISuggestion>
@@ -279,7 +312,7 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
                 </Collapsible>
               ) : null}
 
-              <WorkingNote value={note} onChange={setNote} />
+              <WorkingNote value={note} onChange={setNote} readOnlyReason={noteReadOnlyReason} />
             </>
           )}
         </div>

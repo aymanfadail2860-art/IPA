@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, InteractiveCard } from "@/components/ui/card";
 import { ASSESSMENT_STATUS, CASE_STATUS } from "@/config/domain-status";
+import { casesForUser } from "@/lib/auth/case-access";
 import { hasPermission } from "@/lib/auth/permissions";
 import { useSession } from "@/lib/auth/session";
 import { formatDate, formatShortDate } from "@/lib/format";
@@ -51,6 +52,7 @@ export function HomeView(props: HomeViewProps) {
   const isLeader = hasPermission(grants, "analytics.team.read", "team");
   const isAdmin = hasPermission(grants, "knowledge.document.write");
   const canSeeCases = hasPermission(grants, "advise.case.read");
+  const cases = casesForUser(props.cases, user.id);
   const availableAssessments = props.assessments.filter((item) => item.status === "available");
   const sortedChanges = [...props.changes].sort((a, b) => b.affectsActiveCases - a.affectsActiveCases);
 
@@ -153,13 +155,13 @@ export function HomeView(props: HomeViewProps) {
               <div className="mb-4 flex items-center justify-between gap-4">
                 <CardTitle as="h3" className="flex items-center gap-2">
                   <BriefcaseBusiness className="size-4 text-fg-secondary" aria-hidden />
-                  Aktive kundecases ({props.cases.length})
+                  Aktive kundecases ({cases.length})
                 </CardTitle>
                 <Link href="/advise" className="text-label font-medium text-fg-link hover:underline">
                   Se alle <span aria-hidden>→</span>
                 </Link>
               </div>
-              {props.cases.length === 0 ? (
+              {cases.length === 0 ? (
                 <EmptyState
                   icon={BriefcaseBusiness}
                   title="Ingen aktive sager"
@@ -171,7 +173,7 @@ export function HomeView(props: HomeViewProps) {
                 />
               ) : (
                 <ul className="divide-y divide-border-subtle">
-                  {props.cases.map((entry) => {
+                  {cases.map((entry) => {
                     const area = entry.workAreas.find((item) => item.id === entry.currentAreaId);
                     return (
                       <li key={entry.id}>

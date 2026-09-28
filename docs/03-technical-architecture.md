@@ -740,8 +740,8 @@ En permission har tre dele: **ressource**, **handling** og **scope**.
 | `learning.progress.read` | own | own + team | own |
 | `practice.session.write` | own | own | own |
 | `assessment.result.read` | own | own + team | own |
-| `advise.case.write` | own | own | — |
-| `advise.case.read` | own | own | — |
+| `advise.case.write` | own | own | own |
+| `advise.case.read` | own | own | own |
 | `analytics.team.read` | — | team | efter rettigheder |
 | `knowledge.document.read` | efter grants | efter grants | all |
 | `knowledge.document.read_historical` | efter grants | efter grants | all |
@@ -754,8 +754,12 @@ Lederen har altså ikke en bredere version af administratorens rettigheder, men 
 akse: **lederen ser mennesker, administratoren forvalter indhold.** Ingen af dem arver den
 andens adgang.
 
-Bemærk, at `advise.case.read` er `own` for både rådgiver og leder. Adgang til en kundecase
-gives pr. case, ikke gennem lederrollen — se "Kundecases" nedenfor.
+Bemærk, at `advise.case.read` og `advise.case.write` er `own` for alle tre roller. Adgang til
+en kundecase gives pr. case gennem `case_participants`, aldrig gennem en rolle. `own` betyder
+"kun egne og tildelte sager" og gælder derfor ens for rådgiver, leder og administrator. Et "—"
+ville betyde, at en administrator aldrig kan tildeles en sag, heller ikke som sagsansvarlig —
+og en administrator er også rådgiver, ligesom en leder er det. Hverken leder- eller
+administratorrollen giver adgang til andres sager; se "Kundecases" nedenfor.
 
 ### Teams
 
@@ -796,12 +800,16 @@ Adgang til en kundecase styres pr. case, ikke gennem rolle eller team:
 | **Én primær ejer** | Den sagsansvarlige rådgiver |
 | **Deling** | Andre autoriserede brugere kan tilføjes i `case_participants` med en adgangstype |
 | **Overdragelse** | Ejerskab kan overdrages; både gammel og ny ejer registreres |
-| **Adgangskontrol pr. case** | Adgang findes ikke, før den er tildelt — heller ikke for en leder |
+| **Adgangskontrol pr. case** | Adgang findes ikke, før den er tildelt — heller ikke for en leder eller en administrator |
 | **Four-eyes senere** | Deltagerrollerne skal rumme en reviewer-type, så et review-workflow kan tilføjes uden ændring af adgangsmodellen |
 
 En leder får ikke automatisk adgang til sit teams kundesager. Lederens indsigt gælder
 medarbejderens læring og kompetence, ikke kundens oplysninger. Skal en leder ind i en sag,
 sker det ved eksplicit tildeling, som enhver anden deling — og det logges.
+
+Det samme gælder administratoren: administratorrettigheder til indhold, brugere og
+indstillinger giver ingen adgang til kundecases. En administrator har adgang til de sager,
+vedkommende selv ejer eller er tildelt, på samme måde som enhver anden bruger.
 
 ### Håndhævelse i to lag
 

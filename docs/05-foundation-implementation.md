@@ -26,7 +26,7 @@ hvor de ligger, og hvad der bevidst ikke er bygget endnu.
 | Development-only rolle-switcher | Rådgiver, Leder, Administrator. Styrer kun mock-UI |
 | Mock-data | Samlet i `src/mocks/`, tydeligt markeret, isoleret fra genbrugelig kode |
 | Tilgængelighed | Skip-link, synlig fokusring, semantisk markup, labels, live regions, reduced motion, `lang="da"` |
-| Tests | 26 automatiserede tests (Vitest) af permissions, genveje, statussystem, kontrast og guardrails |
+| Tests | 35 automatiserede tests (Vitest) af permissions, sagsadgang, Advise pr. enhed, genveje, statussystem, kontrast og guardrails |
 
 ---
 
@@ -189,9 +189,10 @@ panelet skubber indholdet til side, folder de sig derfor korrekt sammen.
 | Kildegrundlag | `SourceCard` med tynd fast kant og gyldighedsbadge |
 
 Stiplet kant bruges **kun** i `src/components/knowledge/ai-suggestion.tsx`. Kursiv bruges
-ingen steder. Begge regler håndhæves af tests. `AIRequestTrigger` ("Bed om forslag") er
-bevidst **ikke** stiplet, selv om skitsen i `docs/04` §10.4 tegner den sådan: reglen i §3.4
-forbeholder stiplet kant til AI-indhold, der afventer vurdering, og knappen er ikke indhold.
+ingen steder. Begge regler håndhæves af tests. `AIRequestTrigger` ("Bed om forslag") har
+fast ramme: reglen i `docs/04` §3.4 forbeholder stiplet kant til AI-indhold, der afventer
+vurdering, og knappen er ikke indhold. Skitsen i `docs/04` §10.4 er rettet tilsvarende
+(se `docs/decisions.md`).
 
 ---
 
@@ -247,11 +248,30 @@ ud fra rollenavnet. Navigationspunkter erklærer et krav (`requires`) i
 `src/config/navigation.ts`; punkter uden adgang vises ikke.
 
 Rolle-switcheren (`src/dev/`) skifter mellem tre mock-sessioner med permissions efter
-eksempeltabellen i `docs/03` §10. Den er:
+eksempeltabellen i `docs/03` §10. Alle tre roller har `advise.case.read` og
+`advise.case.write` med scope `own`. Adgang til en kundecase afgøres pr. sag af
+sagsdeltagerne (`src/lib/auth/case-access.ts`): sagsoversigt og Home viser kun egne og
+tildelte sager, og en direkte URL til en anden sag giver en adgangsbesked. I mock-data er
+lederen tildelt Bagerhuset ApS og administratoren Vestkyst Logistik ApS. Rolle-switcheren er:
 
 - markeret "DEV · ikke adgangskontrol" i UI og som `DEVELOPMENT ONLY` i koden
 - kun synlig under `next dev`, eller når et build startes med `NEXT_PUBLIC_IPA_DEV_TOOLS=true`
 - adskilt fra komponenterne: de kender kun `useSession()`-interfacet i `src/lib/auth/session.tsx`
+
+### Advise pr. enhed
+
+Advise følger `docs/04` §19. Reglen er defineret ét sted i `src/config/advise-capabilities.ts`
+og afgøres af viewport-bredden, så et åbent Copilot-panel ikke ændrer den:
+
+| Enhed | Bredde | Kan |
+|-------|--------|-----|
+| Mobil | < 768 px | Kun læsning |
+| Tablet | 768–1023 px | Læsning og arbejdsnoter — ikke bede om, acceptere eller forkaste AI-forslag |
+| Desktop | ≥ 1024 px | Fuld funktionalitet |
+
+Deaktiverede handlinger vises som deaktiverede knapper med en synlig forklaring ("Kan kun
+redigeres på desktop" / "Noter kan kun redigeres på tablet eller desktop"). Forklaringen er
+synlig tekst og ikke et tooltip, fordi touch-enheder ikke har hover.
 
 **Erstatning:** `DevSessionProvider` erstattes af en server-side session fra Supabase Auth
 med brugerens effektive permissions. Skjult UI er ikke en adgangskontrol — den rigtige
@@ -279,11 +299,11 @@ kontrol sker server-side og i RLS i en senere fase.
 |-------|----------|
 | `npm run lint` (ESLint, next/core-web-vitals + TypeScript) | Består, 0 fejl, 0 advarsler |
 | `npm run typecheck` (`next typegen` + `tsc --noEmit`, strict) | Består |
-| `npm test` (Vitest) | 26 af 26 tests består |
+| `npm test` (Vitest) | 35 af 35 tests består |
 | `npm run build` | Består |
 | Routes | Alle 24 routes og undersider svarer 200 i produktionsbuild, `/` viderestiller til `/home`, ukendte slugs viser dansk 404-side |
 | Responsivt grundlayout | Kontrolleret i Chromium ved 390, 820, 1280 og 1440 px. Ingen vandret scroll på mobil |
-| Interaktion | Ctrl+J åbner panel med fokus i feltet, Esc lukker; Ctrl+K søger og navigerer; accept/forkast i Advise |
+| Interaktion | Ctrl+J åbner panel med fokus i feltet, Esc lukker; Ctrl+K søger og navigerer; accept/forkast i Advise; Advise skrivebeskyttet på mobil og uden accept/forkast på tablet |
 | Secrets | Ingen nøgler, `.env`-filer eller klient-AI-kald i repoet (testet); `.env*` er git-ignoreret |
 
 **Automatiserede tests (`src/tests/`):**
@@ -293,6 +313,7 @@ kontrol sker server-side og i RLS i en senere fase.
 - `status.test.ts` — præcis syv faglige statusser, hver med farve + ikon + tekst, unikke ikoner; Synlighed dannes af lederens permissions
 - `design-tokens.test.ts` — WCAG-kontrast: tekst ≥ 4,5:1 på alle flader, statusfarver på egen tone, fokusring og stærk kant ≥ 3:1
 - `guardrails.test.ts` — stiplet kant kun i AI-forslag, ingen kursiv, mock-isolation, ingen secrets
+- `advise-access.test.ts` — Advise pr. enhed (mobil kun læsning, tablet læsning og noter, desktop alt), reglen er koblet i case-workspace; `advise.case.*` er `own` for alle roller, og hver bruger ser kun egne og tildelte sager
 
 Testene fangede undervejs én reel fejl: `border.strong` havde kun 2,7:1 kontrast og er
 rettet til `#7C889B`.
@@ -304,8 +325,8 @@ rettet til `#7C889B`.
 - Kun én lektion (Erhvervsansvar · Dækninger) og ét case-workspace (Nordjysk Entreprise)
   er fuldt udfyldt. Øvrige moduler viser en ærlig tom tilstand.
 - Intet gemmes. Accept, forkast, noter, feedback og filtre lever kun i browserens hukommelse.
-- Advise følger ikke fuldt den responsive profil: på mobil kan der stadig redigeres, hvor
-  spec'en siger "kun læsning".
+- Den globale søgning viser faste mock-resultater under "Egne kundecases" og er ikke
+  filtreret efter sagstildeling.
 - Foldet sidebar og panelbredde huskes i browserens `localStorage` — ikke pr. bruger. Tabeltæthed huskes ikke.
 - Ukendte slugs viser 404-siden med HTTP-status 200, fordi `loading.tsx` streamer svaret,
   før siden afgør, at indholdet ikke findes. Siden får `noindex`.
@@ -328,23 +349,28 @@ tooltip, som `docs/04` §3.6 kræver.
 
 ---
 
-## 11. Observationer til afklaring
+## 11. Observationer og antagelser
 
-Fundet under implementeringen. Ingen af dem er afgjort i koden; de lægges frem til
-beslutning.
+### Afgjort
 
-1. **Administratorens adgang til Advise.** `docs/02` §10 og `docs/04` §21 giver
-   Administrator adgang til Advise, mens eksempeltabellen i `docs/03` §10 angiver "—" for
-   `advise.case.read` og `advise.case.write`. Navigationen følger `docs/02`/`docs/04`
-   (Advise vises for alle). Mock-permissions følger `docs/03`, så administratoren ser en tom
-   sagsoversigt. Afklares sammen med det fulde permission-katalog.
+1. **Administratorens adgang til Advise** — *afgjort 28. september 2026.* Eksempeltabellen i
+   `docs/03` §10 angav "—" for administratorens `advise.case.read` og `advise.case.write`,
+   hvilket modsagde dokumentets egen regel om adgang pr. case samt `docs/02` og `docs/04`.
+   `docs/03` er rettet, så begge permissions er `own` for alle tre roller, og koden følger
+   det. Se `docs/decisions.md`.
+
+### Bekræftede antagelser
+
+Følgende er bekræftet som bevidste antagelser i fase 5. De er ikke krav:
+
 2. **Synlighed — kobling mellem kategori og permission** (`src/config/visibility.ts`).
    Læringsprogression og gennemførte forløb er koblet til `learning.progress.read`.
    Assessment-resultater, kompetencer og udviklingsområder er koblet til
-   `assessment.result.read`. Koblingen er udledt, ikke oplyst.
+   `assessment.result.read`. Koblingen er udledt og **erstattes, når det fulde
+   permission-katalog skrives**.
 3. **Administratorens Analytics-scope** er "efter rettigheder" i spec'en. Mock-sessionen
-   giver `analytics.team.read` med scope `all`, så skærmen kan vurderes. Det er en
-   antagelse.
+   giver `analytics.team.read` med scope `all`, så skærmen kan vurderes. Det er **en
+   mock-antagelse**, ikke en beslutning om administratorens rettigheder.
 
 ---
 

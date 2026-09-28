@@ -39,6 +39,9 @@ const administratorGrants: PermissionGrant[] = [
   { key: "learning.progress.read", scope: "own" },
   { key: "practice.session.write", scope: "own" },
   { key: "assessment.result.read", scope: "own" },
+  // Case access is per case for every role (docs/03 §10, corrected — see docs/decisions.md).
+  { key: "advise.case.read", scope: "own" },
+  { key: "advise.case.write", scope: "own" },
   { key: "analytics.team.read", scope: "all" },
   { key: "knowledge.document.read", scope: "all" },
   { key: "knowledge.document.read_historical", scope: "all" },

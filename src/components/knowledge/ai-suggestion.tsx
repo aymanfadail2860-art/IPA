@@ -1,7 +1,9 @@
 "use client";
 
 import { Check, Pencil, Sparkles, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+
+import { DisabledActionNote } from "@/components/common/disabled-action-note";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +30,7 @@ export function AISuggestion({
   onAccept,
   onEditAndAccept,
   onReject,
+  actionsDisabledReason,
   className,
 }: {
   title?: string;
@@ -37,9 +40,14 @@ export function AISuggestion({
   onAccept?: () => void;
   onEditAndAccept?: () => void;
   onReject?: () => void;
+  /** When set, the actions are shown disabled with this visible explanation. */
+  actionsDisabledReason?: string;
   className?: string;
 }) {
   const hasActions = Boolean(onAccept || onEditAndAccept || onReject);
+  const noteId = useId();
+  const disabled = Boolean(actionsDisabledReason);
+  const describedBy = disabled ? noteId : undefined;
 
   return (
     <article
@@ -69,23 +77,24 @@ export function AISuggestion({
       {hasActions ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {onAccept ? (
-            <Button size="sm" variant="secondary" onClick={onAccept}>
+            <Button size="sm" variant="secondary" onClick={onAccept} disabled={disabled} aria-describedby={describedBy}>
               <Check aria-hidden />
               Acceptér
             </Button>
           ) : null}
           {onEditAndAccept ? (
-            <Button size="sm" variant="ghost" onClick={onEditAndAccept}>
+            <Button size="sm" variant="ghost" onClick={onEditAndAccept} disabled={disabled} aria-describedby={describedBy}>
               <Pencil aria-hidden />
               Redigér og acceptér
             </Button>
           ) : null}
           {onReject ? (
-            <Button size="sm" variant="ghost" onClick={onReject}>
+            <Button size="sm" variant="ghost" onClick={onReject} disabled={disabled} aria-describedby={describedBy}>
               <X aria-hidden />
               Forkast
             </Button>
           ) : null}
+          {actionsDisabledReason ? <DisabledActionNote id={noteId} reason={actionsDisabledReason} className="basis-full" /> : null}
         </div>
       ) : null}
     </article>

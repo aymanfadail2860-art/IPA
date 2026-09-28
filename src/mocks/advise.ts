@@ -30,9 +30,11 @@ function workAreas(
   }));
 }
 
-const mikkel: CaseParticipant = { name: "Mikkel Sørensen", initials: "MS", access: "Ejer" };
-const sara: CaseParticipant = { name: "Sara Lund", initials: "SL", access: "Kan redigere" };
-const peter: CaseParticipant = { name: "Peter Dahl", initials: "PD", access: "Kan læse" };
+const mikkel: CaseParticipant = { userId: "mock-user-mikkel", name: "Mikkel Sørensen", initials: "MS", access: "Ejer" };
+const sara: CaseParticipant = { userId: "mock-user-sara", name: "Sara Lund", initials: "SL", access: "Kan redigere" };
+const peter: CaseParticipant = { userId: "mock-user-peter", name: "Peter Dahl", initials: "PD", access: "Kan læse" };
+const jonas: CaseParticipant = { userId: "mock-user-jonas", name: "Jonas Kjær", initials: "JK", access: "Kan redigere" };
+const anne: CaseParticipant = { userId: "mock-user-anne", name: "Anne Holm", initials: "AH", access: "Kan læse" };
 
 const emptyCaseContent = {
   signals: [],
@@ -126,7 +128,7 @@ export const mockCases: readonly CustomerCase[] = [
     status: "awaitingCustomer",
     currentAreaId: "manglende-oplysninger",
     owner: mikkel,
-    participants: [mikkel],
+    participants: [mikkel, anne],
     updatedAt: "2026-09-26T15:20:00",
     workAreas: workAreas(["complete", "complete", "attention", "inProgress"], 2),
     ...emptyCaseContent,
@@ -139,7 +141,7 @@ export const mockCases: readonly CustomerCase[] = [
     status: "active",
     currentAreaId: "daekninger",
     owner: mikkel,
-    participants: [mikkel, sara],
+    participants: [mikkel, sara, jonas],
     updatedAt: "2026-09-24T11:05:00",
     workAreas: workAreas(["complete", "complete", "complete", "complete", "inProgress"], 0),
     ...emptyCaseContent,

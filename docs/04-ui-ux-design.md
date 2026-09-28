@@ -747,9 +747,9 @@ færdig rådgivningskonklusion.
 └───────────────────────────────────────────────────────┘
 
   FORSLAG TIL VURDERING
-┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-  ✦  Bed AI om forslag til dækninger                      ← on demand
-└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+┌───────────────────────────────────────────────────────┐
+│ ✦  Bed AI om forslag til dækninger                    │  ← on demand
+└───────────────────────────────────────────────────────┘
 ```
 
 Kvalitetssignalerne placeres øverst i arbejdsområdet og samles desuden i højrepanelet under

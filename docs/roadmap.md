@@ -204,16 +204,25 @@ Omfang:
 - [x] Development-only rolle-switcher: Rådgiver, Leder, Administrator
 - [x] Reusable komponenter
 - [x] Keyboard, focus, kontrast, reduced motion
-- [x] Lint, typecheck og build består (samt 26 automatiserede tests)
+- [x] Lint, typecheck og build består (samt 35 automatiserede tests)
 - [x] Routes og responsivt grundlayout kontrolleret
 - [x] Ingen secrets i repository
 
-**Udestående (non-blocking, se `docs/05-foundation-implementation.md` afsnit 11):**
+- [x] Advise følger den responsive profil: mobil kun læsning, tablet læsning og noter, desktop fuld funktionalitet
 
-- Administratorens adgang til Advise: `docs/02`/`docs/04` giver adgang, eksempeltabellen i
-  `docs/03` §10 gør ikke. Afklares med det fulde permission-katalog.
-- Koblingen mellem Synlighedsfanens datakategorier og permissions er udledt og skal bekræftes.
-- Administratorens Analytics-scope ("efter rettigheder") er i mock-data sat til `all`.
+**Rettelser i låste dokumenter (logget i `docs/decisions.md`):**
+
+- B-001: `docs/03` §10 — `advise.case.read` og `advise.case.write` er `own` for alle tre
+  roller, også Administrator. Afgør den tidligere uoverensstemmelse om administratorens
+  adgang til Advise.
+- B-002: `docs/04` §10.4 — skitsen af "Bed AI om forslag" har fast ramme i stedet for stiplet.
+
+**Bekræftede antagelser (se `docs/05-foundation-implementation.md` §11):**
+
+- Koblingen mellem Synlighedsfanens datakategorier og permissions er udledt. Den erstattes,
+  når det fulde permission-katalog skrives.
+- Administratorens Analytics-scope ("efter rettigheder") er i mock-data sat til `all`. Det er
+  en mock-antagelse.
 
 **Uden for omfang:** Claude API, RAG, embeddings, vector retrieval, dokument-ingestion,
 Knowledge Engine-logik, produktionsdatabase, rigtig authentication, kundedata,

@@ -88,7 +88,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/03-technical-architecture.md` | 3 | Oprettet |
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
-| `docs/decisions.md` | Løbende | Ikke oprettet |
+| `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i
