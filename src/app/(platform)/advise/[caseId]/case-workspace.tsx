@@ -1,7 +1,6 @@
 "use client";
 
 import { ChevronDown, FileText, Sparkles } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
@@ -19,14 +18,12 @@ import { WorkingNote } from "@/components/knowledge/working-note";
 import { PageBreadcrumbs } from "@/components/shell/breadcrumbs";
 import { useShell } from "@/components/shell/shell-context";
 import { EmptyState } from "@/components/states/empty-state";
-import { ErrorState } from "@/components/states/error-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CASE_STATUS } from "@/config/domain-status";
 import { ADVISE_CAPABILITIES, ADVISE_DISABLED_REASONS } from "@/config/advise-capabilities";
 import { useDeviceClass } from "@/hooks/use-device-class";
-import { isCaseParticipant } from "@/lib/auth/case-access";
 import { useSession } from "@/lib/auth/session";
 
 import type { CaseContentItem, CustomerCase } from "@/types/domain";
@@ -38,7 +35,8 @@ const TODAY = () => new Date().toISOString().slice(0, 10);
  * and must never be confused: authoritative case information, validated conclusions,
  * AI suggestions (dashed, tinted, labelled) and working notes.
  *
- * PHASE 5: all state is local and mock; nothing is saved.
+ * Access to the case is decided server-side by RLS before this renders (page.tsx). The
+ * work-area content is a later phase: local, unsaved state only.
  */
 export function CaseWorkspace({ customerCase, areaId }: { customerCase: CustomerCase; areaId: string }) {
   const router = useRouter();
@@ -98,25 +96,6 @@ export function CaseWorkspace({ customerCase, areaId }: { customerCase: Customer
         .map((source) => [source.id, source]),
     ).values(),
   ];
-
-  // Access is per case: participants only — never through a role (docs/03 §10).
-  if (!isCaseParticipant(customerCase, user.id)) {
-    return (
-      <div className="px-4 py-10 md:px-8">
-        <ErrorState
-          variant="access"
-          title="Du har ikke adgang til denne sag"
-          actions={
-            <Button asChild variant="secondary">
-              <Link href="/advise">Gå til Advise</Link>
-            </Button>
-          }
-        >
-          Adgang til en kundecase gives pr. sag af sagens ejer.
-        </ErrorState>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-[calc(100dvh-var(--topbar-height))] flex-col @5xl/main:flex-row">

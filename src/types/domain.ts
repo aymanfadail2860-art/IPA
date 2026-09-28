@@ -145,7 +145,7 @@ export interface CaseParticipant {
   userId: string;
   name: string;
   initials: string;
-  access: "Ejer" | "Kan redigere" | "Kan læse";
+  access: "Ejer" | "Kan redigere" | "Kan læse" | "Reviewer";
 }
 
 export interface QualitySignal {
@@ -267,3 +267,35 @@ export interface KnowledgeGap {
   occurrences: number;
   lastSeen: IsoDate;
 }
+
+/* ── Customer case summary (from the database, phase 6) ───────────────── */
+
+/** A case as the access-control foundation knows it: identity, status and participants. */
+export interface CaseSummary {
+  id: string;
+  companyName: string;
+  status: CaseStatus;
+  updatedAt: IsoDate;
+  participants: readonly CaseParticipant[];
+}
+
+/* ── Identity (from the database, phase 6) ──────────────────────────────── */
+
+export interface TeamNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+}
+
+export interface ScopedEmployee {
+  id: string;
+  name: string;
+  initials: string;
+  teams: readonly string[];
+}
+
+/**
+ * The content of a case's work areas (profile, analyses, AI suggestions, notes). Built in a
+ * later phase; phase 6 only has the access-control foundation for cases.
+ */
+export type CaseWorkspaceContent = Omit<CustomerCase, "id" | "companyName" | "status" | "owner" | "participants" | "updatedAt">;

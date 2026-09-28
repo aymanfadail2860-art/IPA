@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+
+import { requireSession } from "@/lib/auth/server-session";
 import { Suspense } from "react";
 
 import { LoadingState } from "@/components/states/loading-state";
@@ -9,7 +11,8 @@ import { CopilotWorkspace } from "./copilot-workspace";
 
 export const metadata: Metadata = { title: "Copilot" };
 
-export default function CopilotPage() {
+export default async function CopilotPage() {
+  await requireSession();
   return (
     <Suspense fallback={<LoadingState className="p-8" />}>
       <CopilotWorkspace conversations={mockCopilotConversations} exampleQuestions={mockCopilotExampleQuestions} />

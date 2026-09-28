@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PipelineStatus } from "@/components/admin/pipeline-status";
+import { AccessDenied } from "@/components/common/access-denied";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
 import { Section } from "@/components/common/section";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Card } from "@/components/ui/card";
 import { PIPELINE_STAGE } from "@/config/domain-status";
+import { ADMIN_REQUIREMENT } from "@/config/navigation";
+import { authorize } from "@/lib/auth/server-session";
 import { formatDate } from "@/lib/format";
 // PHASE 5: mock data only.
 import { mockAdminDocuments, mockDocumentConflicts, mockKnowledgeGaps } from "@/mocks";
@@ -19,7 +22,11 @@ function count(stage: PipelineStage) {
   return mockAdminDocuments.filter((document) => document.stage === stage).length;
 }
 
-export default function AdminOverviewPage() {
+export default async function AdminOverviewPage() {
+  // Authorization is checked in the page itself: a layout renders in parallel with its page
+  // and cannot stop the page's output from being sent.
+  if (!(await authorize(ADMIN_REQUIREMENT))) return <AccessDenied />;
+
   const review = mockAdminDocuments.filter((document) => document.stage === "readyForReview");
   const problems = mockAdminDocuments.filter((document) => document.stage === "failed" || document.stage === "partial");
 

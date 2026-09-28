@@ -1,6 +1,8 @@
 import { ClipboardCheck, Clock, FileText, Lock, Monitor, Smartphone, Timer } from "lucide-react";
 import type { Metadata } from "next";
 
+import { requireSession } from "@/lib/auth/server-session";
+
 import { DisabledReason } from "@/components/common/disabled-reason";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
@@ -17,7 +19,8 @@ import { mockAssessments, mockCompetencies, mockCompetencyLevelLabels } from "@/
 
 export const metadata: Metadata = { title: "Assessment" };
 
-export default function AssessmentPage() {
+export default async function AssessmentPage() {
+  await requireSession();
   const results = mockAssessments.filter((item) => item.result);
   return (
     <PageContainer>

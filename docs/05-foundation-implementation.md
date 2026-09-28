@@ -1,8 +1,9 @@
 # 05 — Grundplatform (implementering)
 
 **Fase:** 5 — Grundplatform
-**Status:** Implementeret. Lint, typecheck, tests og build består. Afventer eksplicit
-godkendelse, før fasen markeres som gennemført.
+**Status:** Gennemført og låst. Fase 6 har siden erstattet den development-only
+rolle-switcher og mock-sessionen med rigtig authentication og adgangskontrol — se
+`docs/06-identity-database-access-control.md`.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/04`, som er låst og behandles som autoritative krav.
 

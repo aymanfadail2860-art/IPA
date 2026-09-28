@@ -7,7 +7,7 @@ import { CopilotPanel } from "@/components/copilot/copilot-panel";
 import { useShortcut } from "@/hooks/use-shortcut";
 
 import type { SearchEntry } from "@/lib/search";
-import type { CustomerCase, CopilotConversation } from "@/types/domain";
+import type { CaseSummary, CopilotConversation } from "@/types/domain";
 
 import { GlobalSearch } from "./global-search";
 import { MobileNav } from "./mobile-nav";
@@ -34,7 +34,7 @@ export function AppShell({
   notifications: readonly NotificationEntry[];
   searchEntries: readonly SearchEntry[];
   /** Customer cases; the search shows only those the user owns or is assigned to. */
-  cases: readonly CustomerCase[];
+  cases: readonly CaseSummary[];
   copilotConversation: CopilotConversation;
   mockNotice: string;
 }) {

@@ -3,10 +3,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ADVISE_CAPABILITIES, ADVISE_DISABLED_REASONS, deviceClassForWidth } from "@/config/advise-capabilities";
-import { casesForUser, isCaseParticipant } from "@/lib/auth/case-access";
 import { hasPermission } from "@/lib/auth/permissions";
-import { mockCases } from "@/mocks/advise";
-import { MOCK_SESSIONS } from "@/mocks/sessions";
+import { ROLE_GRANTS } from "./fixtures/role-grants";
 
 describe("Advise per device class (docs/04 §19)", () => {
   it("is read-only on mobile", () => {
@@ -45,26 +43,15 @@ describe("Advise per device class (docs/04 §19)", () => {
   });
 });
 
-describe("case access per case, not per role (docs/03 §10)", () => {
+describe("case access per case, not per role (docs/03 §10, B-001)", () => {
   it("gives every role advise.case.read/write with scope own — administrator included", () => {
-    for (const session of Object.values(MOCK_SESSIONS)) {
-      expect(hasPermission(session.grants, "advise.case.read", "own")).toBe(true);
-      expect(hasPermission(session.grants, "advise.case.write", "own")).toBe(true);
-      expect(hasPermission(session.grants, "advise.case.read", "team")).toBe(false);
-      expect(hasPermission(session.grants, "advise.case.read", "all")).toBe(false);
+    for (const grants of Object.values(ROLE_GRANTS)) {
+      expect(hasPermission(grants, "advise.case.read", "own")).toBe(true);
+      expect(hasPermission(grants, "advise.case.write", "own")).toBe(true);
+      expect(hasPermission(grants, "advise.case.read", "team")).toBe(false);
+      expect(hasPermission(grants, "advise.case.read", "all")).toBe(false);
     }
   });
-
-  it("shows each user only the cases they own or are assigned to", () => {
-    const ids = (role: keyof typeof MOCK_SESSIONS) => casesForUser(mockCases, MOCK_SESSIONS[role].user.id).map((entry) => entry.id);
-    expect(ids("advisor")).toHaveLength(mockCases.length);
-    expect(ids("administrator")).toEqual(["vestkyst-logistik"]);
-    expect(ids("leader")).toEqual(["bagerhuset"]);
-  });
-
-  it("denies a case the user is not a participant in", () => {
-    const nordjysk = mockCases.find((entry) => entry.id === "nordjysk-entreprise")!;
-    expect(isCaseParticipant(nordjysk, MOCK_SESSIONS.leader.user.id)).toBe(false);
-    expect(isCaseParticipant(nordjysk, MOCK_SESSIONS.administrator.user.id)).toBe(false);
-  });
+  // Which cases each user can see is enforced by RLS and tested against a real database in
+  // src/tests/integration/rls.integration.test.ts.
 });

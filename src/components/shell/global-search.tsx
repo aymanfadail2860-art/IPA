@@ -24,7 +24,7 @@ import {
 import { meetsRequirement } from "@/lib/auth/permissions";
 import { useSession } from "@/lib/auth/session";
 import { searchEntriesForUser, type SearchEntry } from "@/lib/search";
-import type { CustomerCase } from "@/types/domain";
+import type { CaseSummary } from "@/types/domain";
 
 import { useShell } from "./shell-context";
 
@@ -43,14 +43,14 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
  * own cases and actions, grouped by type and filtered by permissions. It does not answer
  * questions — but any query can be sent on to Copilot.
  */
-export function GlobalSearch({ entries, cases }: { entries: readonly SearchEntry[]; cases: readonly CustomerCase[] }) {
+export function GlobalSearch({ entries, cases }: { entries: readonly SearchEntry[]; cases: readonly CaseSummary[] }) {
   const { searchOpen, setSearchOpen } = useShell();
-  const { user, grants } = useSession();
+  const { grants } = useSession();
   const router = useRouter();
   const [query, setQuery] = useState("");
 
   const isAdmin = meetsRequirement(grants, { anyOf: ["knowledge.document.write", "identity.user.manage"] });
-  const visible = searchEntriesForUser({ entries, cases, userId: user.id, isAdmin });
+  const visible = searchEntriesForUser({ entries, cases, isAdmin });
   const groups = [...new Set(visible.map((entry) => entry.group))];
 
   function go(href: string) {

@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 
+import { hasPermission } from "@/lib/auth/permissions";
+import { requireSession } from "@/lib/auth/server-session";
+import { listMyCases } from "@/lib/data/cases";
+
 // PHASE 5: mock data only.
 import {
   mockAdminTasks,
   mockAssessments,
-  mockCases,
   mockChanges,
   mockProducts,
   mockProgression,
@@ -26,7 +29,10 @@ function greetingForNow(): string {
   return "God aften";
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const session = await requireSession();
+  // RLS: only cases the user owns or is assigned to.
+  const cases = hasPermission(session.grants, "advise.case.read") ? await listMyCases() : [];
   const current = mockProducts.find((product) => product.slug === "erhvervsansvar")!;
   return (
     <HomeView
@@ -39,7 +45,7 @@ export default function HomePage() {
         moduleTitle: "Undtagelser",
       }}
       recommended={mockRecommendedTraining}
-      cases={mockCases.filter((entry) => entry.status === "active" || entry.status === "awaitingCustomer")}
+      cases={cases.filter((entry) => entry.status === "active" || entry.status === "awaitingCustomer")}
       recentTraining={mockRecentTraining[0]}
       assessments={mockAssessments}
       progression={mockProgression}

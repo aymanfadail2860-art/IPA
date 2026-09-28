@@ -7,10 +7,9 @@ import type { PermissionGrant } from "@/lib/auth/permissions";
 /**
  * The session the UI renders against.
  *
- * PHASE 5: the value is supplied by the development-only mock provider in `src/dev/`.
- * LATER: it is replaced by a session derived server-side from Supabase Auth and the
- * user's effective permissions. Components only depend on this interface, so the swap
- * does not touch them.
+ * The value is built server-side (src/lib/auth/server-session.ts) from Supabase Auth and
+ * the user's effective permissions in the database, and handed to client components for
+ * rendering. It only shapes the UI — authorization is enforced server-side and by RLS.
  */
 export interface SessionUser {
   id: string;

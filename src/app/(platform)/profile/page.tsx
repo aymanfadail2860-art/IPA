@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 
-// PHASE 5: mock data only.
+import type { PermissionGrant, PermissionKey } from "@/lib/auth/permissions";
+import { requireSession } from "@/lib/auth/server-session";
+import { getMyVisibility } from "@/lib/data/identity";
+// Learning, competencies and history are later phases: development mock data.
 import {
-  MOCK_ADVISOR_LEADER,
-  MOCK_SESSIONS,
   mockCompetencies,
   mockCompetencyLevelLabels,
   mockDevelopmentAreas,
@@ -12,11 +13,21 @@ import {
   mockStrengths,
 } from "@/mocks";
 
-import { ProfileView } from "./profile-view";
+import { ProfileView, type LeaderVisibility } from "./profile-view";
 
 export const metadata: Metadata = { title: "Min profil" };
 
-export default function ProfilePage() {
+export default async function ProfilePage() {
+  await requireSession();
+  // Synlighed: derived from the leaders' actual scopes and permissions in the database.
+  const rows = await getMyVisibility();
+  const leaders = new Map<string, LeaderVisibility>();
+  for (const row of rows) {
+    const leader = leaders.get(row.leaderId) ?? { id: row.leaderId, name: row.leaderName, teamNames: row.teamNames, grants: [] };
+    leader.grants = [...leader.grants, { key: row.permission as PermissionKey, scope: "team" } satisfies PermissionGrant];
+    leaders.set(row.leaderId, leader);
+  }
+
   return (
     <ProfileView
       progression={mockProgression}
@@ -25,7 +36,7 @@ export default function ProfilePage() {
       competencies={mockCompetencies}
       levelLabels={mockCompetencyLevelLabels}
       history={mockHistory}
-      leader={{ ...MOCK_ADVISOR_LEADER, grants: MOCK_SESSIONS.leader.grants }}
+      leaders={[...leaders.values()]}
     />
   );
 }

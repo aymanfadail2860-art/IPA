@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { canAccessPath, visibleNavItems } from "@/config/navigation";
 import { hasPermission, meetsRequirement } from "@/lib/auth/permissions";
-import { MOCK_SESSIONS } from "@/mocks/sessions";
+import { grantsFor } from "./fixtures/role-grants";
 
-const navIds = (role: keyof typeof MOCK_SESSIONS) => visibleNavItems(MOCK_SESSIONS[role].grants).map((item) => item.id);
+const SESSIONS = {
+  advisor: grantsFor("advisor"),
+  leader: grantsFor("advisor", "leader"),
+  administrator: grantsFor("administrator"),
+  administratorWithLeaderScope: grantsFor("administrator", "leader"),
+};
+const navIds = (role: keyof typeof SESSIONS) => visibleNavItems(SESSIONS[role]).map((item) => item.id);
 
 describe("permission checks", () => {
   it("matches key and optional scope", () => {
@@ -27,9 +33,9 @@ describe("permission checks", () => {
   });
 });
 
-describe("role-dependent navigation (mock roles)", () => {
+describe("role-dependent navigation (role bundles from the database catalogue)", () => {
   it("keeps the locked order of the main navigation", () => {
-    expect(navIds("administrator")).toEqual([
+    expect(navIds("administratorWithLeaderScope")).toEqual([
       "home",
       "learn",
       "copilot",
@@ -53,17 +59,22 @@ describe("role-dependent navigation (mock roles)", () => {
     const ids = navIds("leader");
     expect(ids).toContain("analytics");
     expect(ids).not.toContain("admin");
-    expect(hasPermission(MOCK_SESSIONS.leader.grants, "knowledge.document.write")).toBe(false);
+    expect(hasPermission(SESSIONS.leader, "knowledge.document.write")).toBe(false);
   });
 
   it("does not give a Rådgiver team scope on any data (KRAV-ROL-003)", () => {
-    expect(MOCK_SESSIONS.advisor.grants.every((grant) => grant.scope === "own")).toBe(true);
+    expect(SESSIONS.advisor.every((grant) => grant.scope === "own")).toBe(true);
+  });
+
+  it("does not give Administrator Analytics through the role ('efter rettigheder')", () => {
+    expect(navIds("administrator")).not.toContain("analytics");
+    expect(navIds("administrator")).toContain("admin");
   });
 
   it("guards direct URLs with the same requirement as the menu", () => {
-    expect(canAccessPath("/admin/documents", MOCK_SESSIONS.leader.grants)).toBe(false);
-    expect(canAccessPath("/admin/documents", MOCK_SESSIONS.administrator.grants)).toBe(true);
-    expect(canAccessPath("/analytics", MOCK_SESSIONS.advisor.grants)).toBe(false);
-    expect(canAccessPath("/learn/erhvervsansvar", MOCK_SESSIONS.advisor.grants)).toBe(true);
+    expect(canAccessPath("/admin/documents", SESSIONS.leader)).toBe(false);
+    expect(canAccessPath("/admin/documents", SESSIONS.administrator)).toBe(true);
+    expect(canAccessPath("/analytics", SESSIONS.advisor)).toBe(false);
+    expect(canAccessPath("/learn/erhvervsansvar", SESSIONS.advisor)).toBe(true);
   });
 });

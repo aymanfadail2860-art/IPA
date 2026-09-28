@@ -1,6 +1,8 @@
 # Mock-data — KUN UDVIKLING
 
-Alt i denne mappe er **fiktive udviklingsdata** til Fase 5 (grundplatform). Formålet er at
+Alt i denne mappe er **fiktive udviklingsdata** til de moduler, der endnu ikke er bygget
+(Learn, Practice, Copilot, Assessment, dele af Admin og sagens indhold i Advise). Brugere,
+roller, teams og sager ligger siden Fase 6 i databasen — ikke her. Formålet er at
 kunne vurdere design og informationshierarki med realistisk dansk indhold.
 
 - Virksomheder, personer, produkter, dokumenter, betingelser, citater og tal er **opdigtede**.

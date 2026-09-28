@@ -1,6 +1,8 @@
 import { Dumbbell, Target } from "lucide-react";
 import type { Metadata } from "next";
 
+import { requireSession } from "@/lib/auth/server-session";
+
 import { DisabledReason } from "@/components/common/disabled-reason";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
@@ -17,7 +19,8 @@ export const metadata: Metadata = { title: "Practice" };
 
 const SESSION_REASON = "Træningssessioner kræver AI-integrationen, som bygges i en senere fase.";
 
-export default function PracticePage() {
+export default async function PracticePage() {
+  await requireSession();
   return (
     <PageContainer>
       <PageHeader

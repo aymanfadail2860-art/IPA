@@ -12,7 +12,6 @@ export * from "./learn";
 export * from "./practice";
 export * from "./profile";
 export * from "./search";
-export * from "./sessions";
 export * from "./sources";
 
 /** Shown in the UI so mock data can never be mistaken for real data. */

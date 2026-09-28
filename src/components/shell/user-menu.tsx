@@ -16,6 +16,7 @@ import {
 import { SHORTCUTS } from "@/config/shortcuts";
 import { usePlatform } from "@/hooks/use-shortcut";
 import { formatShortcut } from "@/config/shortcuts";
+import { signOut } from "@/lib/auth/actions";
 import { useSession } from "@/lib/auth/session";
 
 /** User menu — identity, own profile and the documented keyboard shortcuts (§20). */
@@ -67,10 +68,14 @@ export function UserMenu() {
           </>
         ) : null}
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled>
-          <LogOut aria-hidden />
-          Log ud · ikke tilgængelig uden login
-        </DropdownMenuItem>
+        <form action={signOut}>
+          <DropdownMenuItem asChild>
+            <button type="submit" className="w-full">
+              <LogOut aria-hidden />
+              Log ud
+            </button>
+          </DropdownMenuItem>
+        </form>
       </DropdownMenuContent>
     </DropdownMenu>
   );

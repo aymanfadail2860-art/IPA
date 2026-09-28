@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { KNOWLEDGE_STATUSES, STATUSES } from "@/config/status";
 import { leaderVisibility } from "@/config/visibility";
-import { MOCK_SESSIONS } from "@/mocks/sessions";
+import { grantsFor } from "./fixtures/role-grants";
 
 describe("status system", () => {
   it("defines exactly the seven locked knowledge statuses", () => {
@@ -30,7 +30,7 @@ describe("status system", () => {
 
 describe("Synlighed — derived from the leader's permissions", () => {
   it("lists what the leader can and cannot see", () => {
-    const { canSee, cannotSee } = leaderVisibility(MOCK_SESSIONS.leader.grants);
+    const { canSee, cannotSee } = leaderVisibility(grantsFor("advisor", "leader"));
     expect(canSee.map((category) => category.id)).toEqual([
       "learning-progress",
       "completed-paths",
@@ -42,7 +42,7 @@ describe("Synlighed — derived from the leader's permissions", () => {
   });
 
   it("shows nothing as visible when the leader has no team scope", () => {
-    const { canSee } = leaderVisibility(MOCK_SESSIONS.advisor.grants);
+    const { canSee } = leaderVisibility(grantsFor("advisor"));
     expect(canSee).toHaveLength(0);
   });
 });

@@ -14,13 +14,10 @@ import { EmptyState } from "@/components/states/empty-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { CASE_STATUS } from "@/config/domain-status";
-import { casesForUser } from "@/lib/auth/case-access";
-import { hasPermission } from "@/lib/auth/permissions";
-import { useSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format";
-import type { CustomerCase } from "@/types/domain";
+import type { CaseSummary } from "@/types/domain";
 
-const columns: DataTableColumn<CustomerCase>[] = [
+const columns: DataTableColumn<CaseSummary>[] = [
   {
     id: "company",
     header: "Virksomhed",
@@ -28,14 +25,8 @@ const columns: DataTableColumn<CustomerCase>[] = [
     cell: (row) => (
       <Link href={`/advise/${row.id}`} className="font-medium text-fg-primary hover:underline">
         {row.companyName}
-        <span className="block text-caption font-normal text-fg-tertiary">{row.industry}</span>
       </Link>
     ),
-  },
-  {
-    id: "area",
-    header: "Arbejdsområde",
-    cell: (row) => row.workAreas.find((area) => area.id === row.currentAreaId)?.name,
   },
   {
     id: "status",
@@ -57,14 +48,11 @@ const columns: DataTableColumn<CustomerCase>[] = [
 ];
 
 /** Case overview (Sagsoversigt). Access to a case is granted per case, never through the role. */
-export function AdviseOverview({ cases }: { cases: readonly CustomerCase[] }) {
-  const { user, grants } = useSession();
+export function AdviseOverview({ cases, canRead }: { cases: readonly CaseSummary[]; canRead: boolean }) {
   const router = useRouter();
-  const canRead = hasPermission(grants, "advise.case.read");
-  // Only cases the user owns or is assigned to — the same rule for every role.
-  const assigned = casesForUser(cases, user.id);
-  const open = assigned.filter((entry) => entry.status !== "closed");
-  const closed = assigned.filter((entry) => entry.status === "closed");
+  // `cases` is already limited by RLS to cases the user owns or is assigned to.
+  const open = cases.filter((entry) => entry.status !== "closed");
+  const closed = cases.filter((entry) => entry.status === "closed");
 
   return (
     <PageContainer>
@@ -73,7 +61,7 @@ export function AdviseOverview({ cases }: { cases: readonly CustomerCase[] }) {
         title="Advise"
         description="Dit arbejdsværktøj til rådgivning på reelle kundecases. AI foreslår — du afgør."
         actions={
-          <DisabledReason reason="Oprettelse af kundecases kræver database og adgangsstyring, som bygges i en senere fase.">
+          <DisabledReason reason="Oprettelse af kundecases bygges sammen med sagens indhold i en senere fase.">
             <Button variant="primary" disabled>
               <Plus aria-hidden />
               Opret kundecase

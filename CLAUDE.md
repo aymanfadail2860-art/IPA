@@ -8,9 +8,9 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–4 er gennemført og låst. Fase 5 — Grundplatform er i gang.**
+**Fase 1–5 er gennemført og låst. Fase 6 — Identity, database og adgangskontrol implementeres.**
 
-Låst betyder, at dokumenterne fra fase 1–4 er projektets autoritative specifikation. De
+Låst betyder, at dokumenterne fra fase 1–5 er projektets autoritative specifikation. De
 ændres ikke som led i implementeringen, men kun ved en eksplicit beslutning om at genåbne
 dem.
 
@@ -67,8 +67,9 @@ fase, der ophæver dem, er nået.
 | 2 | Informationsarkitektur | **Gennemført** |
 | 3 | Teknisk arkitektur | **Gennemført og låst** |
 | 4 | UI/UX-design | **Gennemført og låst** |
-| 5 | Grundplatform | **I gang** |
-| 6+ | *Ikke fastlagt* | Ikke påbegyndt |
+| 5 | Grundplatform | **Gennemført og låst** |
+| 6 | Identity, database og adgangskontrol | **Implementeres** |
+| 7+ | *Ikke fastlagt* | Ikke påbegyndt |
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
 fasen, og der arbejdes ikke forud på senere faser.
@@ -88,6 +89,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/03-technical-architecture.md` | 3 | Oprettet |
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
+| `docs/06-identity-database-access-control.md` | 6 | Oprettet |
 | `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

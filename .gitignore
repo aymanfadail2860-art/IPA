@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The example env file (placeholders only, no secrets) is committed.
+!.env.example

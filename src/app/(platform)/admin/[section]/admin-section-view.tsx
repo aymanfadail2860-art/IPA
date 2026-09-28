@@ -18,7 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { adminSectionById } from "@/config/admin-sections";
 import { PIPELINE_STAGE } from "@/config/domain-status";
 import type { ShortcutDefinition } from "@/config/shortcuts";
-import type { PermissionGrant, PermissionKey } from "@/lib/auth/permissions";
+import type { AdminTeamRow, AdminUserRow, RoleMatrix } from "@/lib/data/identity";
 import { formatDate } from "@/lib/format";
 import type { AdminDocument, KnowledgeGap, PipelineStage } from "@/types/domain";
 
@@ -28,27 +28,14 @@ interface AdminData {
   gaps: readonly KnowledgeGap[];
   conflicts: readonly { id: string; topic: string; left: string; right: string; reportedAt: string }[];
   learningContent: readonly { id: string; title: string; modules: number; lessons: number; quizzes: number; updatedAt: string; status: string }[];
-  users: readonly { id: string; name: string; email: string; roles: string; teams: string; status: string }[];
-  teams: readonly { id: string; name: string; depth: number; members: number; leaders: string }[];
+  /** From the database (identity schema, RLS: identity.user.manage). */
+  users: readonly AdminUserRow[];
+  teams: readonly AdminTeamRow[];
   versions: readonly { id: string; document: string; version: string; event: string; at: string }[];
-  roles: readonly { id: string; label: string; grants: readonly PermissionGrant[] }[];
+  matrix: RoleMatrix;
   shortcuts: readonly ShortcutDefinition[];
 }
 
-const PERMISSION_KEYS: PermissionKey[] = [
-  "learning.progress.read",
-  "practice.session.write",
-  "assessment.result.read",
-  "advise.case.read",
-  "advise.case.write",
-  "analytics.team.read",
-  "knowledge.document.read",
-  "knowledge.document.read_historical",
-  "knowledge.document.write",
-  "knowledge.version.publish",
-  "identity.user.manage",
-  "system.settings.manage",
-];
 
 const RETENTION_CATEGORIES = [
   "AI-samtaler",
@@ -261,16 +248,18 @@ export function AdminSectionView({ section, data }: { section: string; data: Adm
               cell: (row) => (
                 <span>
                   <span className="block font-medium">{row.name}</span>
-                  <span className="block text-caption text-fg-tertiary">{row.email}</span>
+                  {row.title ? <span className="block text-caption text-fg-tertiary">{row.title}</span> : null}
                 </span>
               ),
             },
-            { id: "roles", header: "Roller", cell: (row) => row.roles },
-            { id: "teams", header: "Teams", cell: (row) => row.teams },
+            { id: "roles", header: "Roller", cell: (row) => (row.roles.length > 0 ? row.roles.join(", ") : "Ingen roller") },
+            { id: "teams", header: "Teams", cell: (row) => (row.teams.length > 0 ? row.teams.join(", ") : "—") },
             {
               id: "status",
               header: "Status",
-              cell: (row) => <StatusBadge status={row.status === "Aktiv" ? "success" : "info"} label={row.status} />,
+              cell: (row) => (
+                <StatusBadge status={row.status === "active" ? "success" : "neutral"} label={row.status === "active" ? "Aktiv" : "Inaktiv"} />
+              ),
             },
           ]}
           rows={data.users}
@@ -291,7 +280,8 @@ export function AdminSectionView({ section, data }: { section: string; data: Adm
                   {team.name}
                 </span>
                 <span className="text-body text-fg-secondary">
-                  {team.members} medlemmer · Lederscope: {team.leaders}
+                  {team.members} {team.members === 1 ? "medlem" : "medlemmer"} · Lederscope:{" "}
+                  {team.leaders.length > 0 ? team.leaders.join(", ") : "ingen"}
                 </span>
               </li>
             ))}
@@ -303,8 +293,8 @@ export function AdminSectionView({ section, data }: { section: string; data: Adm
       content = (
         <div className="space-y-4">
           <p className="max-w-3xl text-body text-fg-secondary">
-            Roller er samlinger af permissions. Systemet kontrollerer altid permission og scope — aldrig rollenavnet.
-            Matrixen viser udviklingsdataenes rollesæt.
+            Roller er samlinger af standardpermissions. Systemet kontrollerer altid permission og scope — aldrig
+            rollenavnet. Matrixen læses direkte fra databasen.
           </p>
           <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface-raised">
             <table className="w-full text-body">
@@ -312,23 +302,24 @@ export function AdminSectionView({ section, data }: { section: string; data: Adm
               <thead>
                 <tr className="border-b border-border-subtle text-label text-fg-secondary">
                   <th scope="col" className="px-4 py-2.5 text-left">Permission</th>
-                  {data.roles.map((role) => (
-                    <th key={role.id} scope="col" className="px-4 py-2.5 text-left">
-                      {role.label}
+                  {data.matrix.roles.map((role) => (
+                    <th key={role.key} scope="col" className="px-4 py-2.5 text-left">
+                      {role.name}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {PERMISSION_KEYS.map((key) => (
-                  <tr key={key} className="border-b border-border-subtle last:border-0">
-                    <th scope="row" className="px-4 py-2 text-left font-mono text-mono font-normal text-fg-primary">
-                      {key}
+                {data.matrix.rows.map((row) => (
+                  <tr key={row.permission} className="border-b border-border-subtle last:border-0">
+                    <th scope="row" className="px-4 py-2 text-left font-normal text-fg-primary">
+                      <span className="block font-mono text-mono">{row.permission}</span>
+                      <span className="block text-caption text-fg-tertiary">{row.description}</span>
                     </th>
-                    {data.roles.map((role) => {
-                      const scopes = role.grants.filter((grant) => grant.key === key).map((grant) => grant.scope);
+                    {data.matrix.roles.map((role) => {
+                      const scopes = row.scopes[role.key] ?? [];
                       return (
-                        <td key={role.id} className="px-4 py-2 text-fg-secondary">
+                        <td key={role.key} className="px-4 py-2 text-fg-secondary">
                           {scopes.length > 0 ? scopes.join(" + ") : <span aria-label="Ingen adgang">—</span>}
                         </td>
                       );

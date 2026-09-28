@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+
+import { requireSession } from "@/lib/auth/server-session";
 import { notFound } from "next/navigation";
 
 // PHASE 5: mock data only.
@@ -21,6 +23,7 @@ export async function generateMetadata(props: PageProps<"/learn/[product]/[modul
 }
 
 export default async function ModulePage(props: PageProps<"/learn/[product]/[module]">) {
+  await requireSession();
   const { product, modules, courseModule } = await resolve(props);
   if (!product || !courseModule) notFound();
 

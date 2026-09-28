@@ -23,17 +23,17 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, InteractiveCard } from "@/components/ui/card";
 import { ASSESSMENT_STATUS, CASE_STATUS } from "@/config/domain-status";
-import { casesForUser } from "@/lib/auth/case-access";
 import { hasPermission } from "@/lib/auth/permissions";
 import { useSession } from "@/lib/auth/session";
 import { formatDate, formatShortDate } from "@/lib/format";
-import type { AssessmentItem, CustomerCase, TrainingSessionSummary } from "@/types/domain";
+import type { AssessmentItem, CaseSummary, TrainingSessionSummary } from "@/types/domain";
 
 interface HomeViewProps {
   greeting: string;
   continueLearning: { product: string; href: string; module: number; moduleCount: number; moduleTitle: string };
   recommended: { form: string; product: string; reason: string };
-  cases: readonly CustomerCase[];
+  /** Active cases the user owns or is assigned to (loaded server-side under RLS). */
+  cases: readonly CaseSummary[];
   recentTraining: TrainingSessionSummary;
   assessments: readonly AssessmentItem[];
   progression: { pathsInProgress: number; pathsCompleted: number; pathsAssigned: number; overallPercent: number };
@@ -52,7 +52,7 @@ export function HomeView(props: HomeViewProps) {
   const isLeader = hasPermission(grants, "analytics.team.read", "team");
   const isAdmin = hasPermission(grants, "knowledge.document.write");
   const canSeeCases = hasPermission(grants, "advise.case.read");
-  const cases = casesForUser(props.cases, user.id);
+  const cases = props.cases;
   const availableAssessments = props.assessments.filter((item) => item.status === "available");
   const sortedChanges = [...props.changes].sort((a, b) => b.affectsActiveCases - a.affectsActiveCases);
 
@@ -174,7 +174,6 @@ export function HomeView(props: HomeViewProps) {
               ) : (
                 <ul className="divide-y divide-border-subtle">
                   {cases.map((entry) => {
-                    const area = entry.workAreas.find((item) => item.id === entry.currentAreaId);
                     return (
                       <li key={entry.id}>
                         <Link
@@ -184,7 +183,7 @@ export function HomeView(props: HomeViewProps) {
                           <span>
                             <span className="block text-body font-medium text-fg-primary">{entry.companyName}</span>
                             <span className="block text-caption text-fg-secondary">
-                              {area?.name} · opdateret {formatShortDate(entry.updatedAt)}
+                              Opdateret {formatShortDate(entry.updatedAt)}
                             </span>
                           </span>
                           <StatusBadge status={CASE_STATUS[entry.status].status} label={CASE_STATUS[entry.status].label} />

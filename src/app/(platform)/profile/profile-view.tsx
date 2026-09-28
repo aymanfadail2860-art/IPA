@@ -14,6 +14,13 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { leaderVisibility } from "@/config/visibility";
 import type { PermissionGrant } from "@/lib/auth/permissions";
+
+export interface LeaderVisibility {
+  id: string;
+  name: string;
+  teamNames: string[];
+  grants: PermissionGrant[];
+}
 import { useSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format";
 import type { Competency, HistoryEntry } from "@/types/domain";
@@ -35,7 +42,7 @@ export function ProfileView({
   competencies,
   levelLabels,
   history,
-  leader,
+  leaders,
 }: {
   progression: { pathsInProgress: number; pathsCompleted: number; pathsAssigned: number; overallPercent: number; currentPath: string; currentModule: number };
   strengths: readonly string[];
@@ -43,12 +50,11 @@ export function ProfileView({
   competencies: readonly Competency[];
   levelLabels: Record<number, string>;
   history: readonly HistoryEntry[];
-  leader: { name: string; team: string; grants: readonly PermissionGrant[] };
+  /** Leaders whose explicit scope covers the user, with their team-scoped permissions. */
+  leaders: readonly LeaderVisibility[];
 }) {
   const { user } = useSession();
   const [kind, setKind] = useState<HistoryEntry["kind"] | null>(null);
-  const visibility = leaderVisibility(leader.grants);
-  const hasLeader = user.name !== leader.name;
 
   return (
     <PageContainer className="max-w-5xl">
@@ -167,40 +173,48 @@ export function ProfileView({
 
         <TabsContent value="visibility">
           <Section title="Hvem kan se dine data">
-            {hasLeader ? (
-              <Card className="space-y-6">
-                <p className="text-body text-fg-primary">
-                  <span className="font-semibold">{leader.name}</span> (leder, {leader.team}) kan se:
+            {leaders.length > 0 ? (
+              <div className="space-y-4">
+                {leaders.map((leader) => {
+                  const visibility = leaderVisibility(leader.grants);
+                  return (
+                    <Card key={leader.id} className="space-y-6">
+                      <p className="text-body text-fg-primary">
+                        <span className="font-semibold">{leader.name}</span> (leder for {leader.teamNames.join(", ")}) kan
+                        se:
+                      </p>
+                      <ul className="space-y-2">
+                        {visibility.canSee.map((category) => (
+                          <li key={category.id} className="flex items-center gap-2 text-body text-fg-primary">
+                            <Eye className="size-4 text-success" aria-hidden />
+                            <span className="sr-only">Kan se: </span>
+                            {category.label}
+                          </li>
+                        ))}
+                      </ul>
+                      <div>
+                        <p className="mb-2 text-body font-semibold text-fg-primary">Kan ikke se:</p>
+                        <ul className="space-y-2">
+                          {visibility.cannotSee.map((category) => (
+                            <li key={category.id} className="flex items-center gap-2 text-body text-fg-secondary">
+                              <EyeOff className="size-4" aria-hidden />
+                              <span className="sr-only">Kan ikke se: </span>
+                              {category.label}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </Card>
+                  );
+                })}
+                <p className="text-caption text-fg-secondary">
+                  Listen er dannet ud fra de lederscopes og rettigheder, der faktisk er tildelt i systemet. Den viser, hvilke
+                  kategorier af data der er synlige — ikke hvornår de er set.
                 </p>
-                <ul className="space-y-2">
-                  {visibility.canSee.map((category) => (
-                    <li key={category.id} className="flex items-center gap-2 text-body text-fg-primary">
-                      <Eye className="size-4 text-success" aria-hidden />
-                      <span className="sr-only">Kan se: </span>
-                      {category.label}
-                    </li>
-                  ))}
-                </ul>
-                <div>
-                  <p className="mb-2 text-body font-semibold text-fg-primary">Kan ikke se:</p>
-                  <ul className="space-y-2">
-                    {visibility.cannotSee.map((category) => (
-                      <li key={category.id} className="flex items-center gap-2 text-body text-fg-secondary">
-                        <EyeOff className="size-4" aria-hidden />
-                        <span className="sr-only">Kan ikke se: </span>
-                        {category.label}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <p className="border-t border-border-subtle pt-4 text-caption text-fg-secondary">
-                  Listen er dannet ud fra de rettigheder, din leder faktisk har. Den viser, hvilke kategorier af data
-                  der er synlige — ikke hvornår de er set.
-                </p>
-              </Card>
+              </div>
             ) : (
-              <EmptyState icon={Eye} title="Ingen har lederadgang til dine data">
-                I udviklingsdata er der ingen leder med scope for {user.name}.
+              <EmptyState icon={Eye} title="Ingen leder har adgang til dine data">
+                Ingen leder har i dag et lederscope, der omfatter dine teams.
               </EmptyState>
             )}
           </Section>

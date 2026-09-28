@@ -13,6 +13,13 @@ import {
 
 import { meetsRequirement, type PermissionGrant, type PermissionRequirement } from "@/lib/auth/permissions";
 
+/** Admin is shown to — and served to — users with at least one administrative permission. */
+export const ADMIN_REQUIREMENT: PermissionRequirement = {
+  anyOf: ["knowledge.document.write", "knowledge.version.publish", "identity.user.manage", "system.settings.manage"],
+};
+
+export const ANALYTICS_REQUIREMENT: PermissionRequirement = { anyOf: ["analytics.team.read"] };
+
 export type NavGroupId = "work" | "insight" | "personal";
 
 export interface NavItem {
@@ -42,7 +49,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/analytics",
     icon: ChartColumn,
     group: "insight",
-    requires: { anyOf: ["analytics.team.read"] },
+    requires: ANALYTICS_REQUIREMENT,
   },
   { id: "profile", label: "Min profil", href: "/profile", icon: UserRound, group: "personal" },
   {
@@ -51,14 +58,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/admin",
     icon: Settings,
     group: "personal",
-    requires: {
-      anyOf: [
-        "knowledge.document.write",
-        "knowledge.version.publish",
-        "identity.user.manage",
-        "system.settings.manage",
-      ],
-    },
+    requires: ADMIN_REQUIREMENT,
   },
 ];
 

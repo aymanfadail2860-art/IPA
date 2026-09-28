@@ -1,63 +1,25 @@
 /**
- * ⚠ MOCK DATA — DEVELOPMENT ONLY. Fictional companies and customer cases. No real customer
- * data exists in phase 5, and none may ever be added to this file.
+ * ⚠ MOCK DATA — DEVELOPMENT ONLY. Fictional work-area content for ONE development seed case,
+ * so the Advise workspace design from phase 5 can still be evaluated. Cases themselves
+ * (identity, status, owner, participants) live in the database under RLS.
+ *
+ * The content is attached only to the seed fixture case "Testvirksomhed Alfa ApS"
+ * (scripts/seed-fixtures.mjs). Real cases never match and show empty work areas.
  * Must never be used as or mixed with production data.
  */
-import type { CaseParticipant, CustomerCase, WorkArea, WorkAreaState } from "@/types/domain";
+import { buildWorkAreas } from "@/lib/advise/workspace";
+import type { CaseWorkspaceContent } from "@/types/domain";
+
+import { SEED_CASE_IDS } from "../../scripts/seed-fixtures.mjs";
 
 import { mockSources } from "./sources";
 
-/** The seven work areas of a customer case, in intended — not locked — order (IA §3). */
-const WORK_AREA_NAMES = [
-  ["virksomhedsprofil", "Virksomhedsprofil"],
-  ["risikoanalyse", "Risikoanalyse"],
-  ["manglende-oplysninger", "Manglende oplysninger"],
-  ["forsikringsbehov", "Forsikringsbehov"],
-  ["daekninger", "Dækninger"],
-  ["accept", "Accept"],
-  ["opsummering", "Opsummering"],
-] as const;
-
-function workAreas(
-  states: readonly WorkAreaState[],
-  openMissing?: number,
-): WorkArea[] {
-  return WORK_AREA_NAMES.map(([id, name], index) => ({
-    id,
-    name,
-    state: states[index] ?? "notStarted",
-    openItems: id === "manglende-oplysninger" ? openMissing : undefined,
-  }));
-}
-
-const mikkel: CaseParticipant = { userId: "mock-user-mikkel", name: "Mikkel Sørensen", initials: "MS", access: "Ejer" };
-const sara: CaseParticipant = { userId: "mock-user-sara", name: "Sara Lund", initials: "SL", access: "Kan redigere" };
-const peter: CaseParticipant = { userId: "mock-user-peter", name: "Peter Dahl", initials: "PD", access: "Kan læse" };
-const jonas: CaseParticipant = { userId: "mock-user-jonas", name: "Jonas Kjær", initials: "JK", access: "Kan redigere" };
-const anne: CaseParticipant = { userId: "mock-user-anne", name: "Anne Holm", initials: "AH", access: "Kan læse" };
-
-const emptyCaseContent = {
-  signals: [],
-  facts: [],
-  conclusions: [],
-  onDemandSuggestions: [],
-  note: "",
-  sourceDocuments: 0,
-  history: [],
-} as const;
-
-export const mockCases: readonly CustomerCase[] = [
-  {
-    id: "nordjysk-entreprise",
-    companyName: "Nordjysk Entreprise A/S",
+const alfaContent: CaseWorkspaceContent =
+{
     industry: "Tømrer- og snedkerentreprise",
     employees: "38 ansatte",
-    status: "active",
     currentAreaId: "risikoanalyse",
-    owner: mikkel,
-    participants: [mikkel, sara, peter],
-    updatedAt: "2026-09-28T08:15:00",
-    workAreas: workAreas(["complete", "inProgress", "attention", "notStarted", "notStarted", "notStarted", "notStarted"], 3),
+    workAreas: buildWorkAreas(["complete", "inProgress", "attention", "notStarted", "notStarted", "notStarted", "notStarted"], 3),
     signals: [
       {
         id: "sig-1",
@@ -86,7 +48,7 @@ export const mockCases: readonly CustomerCase[] = [
         id: "con-1",
         title: "Arbejde på kundens ejendom er den væsentligste ansvarsrisiko",
         text: "Virksomheden udfører størstedelen af sit arbejde i kundernes bygninger. Skader på det, der arbejdes på, er den risiko, der oftest fører til krav.",
-        validatedBy: "Mikkel Sørensen",
+        validatedBy: "Test Rådgiver A",
         validatedAt: "2026-09-25",
         sources: [mockSources.liabilityTermsV3],
       },
@@ -115,65 +77,14 @@ export const mockCases: readonly CustomerCase[] = [
     sourceDocuments: 4,
     history: [
       { at: "2026-09-28T08:15:00", text: "Risikoanalyse opdateret" },
-      { at: "2026-09-25T13:40:00", text: "Konklusion valideret af Mikkel Sørensen" },
-      { at: "2026-09-24T10:02:00", text: "Sagen delt med Sara Lund (kan redigere)" },
+      { at: "2026-09-25T13:40:00", text: "Konklusion valideret af Test Rådgiver A" },
+      { at: "2026-09-24T10:02:00", text: "Sagen delt med Test Rådgiver B (kan læse)" },
       { at: "2026-09-23T09:30:00", text: "Sagen oprettet" },
     ],
-  },
-  {
-    id: "bagerhuset",
-    companyName: "Bagerhuset ApS",
-    industry: "Bageri med butik",
-    employees: "14 ansatte",
-    status: "awaitingCustomer",
-    currentAreaId: "manglende-oplysninger",
-    owner: mikkel,
-    participants: [mikkel, anne],
-    updatedAt: "2026-09-26T15:20:00",
-    workAreas: workAreas(["complete", "complete", "attention", "inProgress"], 2),
-    ...emptyCaseContent,
-  },
-  {
-    id: "vestkyst-logistik",
-    companyName: "Vestkyst Logistik ApS",
-    industry: "Godstransport og lager",
-    employees: "62 ansatte",
-    status: "active",
-    currentAreaId: "daekninger",
-    owner: mikkel,
-    participants: [mikkel, sara, jonas],
-    updatedAt: "2026-09-24T11:05:00",
-    workAreas: workAreas(["complete", "complete", "complete", "complete", "inProgress"], 0),
-    ...emptyCaseContent,
-  },
-  {
-    id: "tandklinikken-aalborg",
-    companyName: "Tandklinikken Aalborg I/S",
-    industry: "Tandlægepraksis",
-    employees: "9 ansatte",
-    status: "draft",
-    currentAreaId: "virksomhedsprofil",
-    owner: mikkel,
-    participants: [mikkel],
-    updatedAt: "2026-09-19T09:45:00",
-    workAreas: workAreas(["inProgress"]),
-    ...emptyCaseContent,
-  },
-  {
-    id: "fjordens-vvs",
-    companyName: "Fjordens VVS ApS",
-    industry: "VVS-installation",
-    employees: "21 ansatte",
-    status: "closed",
-    currentAreaId: "opsummering",
-    owner: mikkel,
-    participants: [mikkel],
-    updatedAt: "2026-08-30T14:10:00",
-    workAreas: workAreas(["complete", "complete", "complete", "complete", "complete", "complete", "complete"], 0),
-    ...emptyCaseContent,
-  },
-];
+  }
+;
 
-export function mockCaseById(id: string): CustomerCase | undefined {
-  return mockCases.find((entry) => entry.id === id);
+/** Mock work-area content for the development seed fixture case, or null for any other case. */
+export function mockCaseWorkspaceContent(caseId: string): CaseWorkspaceContent | null {
+  return caseId === SEED_CASE_IDS.alfa ? alfaContent : null;
 }

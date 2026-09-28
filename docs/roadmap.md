@@ -3,9 +3,9 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–4 er gennemført og **låst**. Fase 5 — Grundplatform er
-implementeret, og alle checks består. Fasen afventer eksplicit godkendelse, før den
-markeres som gennemført.
+**Aktuel status:** Fase 1–5 er gennemført og **låst**. Fase 6 — Identity, database og
+adgangskontrol implementeres: implementering og checks er færdige, og fasen afventer
+godkendelse.
 
 ---
 
@@ -17,8 +17,9 @@ markeres som gennemført.
 | 2 | Informationsarkitektur | 🔒 Gennemført og låst | `docs/02-information-architecture.md` |
 | 3 | Teknisk arkitektur | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
-| 5 | Grundplatform | ✅ Implementeret — afventer godkendelse | `docs/05-foundation-implementation.md` |
-| 6+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
+| 6 | Identity, database og adgangskontrol | 🔄 Implementeres — afventer godkendelse | `docs/06-identity-database-access-control.md` |
+| 7+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
 
@@ -183,8 +184,7 @@ Låst i denne fase:
 
 ## Fase 5 — Grundplatform
 
-**Status:** ✅ Implementeret. Lint, typecheck, tests og build består. Afventer eksplicit
-godkendelse, før fasen markeres som gennemført.
+**Status:** 🔒 Gennemført og låst.
 
 **Leverance:** Kørende grundplatform samt `docs/05-foundation-implementation.md`
 
@@ -236,6 +236,43 @@ Fasen markeres først som gennemført, når alle relevante checks består.
 
 ---
 
-## Fase 6 og frem
+## Fase 6 — Identity, database og adgangskontrol
+
+**Status:** 🔄 Implementeres. Implementering, checks og verifikation af adgangskontrol er
+færdige. Afventer godkendelse, før fasen markeres som gennemført.
+
+**Leverance:** Migrationer i `supabase/`, Supabase Auth i appen samt
+`docs/06-identity-database-access-control.md`
+
+Omfang:
+
+- [x] PostgreSQL via Supabase med versionerede migrationer (`identity`, `advise`, `audit`)
+- [x] Brugere, roller, permissions, rolle-permissions, brugerroller
+- [x] Teams med hierarki, flere medlemskaber og eksplicitte lederscopes (inkl./ekskl. underteams)
+- [x] Permission-katalog præcis som `docs/03` §10 — ingen opfundne permissions
+- [x] Supabase Auth: login, logout, session, beskyttede routes
+- [x] Rolle-switcheren fra fase 5 er fjernet
+- [x] RLS på alle tabeller; server-side autorisation i hver side
+- [x] Adgangsfundament for kundecases (ejer, deltagere, deling) — ingen "admin ser alt"
+- [x] Append-only audit af administrative ændringer og lederens individadgang
+- [x] Grundlag for transparens: `my_visibility()` driver Min profil → Synlighed
+- [x] Development-seed kun mod lokal Supabase, uden passwords i repoet
+- [x] Lint, typecheck, 44 enhedstests, 9 pgTAP-tests, 45 integrationstests og build består
+- [x] Adgangskontrol verificeret mod rigtig Supabase Auth + Postgres (inkl. mutationstest)
+
+**Udestående (non-blocking, se `docs/06` §14–15):**
+
+- Seks implementeringsbeslutninger til bekræftelse (bl.a. administratorens Analytics og
+  scope på `role_permissions`).
+- Hostet Supabase-projekt (EU) er ikke oprettet. Indtil da viser Vercel-demoen login-siden
+  med besked om manglende forbindelse.
+- Brugeradministration i UI, nulstilling af adgangskode og MFA er ikke bygget.
+
+**Uden for omfang:** Knowledge Engine, RAG, embeddings, ingestion, Claude API, AI i Copilot,
+Practice og Advise, produktionsdata.
+
+---
+
+## Fase 7 og frem
 
 Ikke fastlagt.

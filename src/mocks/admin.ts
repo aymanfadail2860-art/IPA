@@ -47,21 +47,6 @@ export const mockAdminLearningContent = [
   { id: "l3", title: "Cyberforsikring", modules: 11, lessons: 12, quizzes: 2, updatedAt: "2026-09-27", status: "Kladde" },
 ];
 
-export const mockAdminUsers = [
-  { id: "u1", name: "Mikkel Sørensen", email: "mikkel.sorensen@eksempel.dk", roles: "Rådgiver", teams: "Erhverv Nord · Aalborg", status: "Aktiv" },
-  { id: "u2", name: "Anne Holm", email: "anne.holm@eksempel.dk", roles: "Rådgiver, Leder", teams: "Erhverv Nord", status: "Aktiv" },
-  { id: "u3", name: "Sara Lund", email: "sara.lund@eksempel.dk", roles: "Rådgiver", teams: "Erhverv Nord · Aalborg", status: "Aktiv" },
-  { id: "u4", name: "Jonas Kjær", email: "jonas.kjaer@eksempel.dk", roles: "Administrator", teams: "Produkt og viden", status: "Aktiv" },
-  { id: "u5", name: "Karen Vestergaard", email: "karen.vestergaard@eksempel.dk", roles: "Rådgiver", teams: "Erhverv Nord · Hjørring", status: "Inviteret" },
-];
-
-export const mockAdminTeams = [
-  { id: "t1", name: "Erhverv Nord", depth: 0, members: 14, leaders: "Anne Holm (inkl. underteams)" },
-  { id: "t2", name: "Aalborg", depth: 1, members: 8, leaders: "Anne Holm (arvet)" },
-  { id: "t3", name: "Hjørring", depth: 1, members: 6, leaders: "Anne Holm (arvet)" },
-  { id: "t4", name: "Produkt og viden", depth: 0, members: 4, leaders: "Ingen lederscope" },
-];
-
 export const mockAdminVersions = [
   { id: "v1", document: "Betingelser for Erhvervsansvar", version: "4", event: "Klar til review", at: "2026-09-27" },
   { id: "v2", document: "Betingelser for Erhvervsansvar", version: "3", event: "Aktiv · erstatter v2", at: "2025-07-01" },
