@@ -285,7 +285,7 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 
 - Godkendelse af specifikationen og beslutningerne i `docs/07` §17.2
 - Afklaring af konflikterne K-1 til K-3 i `docs/07` §19
-- [AFKLARES]: filtyper i V1, produktkategorier, virusscanning
+- [AFKLARES]: virusscanning af uploads (skal afklares før rigtige dokumenter, ikke blokerende for fase 7)
 
 ---
 

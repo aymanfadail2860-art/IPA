@@ -61,7 +61,7 @@ rækken kan ændres, `updated_at`.
 | Felt | Bemærkning |
 |------|------------|
 | `id`, `name` | Navnet er unikt |
-| `category` | Fritekst i fase 7. Kategorierne er ikke fastlagt **[AFKLARES]** |
+| `category` | Nullable fritekst. Simpel metadata, indtil produktkataloget fastlægges i en senere fase. Fase 7 designer ingen kategoritaksonomi |
 | `status` | `active` / `retired`. Et udgået produkt kan ikke få nye dokumenter |
 
 **`document_types`** — opslagstabel med de otte typer fra `docs/03` §6: `policy_text`
@@ -430,7 +430,8 @@ her, så den ikke forveksles i koden (§17, B-09).
   `FOR UPDATE SKIP LOCKED` gennem en databasefunktion og får en tidsbegrænset lease.
 - **Worker:** en selvstændig Node/TypeScript-proces i repoet (`workers/ingestion/`) uden for
   Next.js-appen. Den deler ikke runtime med brugerrequests (`docs/03` §8, §14). Lokalt
-  startes den med et npm-script. **Hvor den hostes, er ikke låst** (§17).
+  startes den med et npm-script. **Hvor den hostes, er ikke låst** (§17). Workerens
+  adgang er development-only i fase 7 (§14.1).
 - **Applikationen** opretter jobs og læser deres tilstand. Intet andet (`docs/03` §14).
 - **Upload:** Filen går direkte fra browseren til Storage via en signeret upload-URL, som
   serveren udsteder efter permission-tjek. Store PDF'er passerer derfor ikke gennem en
@@ -480,9 +481,14 @@ Grænseværdier er konfiguration (`docs/03` §17 pkt. 9).
 
 ### 5.4 Filtyper
 
-Fase 7 understøtter **PDF med tekstlag**. Scannede PDF'er uden tekstlag fejler synligt med
-årsagen "ingen tekst at læse". OCR, DOCX og andre formater kommer senere. Hvilke filtyper
-V1 skal understøtte, er ikke fastlagt **[AFKLARES]** (§17, B-14).
+Fase 7 understøtter **udelukkende PDF med tekstlag** (§17, B-14):
+
+- ingen OCR: en scannet PDF uden tekstlag fejler synligt med årsagen "ingen tekst at læse"
+- ingen DOCX
+- ingen andre filformater: afvises ved upload (bucket-grænse) og igen ved validering i workeren
+
+Understøttelse af andre formater kan tilføjes i en senere fase bag `Extractor`-interfacet uden
+ændring af datamodellen.
 
 ---
 
@@ -521,7 +527,7 @@ Chunkeren er ren, deterministisk kode uden I/O. Den testes med faste fiktive dok
 | **Modelskifte** | (1) Ny model som `candidate`. (2) `reembed`-jobs genererer vektorer for alle chunks i publicerede, ikke-deaktiverede versioner og i versioner under behandling. (3) Evalueringskørsel. (4) Skifte i én transaktion: den nye bliver `active`, den gamle `retired`. Kræver `system.settings.manage`. Skiftet er blokeret, så længe dækningen ikke er 100 % |
 | **Gamle embeddings** | Bevares, når modellen går på pension (`retired`), men søges ikke. De kan slettes ved en senere, eksplicit oprydning. Hvornår er ikke fastlagt (§17, B-25) |
 | **Deaktiverede versioner** | Beholder deres embeddings, men retrieval-filteret udelukker dem |
-| **Udbyder** | **Ikke låst.** Fase 7 bygger et `Embedder`-interface (`embed(texts, {model}) → vectors`). En konkret udbyder vælges, før der indlæses rigtige dokumenter (§17). Til udvikling og test bruges en **deterministisk test-embedder** (hash af tokens til en fast vektor). Den er tydeligt markeret som mock og kan ikke aktiveres uden for lokale miljøer |
+| **Udbyder** | **Ikke låst.** Fase 7 bygger et `Embedder`-interface (`embed(texts, {model}) → vectors`). En konkret udbyder vælges, før der indlæses rigtige dokumenter (§17). Til udvikling og test bruges en **deterministisk test-embedder** (hash af tokens til en fast vektor). Den er tydeligt markeret som mock, har grad `development` og kan ikke aktiveres uden for `local`/`test` (§9.1) |
 | **Hvor embedding sker** | Chunk-embeddings laves i workeren. Forespørgselsembedding laves server-side i appen ved retrieval, med samme model. Nøglen til udbyderen er en server-secret og kan aldrig have `NEXT_PUBLIC_`-prefix |
 
 ---
@@ -625,9 +631,39 @@ type RankReason =
   scores. Scores sammenlignes kun inden for én forespørgsel.
 - **Begrundelse:** `reasons` forklarer, hvorfor et chunk er valgt. Begrundelsen følger med i
   evidensen.
-- **Fase 7:** Rerankeren er `none`, som bevarer fusionsrækkefølgen. Den er tydeligt markeret i
-  evidensen (`reranker.id = "none"`). **Senere AI-moduler må ikke bruge evidens uden en rigtig
-  reranker i produktion.** Det håndhæves, når AI Gateway bygges (§17, B-18).
+- **Fase 7:** Rerankeren er `none`, som bevarer fusionsrækkefølgen. Den er en
+  test/dev-implementering.
+
+### 9.1 Teknisk guardrail: evidensgrad
+
+```text
+Fase 7 dev/test:   retrieveEvidence → reranker:none → EvidenceSet (grade: "development")
+Production AI:     retrieveEvidence → rigtig reranker → EvidenceSet (grade: "production")
+                   → requireProductionEvidence() → AI-modul
+```
+
+At en senere AI-implementering ikke kan bruge evidens med `reranker = none`, sikres ikke af en
+kommentar eller en regel i CLAUDE.md, men af fire mekanismer i koden:
+
+1. **Implementeringer erklærer deres grad.** Hver `Reranker` og hver `Embedder` har
+   `grade: "development" | "production"`. `none`-rerankeren og test-embedderen er
+   `development`. Det er en egenskab ved implementeringen, som kalderen ikke kan sætte.
+2. **Registret er fail-closed.** Fabrikken, der vælger implementering ud fra konfiguration,
+   nægter at konstruere en `development`-implementering, medmindre runtime-miljøet eksplicit er
+   `IPA_RUNTIME_ENV=local` eller `test`. Mangler variablen, eller har den en anden værdi,
+   behandles miljøet som produktion. Fejlen opstår ved opstart og ikke først ved første kald.
+3. **EvidenceSet'et bærer sin grad.** `retrieveEvidence` beregner `grade` ud fra de faktisk
+   anvendte implementeringer: `production` kun hvis både embedder og reranker er
+   `production`, ellers `development`. Feltet sættes af retrieval-laget og kan ikke angives i
+   requesten.
+4. **Typesystem og en kontrolfunktion.** `requireProductionEvidence(set)` er den eneste måde at
+   få typen `ProductionEvidenceSet` på (branded type). Funktionen kaster en fejl, hvis
+   `grade !== "production"` eller `reranker.id === "none"`. Fase 7 definerer funktionen og
+   typen. Senere AI-moduler og AI Gateway må kun tage imod `ProductionEvidenceSet`, og en
+   guardrail-test i fase 7 fastslår, at typen ikke kan konstrueres på anden vis.
+
+Fase 7 bygger selv ingen AI-forbruger. Mekanismen og dens tests ligger klar, så den første
+AI-fase ikke kan omgå den ved en fejl (§17, B-18).
 
 ---
 
@@ -642,7 +678,9 @@ brugeres adgang.
   "schemaVersion": 1,
   "query": { "text": "…", "mode": "current", "asOf": "2026-09-29", "language": "da",
              "filters": { "productIds": ["…"], "documentTypes": ["terms"] } },
-  "retrieval": { "embeddingModel": "test-hash-embedder@1", "reranker": { "id": "none", "version": "1" },
+  "retrieval": { "grade": "development",
+                 "embeddingModel": { "id": "test-hash-embedder@1", "grade": "development" },
+                 "reranker": { "id": "none", "version": "1", "grade": "development" },
                  "candidateCount": 50, "generatedAt": "2026-09-29T10:00:00Z" },
   "items": [
     {
@@ -722,8 +760,26 @@ Registrering kræver `knowledge.document.write` eller `knowledge.version.publish
   tilgængelig for brugeren, hentes den med som eget evidenselement, også selv om den ikke
   scorede højt nok. Retrieval skjuler aldrig en kendt konflikt (`docs/03` §8: "Retrieval
   returnerer begge").
-- Har brugeren ikke adgang til modparten, markeres evidensen med, at der findes en konflikt
-  med en kilde, brugeren ikke har adgang til. Titel og indhold vises ikke (§17, B-20).
+- Har brugeren ikke adgang til modparten, returneres **kun en neutral konfliktindikator**
+  (§17, B-20):
+
+  ```jsonc
+  "conflicts": [{ "visibility": "restricted",
+                  "message": "Der findes en konflikt mellem kilder, som ikke er fuldt synlig for denne bruger." }]
+  ```
+
+  Om den utilgængelige kilde eksponeres **intet identificerende**. Det gælder dokumenttitel,
+  produktnavn, dokumenttype, versionsbetegnelse, kilde, side, afsnit, overskrift, chunk-id,
+  version-id, dokument-id, gyldighed og uddrag. Det gælder også metadata, der indirekte
+  afslører kilden: `conflictId`, `detection_rule` (fx `overlapping_scope` afslører samme produkt
+  og type), beskrivelse, noter, antal skjulte passager, og hvem der har registreret konflikten.
+- **Håndhævelsen ligger i databasen.** Retrieval-funktionen returnerer for utilgængelige
+  modparter kun det boolske `has_restricted_conflict` pr. chunk. Den skjulte kildes metadata
+  forlader aldrig databasen, heller ikke til app-serveren. `conflicts` og `conflict_passages`
+  kan ikke læses direkte af brugere uden `knowledge.document.write` eller
+  `knowledge.version.publish`.
+- Har en konflikt flere modparter, hvoraf nogle er tilgængelige, returneres de tilgængelige som
+  fuld evidens og de øvrige samlet som én neutral indikator.
 - Løste og afviste konflikter påvirker ikke retrieval.
 
 ---
@@ -747,7 +803,7 @@ layouts).
 | **Version (publiceret)** | Status, gyldighed, godkender, efterfølger | Deaktivér (begrundelse + kategori, bekræftelsesdialog) | `knowledge.version.publish` |
 | **Versioner** | Tidslinje pr. dokument: gyldighedsperioder, publicering, erstatning, deaktivering, huller | — | `write` eller `publish` |
 | **Knowledge Base** | Konfliktkø (begge passager side om side, `docs/04` §14.3); dækningsoversigt pr. produkt (publicerede dokumenter pr. type, manglende typer); videnshuller som tom tilstand ("registreres, når Copilot tages i brug") | Registrér, løs, afvis konflikt | Læs: `write` eller `publish`; løs/afvis: `publish` |
-| **Knowledge Base → Afprøv retrieval** *(forslag, §17, B-21)* | Søgning som den indloggede administrator, der viser EvidenceSet'et med scores og begrundelser | Søg | `knowledge.document.read` |
+| **Knowledge Base → Afprøv retrieval** (§12.1, §17, B-21) | EvidenceSet for den indloggede bruger med tekniske debug-oplysninger | Søg (read-only) | `knowledge.document.read` + Admin-adgang |
 | **Systemindstillinger → Embedding** | Aktiv model, kandidat, re-embedding-dækning (kun visning) | — | `system.settings.manage` |
 
 Fejl- og tomme tilstande følger `docs/04` §14.3 og §18. Statuslabels bruger de danske
@@ -755,6 +811,28 @@ betegnelser fra §2.1, og statusfarver bruger tokens fra fase 5. Det gælder f.e
 `knowledge.authoritative`, `knowledge.historical` og `knowledge.conflict`. Mock-data fra fase 5
 for dokumenter, produkter, versioner og konflikter udskiftes med databasen. Videnshuller og
 læringsindhold forbliver mock.
+
+### 12.1 Afprøv retrieval — read-only
+
+Admin-værktøj, der viser resultatet af retrieval-processen for **den aktuelle bruger** og
+intet andet. Der er ingen mulighed for at søge "som" en anden bruger.
+
+**Read-only, håndhævet teknisk:**
+
+- Kalder den samme `retrieveEvidence` som senere moduler, med samme konfiguration. Værktøjet
+  kan ikke vælge en anden reranker, ændre vægte, scores eller ranking.
+- Ændrer ikke dokumenter, versioner, status, embeddings, permissions, tildelinger eller
+  konflikter. Retrieval-funktionen i databasen er erklæret `stable` og kører i en read-only
+  transaktion, så den ikke kan skrive.
+- Forespørgslen gemmes ikke. Den skrives ikke som knowledge-data, ikke i audit og ikke i
+  applikationslogs, og den indgår ikke i videnshuller eller i evalueringssæt.
+- Input er det samme som i `retrieveEvidence` (§8.2): forespørgsel, tilstand/dato, filtre og
+  `topK`.
+
+**Viser** ud over evidensen (§10) følgende debug-oplysninger: kandidatantal, vektor-, leksikalsk-
+og RRF-score, rank, reranker (id, version, grad), relevance score og begrundelser,
+kildehenvisning, konflikter (med samme skjulningsregel som §11.4), embedding-model og
+evidensgrad (`development` markeres tydeligt: "Udviklingsresultat — ikke produktionsevidens").
 
 Uden for Admin bygges der intet brugerrettet i fase 7. Copilots Kilder og Dokumentvisning
 kommer med AI-fasen.
@@ -805,9 +883,27 @@ fil → checksum → godkender) ligger i selve datamodellen, ikke i audit.
 | **Storage** | Privat bucket `knowledge-originals` (aldrig public). Stien er `{document_id}/{version_id}/original.pdf`, aldrig brugerens filnavn. Bucket-grænser: `allowed_mime_types = application/pdf`, filstørrelsesgrænse (fx 50 MiB, konfiguration). Storage-RLS: upload kun med `write`, læsning kun med `write`/`publish` |
 | **Signerede URL'er** | Upload-URL'er og download-URL'er udstedes af serveren efter permission-tjek og har kort levetid (fx 60 sek.). Download auditeres |
 | **Upload-validering** | Klientvalidering er kun for brugeroplevelsen. Workeren validerer magic bytes, MIME, størrelse, sidetal, kryptering og checksum. PDF-indhold eksekveres aldrig: tekstudtræk kører uden scripts, og indlejrede filer ignoreres. Virusscanning **[AFKLARES]** (§17, B-26) |
-| **Secrets** | Service-role-nøglen findes kun i workerens miljø, aldrig i Next-appen (fase 6's guardrail-test udvides). Nøglen til embedding-udbyderen er en server-secret i app og worker. `.env.example` får tomme pladsholdere. Ingen nøgler i repoet |
-| **Fejlbeskeder** | Et dokument, man ikke har adgang til, svarer som "findes ikke". Eksistens lækkes ikke. Undtagelsen er konfliktmarkeringen i §11.4 (B-20) |
+| **Secrets** | Service-role-nøglen: se §14.1. Nøglen til embedding-udbyderen er en server-secret i app og worker, aldrig med `NEXT_PUBLIC_`-prefix. `.env.example` får tomme pladsholdere. Ingen nøgler i repoet |
+| **Fejlbeskeder** | Et dokument, man ikke har adgang til, svarer som "findes ikke". Eksistens lækkes ikke. Den eneste undtagelse er den neutrale konfliktindikator i §11.4, som ikke identificerer kilden (B-20) |
 | **Misbrug** | Forespørgselslængde begrænses. Rate limiting hører til AI Gateway (`docs/03` §9) og kommer med den |
+
+### 14.1 Workerens adgang — development-only i fase 7
+
+**Dette er ikke den endelige produktionsbeslutning** (§17, B-16).
+
+- Den lokale/dev-worker må i fase 7 bruge Supabase service-role-nøglen. Nøglen ligger kun i
+  workerens runtime-miljø (`workers/ingestion/`).
+- Brugen følger least privilege inden for workerens runtime: workeren kalder kun et snævert sæt
+  navngivne databasefunktioner (tag job, skriv trinresultat, afslut/fejl job) og læser kun
+  originalfiler i `knowledge-originals`. Den laver ingen generelle tabelskrivninger. Funktionerne
+  kontrollerer selv tilstand og versionsstatus og kan fx aldrig publicere.
+- Nøglen må **aldrig** ligge i frontend-kode, i `src/`, i en variabel med `NEXT_PUBLIC_`-prefix
+  eller i build-output, og må aldrig eksponeres til browseren.
+- **Før produktionsdata eller en production-worker** skal en dedikeret least-privilege-adgang
+  for workeren vurderes og fastlægges, fx en særskilt Postgres-rolle med grants kun til
+  workerfunktionerne og en særskilt Storage-adgang.
+- Skiftet kræver ingen ændring af Knowledge Engine-domænemodellen. Workeren taler kun med
+  databasen gennem workerfunktionerne, så kun forbindelsen og rollen, de kaldes med, ændres.
 
 ---
 
@@ -834,9 +930,13 @@ retrieval, Storage, worker end-to-end) og rutetests mod den kørende app (Admin)
 | **Embedding/indeks-integritet** | Hvert chunk i en publiceret version har præcis én embedding med den aktive model, og dimensionen matcher modellen. Modelskifte blokeres ved manglende dækning. Vektorer fra flere modeller blandes aldrig i én søgning. Idempotent genkørsel giver ingen dubletter |
 | **Godkendelses-workflow** | Upload eller gennemført behandling gør aldrig en version synlig. Godkendelse uden `publish` afvises. Manglende metadata, ulæste sider eller manglende embeddings blokerer. Afvisning kræver begrundelse. Alle overgange uden for tabellen i §2.2 afvises |
 | **Publicerings-workflow** | Godkendelse gør versionen synlig for brugere med tildeling i samme transaktion. Deaktivering fjerner den straks fra al retrieval. Audit skrives for hver overgang og kan ikke ændres |
-| **Konflikter** | Strukturel regel opretter kandidat. Retrieval returnerer begge parter med markering. Modpart uden adgang giver kun markering uden indhold. Løst konflikt påvirker ikke retrieval. Konflikt kan ikke løses uden `publish` |
+| **Konflikter** | Strukturel regel opretter kandidat. Retrieval returnerer begge parter med markering, når brugeren har adgang til begge. Løst konflikt påvirker ikke retrieval. Konflikt kan ikke løses uden `publish` |
+| **Konfliktlæk** | Rådgiver med adgang til A, ikke B, og åben konflikt A↔B: (a) evidensen indeholder præcis én neutral indikator med den faste tekst; (b) den serialiserede EvidenceSet indeholder ingen af B's værdier: dokument-id, version-id, chunk-ids, titel, dokumenttype (hvis forskellig fra A's), versionsbetegnelse, kilde, sider, afsnit, overskrifter og uddrag. Det samme gælder `conflictId`, `detection_rule`, beskrivelse og note; (c) det rå resultat fra retrieval-funktionen i databasen indeholder heller ingen af dem; (d) direkte `select` på `conflicts`/`conflict_passages` giver 0 rækker; (e) med adgang til både A og B returneres begge som fuld evidens |
+| **Reranker-guardrail** | `requireProductionEvidence` kaster for `grade = development` og for `reranker.id = "none"`. Fabrikken nægter at konstruere `none` og test-embedderen, når `IPA_RUNTIME_ENV` mangler eller er `production`. `grade` kan ikke sættes via requesten. `ProductionEvidenceSet` kan kun opnås via `requireProductionEvidence` (typetest) |
+| **Afprøv retrieval** | Et kald ændrer ingen rækker i `knowledge` eller `audit` (tællinger og checksums før/efter). Forespørgselsteksten findes ikke i nogen tabel eller log bagefter. Retrieval-funktionen fejler, hvis den forsøger at skrive (read-only). Uden `knowledge.document.read` eller Admin-adgang afvises værktøjet. Resultatet er identisk med `retrieveEvidence` for samme bruger og input |
+| **Filformat** | DOCX, billeder og andre typer afvises ved upload og ved validering i workeren, også hvis filendelsen er `.pdf`. En PDF uden tekstlag giver `processing_failed` med årsagen "ingen tekst at læse" |
 | **Pipeline** | Worker end-to-end på fiktive PDF'er: gyldig → `processed`; krypteret, ingen tekst og forkert type → `processing_failed` med årsag; afbrudt job genoptages efter lease; genforsøg stopper ved `max_attempts` |
-| **Guardrails** | Ingen service-role i `src/`. Retrieval-kode kun server-side. Bucket er privat. Test-embedderen kan ikke aktiveres uden for lokale miljøer |
+| **Guardrails** | Service-role-nøglen findes ikke i `src/`, ikke i `NEXT_PUBLIC_`-variabler og ikke i Next.js' build-output (`.next/`). Den bruges kun i `workers/`. Retrieval-kode kun server-side. Bucket er privat. Test-embedder og `none`-reranker kan ikke aktiveres uden for `local`/`test` |
 
 Fasen er først færdig, når lint, typecheck, enhedstests, pgTAP, integrationstests og build
 består, og adgangsisolationen er demonstreret mod en rigtig lokal Supabase.
@@ -890,14 +990,14 @@ server-side.
 | B-11 | Godkendelse blokeres ved ulæste sider, manglende metadata, manglende embeddings eller overlap. Øvrige advarsler er rådgivende | Ja |
 | B-12 | Deaktivering kræver `publish`, begrundelse og kategori (`invalid`, `withdrawn_by_owner`, `other`) | Ja |
 | B-13 | Publicerede chunks er frosne; ny chunking kræver ny version | Ja |
-| B-14 | Kun PDF med tekstlag i fase 7 | Ja — V1-filtyper **[AFKLARES]** |
+| B-14 | Fase 7 understøtter udelukkende PDF med tekstlag: ingen OCR, ingen DOCX, ingen andre formater. Andre formater kan komme i en senere fase | **Låst for fase 7** |
 | B-15 | Kø i Postgres og selvstændig Node-worker i repoet. Hosting ikke låst | Ja |
-| B-16 | Workerens adgang: service-role-nøgle kun i workerens miljø, begrænset til snævre funktioner. Alternativ: dedikeret Postgres-rolle (mere least privilege, mere opsætning) | Service-role i fase 7; dedikeret rolle vurderes før produktion |
+| B-16 | Lokal/dev-worker må i fase 7 bruge service-role-nøglen efter least privilege inden for workerens runtime. Aldrig i frontend, `src/` eller browseren. **Ikke den endelige produktionsbeslutning:** Dedikeret least-privilege worker-adgang skal vurderes og fastlægges før produktionsdata eller production-worker, uden ændring af domænemodellen (§14.1) | Development-only |
 | B-17 | Ingen logning af retrieval i fase 7 (hører til `ai`) | Ja |
-| B-18 | Reranker `none` i fase 7; AI-moduler må ikke bruge evidens uden rigtig reranker i produktion | Ja |
+| B-18 | `none` er test/dev-reranker i fase 7. En rigtig reranker kræves, før AI-moduler må bruge production-EvidenceSets. Det håndhæves teknisk: grad pr. implementering, fail-closed register, `grade` på EvidenceSet og `requireProductionEvidence()`/`ProductionEvidenceSet` (§9.1) | Ja |
 | B-19 | Leksikalsk søgning med Postgres FTS (`danish` + `simple`) og fusion med RRF | Ja |
-| B-20 | Konflikt med en kilde, brugeren ikke har adgang til: markering uden titel og indhold (alternativ: skjul helt) | Markering uden indhold |
-| B-21 | "Afprøv retrieval" i Knowledge Base (ny skærm, ikke i `docs/04`) | Ja, som admin-værktøj — kan fravælges |
+| B-20 | Kendte konflikter skjules ikke. Med adgang til begge kilder returneres begge. Uden adgang til modparten returneres kun en neutral indikator uden nogen identificerende eller indirekte afslørende metadata. Håndhævet i databasen (§11.4) | Ja |
+| B-21 | "Afprøv retrieval" i Knowledge Base er et read-only admin-værktøj for den aktuelle bruger. Det ændrer intet, gemmer ikke forespørgslen og viser debug-oplysninger (§12.1) | Godkendt |
 | B-22 | Skift af embedding-model kræver `system.settings.manage` og sker som planlagt operation. UI viser kun status | Ja |
 | B-23 | Supabase Storage slås til lokalt (`config.toml`), privat bucket, signerede upload-URL'er, SHA-256 i klienten til dubletdialogen | Ja |
 | B-24 | Nye dependencies: PDF-udtræk i workeren (anbefaling `pdfjs-dist`, Mozilla, Apache-2.0) og til testfixtures `pdf-lib` som devDependency. Ingen andre | Ja |
@@ -909,7 +1009,7 @@ server-side.
 | B-25 | Oprydning af embeddings fra udfasede modeller | Ved første modelskifte |
 | B-26 | Virusscanning af uploads | Før rigtige dokumenter |
 | B-27 | Tilstanden "hvad vidste systemet på tidspunkt T" i retrieval | Når Advise/audit kræver det |
-| B-28 | Produktkategorier | Når produktkataloget fastlægges **[AFKLARES]** |
+| B-28 | Produktkatalog og kategoritaksonomi. Fase 7 har `category` som nullable fritekst og blokeres ikke | Når produktkataloget fastlægges i en senere fase |
 | B-29 | Evalueringssæt med rigtige dokumenter (`docs/03` §13) | Før AI-moduler tages i brug |
 | B-30 | Retention for originalfiler og kasserede versioner (`docs/03` §17 pkt. 5) | Før produktion |
 
@@ -939,8 +1039,8 @@ forbrugere.
 3. Worker: kø, validering, udtræk, normalisering, strukturering og chunking + enhedstests
 4. Embeddings: interface, test-embedder, modeltabel, indeks og integritetstjek
 5. Review, godkendelse, publicering, afvisning og deaktivering
-6. Retrieval: kandidatfunktion, RRF, reranker-interface og evidensformat
-7. Konflikter
+6. Retrieval: kandidatfunktion, RRF, reranker-interface, evidensformat og evidensgrad-guardrail (§9.1)
+7. Konflikter, inkl. neutral indikator håndhævet i databasen (§11.4)
 8. Admin-UI (§12), mock-data udskiftes
 9. Integrations- og rutetests, mutationstest, dokumentation (`docs/07` opdateres fra DRAFT)
 
@@ -964,7 +1064,15 @@ forbrugere.
   du har bedt om. Det er en udsættelse af et non-blocking punkt, ikke en ændring af
   arkitekturen.
 - `docs/03` §7 gør reranking obligatorisk i V1. Fase 7 leverer trinnet med `none`. Kravet
-  opfyldes ved, at AI-moduler ikke må bruge evidens uden rigtig reranker i produktion (B-18).
+  håndhæves teknisk: AI-moduler kan kun tage imod `ProductionEvidenceSet`, som kræver en rigtig
+  reranker (§9.1, B-18).
+- `docs/03` §8 siger, at retrieval ved modstridende dokumenter returnerer begge, og at svaret
+  viser begge kilder. `docs/03` §6 siger, at et dokument uden adgang aldrig må optræde i
+  kontekst eller citeres. Når brugeren kun har adgang til den ene kilde, går adgangsreglen
+  forud, og konflikten vises som neutral indikator (§11.4, B-20). `docs/04` §17.2's kildekort
+  "I konflikt" forudsætter en parret visning. Varianten uden synlig modpart skal have sin
+  tekst, når kildekortet bruges i AI-fasen. Det er et tilfælde, `docs/04` ikke dækker, og
+  ikke en modstrid.
 - `docs/04` §14.4 placerer videnshuller i Knowledge Base. De kan først udfyldes, når der findes
   AI-forespørgsler, så i fase 7 vises en tom tilstand.
 - `docs/03` §4's `document_access_grants.scope` udbygges med modtagerfelter, og "team" betyder
