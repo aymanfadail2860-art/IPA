@@ -4,8 +4,9 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
-adgangskontrol er godkendt (2026-09-29). Fase 7 er ikke fastlagt og påbegyndes først efter
-eksplicit godkendelse.
+adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikation under
+udarbejdelse (`docs/07-knowledge-engine.md`, DRAFT). Der implementeres intet, før
+specifikationen er godkendt.
 
 ---
 
@@ -19,7 +20,8 @@ eksplicit godkendelse.
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
-| 7+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 7 | Knowledge Engine | 📝 Specifikation under udarbejdelse | `docs/07-knowledge-engine.md` (DRAFT) |
+| 8+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
 
@@ -271,6 +273,22 @@ Practice og Advise, produktionsdata.
 
 ---
 
-## Fase 7 og frem
+## Fase 7 — Knowledge Engine
+
+**Status:** 📝 Specifikation under udarbejdelse. `docs/07-knowledge-engine.md` er et DRAFT,
+der afventer godkendelse. Der er ikke ændret kode eller database.
+
+**Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
+menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
+
+**Udestående før implementering:**
+
+- Godkendelse af specifikationen og beslutningerne i `docs/07` §17.2
+- Afklaring af konflikterne K-1 til K-3 i `docs/07` §19
+- [AFKLARES]: filtyper i V1, produktkategorier, virusscanning
+
+---
+
+## Fase 8 og frem
 
 Ikke fastlagt.
