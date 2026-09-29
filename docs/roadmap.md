@@ -3,9 +3,9 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–5 er gennemført og **låst**. Fase 6 — Identity, database og
-adgangskontrol implementeres: implementering og checks er færdige, og fasen afventer
-godkendelse.
+**Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
+adgangskontrol er godkendt (2026-09-29). Fase 7 er ikke fastlagt og påbegyndes først efter
+eksplicit godkendelse.
 
 ---
 
@@ -18,7 +18,7 @@ godkendelse.
 | 3 | Teknisk arkitektur | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
-| 6 | Identity, database og adgangskontrol | 🔄 Implementeres — afventer godkendelse | `docs/06-identity-database-access-control.md` |
+| 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
@@ -238,8 +238,8 @@ Fasen markeres først som gennemført, når alle relevante checks består.
 
 ## Fase 6 — Identity, database og adgangskontrol
 
-**Status:** 🔄 Implementeres. Implementering, checks og verifikation af adgangskontrol er
-færdige. Afventer godkendelse, før fasen markeres som gennemført.
+**Status:** 🔒 Gennemført og låst. Godkendt 2026-09-29 efter gennemgang af implementering,
+tests, sikkerhedsmodel, begrænsninger og de seks implementeringsbeslutninger.
 
 **Leverance:** Migrationer i `supabase/`, Supabase Auth i appen samt
 `docs/06-identity-database-access-control.md`
@@ -260,13 +260,11 @@ Omfang:
 - [x] Lint, typecheck, 44 enhedstests, 9 pgTAP-tests, 45 integrationstests og build består
 - [x] Adgangskontrol verificeret mod rigtig Supabase Auth + Postgres (inkl. mutationstest)
 
-**Udestående (non-blocking, se `docs/06` §14–15):**
+**Godkendte beslutninger:** De seks implementeringsbeslutninger i `docs/06` §14 er godkendt.
 
-- Seks implementeringsbeslutninger til bekræftelse (bl.a. administratorens Analytics og
-  scope på `role_permissions`).
-- Hostet Supabase-projekt (EU) er ikke oprettet. Indtil da viser Vercel-demoen login-siden
-  med besked om manglende forbindelse.
-- Brugeradministration i UI, nulstilling af adgangskode og MFA er ikke bygget.
+**Henlagt til senere faser (bevidst, ikke udestående i fase 6):** hostet/produktions-Supabase
+(Vercel-demoen viser indtil da login-siden med besked om manglende forbindelse), MFA, SSO,
+brugeradministration i UI og nulstilling af adgangskode i UI.
 
 **Uden for omfang:** Knowledge Engine, RAG, embeddings, ingestion, Claude API, AI i Copilot,
 Practice og Advise, produktionsdata.

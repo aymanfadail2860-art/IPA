@@ -1,8 +1,8 @@
 # 06 — Identity, database og adgangskontrol
 
 **Fase:** 6 — Identity, database og adgangskontrol
-**Status:** Implementeres. Implementering og checks er færdige, og adgangskontrollen er
-verificeret mod en rigtig database. Afventer godkendelse.
+**Status:** 🔒 Gennemført og låst (godkendt 2026-09-29). Dokumentet er autoritativt og ændres
+kun ved en eksplicit beslutning om at genåbne det.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/05` (låst) og beslutningerne i `docs/decisions.md`.
 
@@ -286,9 +286,9 @@ browser (Chromium).
 
 ---
 
-## 14. Non-blocking implementeringsbeslutninger (til bekræftelse)
+## 14. Implementeringsbeslutninger (godkendt)
 
-Truffet inden for de låste rammer. De er udledt, ikke oplyst, og lægges frem til bekræftelse:
+Truffet inden for de låste rammer og **godkendt 2026-09-29**:
 
 1. **Scope ligger på `role_permissions`, ikke på `user_roles`.** `docs/03` §4 nævner et scope på
    `user_roles`, mens §10 angiver scope pr. rolle og permission. Teamafgrænsningen ligger i
@@ -301,9 +301,11 @@ Truffet inden for de låste rammer. De er udledt, ikke oplyst, og lægges frem t
    Knowledge-domænet (`document_access_grants`, senere fase), ikke gennem rollen.
 4. **Ingen selvregistrering** og minimum 12 tegn i adgangskoder.
 5. **Læseadgang til audit-loggen via API** er ikke fastlagt i `docs/03`. Indtil videre kan kun
-   databasens ejer og service-role læse den.
+   databasens ejer og service-role læse den. Et relevant UI/API tilføjes senere, hvis det
+   bliver nødvendigt.
 6. **Synlighedskategorier → permissions** (`src/config/visibility.ts`) er stadig den udledte
-   kobling fra fase 5. Den erstattes, når det fulde permission-katalog skrives.
+   kobling fra fase 5. Den videreføres og kan justeres senere, hvis den konkrete
+   permission-model kræver det.
 
 ---
 

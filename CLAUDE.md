@@ -8,9 +8,9 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–5 er gennemført og låst. Fase 6 — Identity, database og adgangskontrol implementeres.**
+**Fase 1–6 er gennemført og låst. Fase 7 er ikke fastlagt og påbegyndes først efter eksplicit godkendelse.**
 
-Låst betyder, at dokumenterne fra fase 1–5 er projektets autoritative specifikation. De
+Låst betyder, at dokumenterne fra fase 1–6 er projektets autoritative specifikation. De
 ændres ikke som led i implementeringen, men kun ved en eksplicit beslutning om at genåbne
 dem.
 
@@ -68,7 +68,7 @@ fase, der ophæver dem, er nået.
 | 3 | Teknisk arkitektur | **Gennemført og låst** |
 | 4 | UI/UX-design | **Gennemført og låst** |
 | 5 | Grundplatform | **Gennemført og låst** |
-| 6 | Identity, database og adgangskontrol | **Implementeres** |
+| 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
 | 7+ | *Ikke fastlagt* | Ikke påbegyndt |
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
