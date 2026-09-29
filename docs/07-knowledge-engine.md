@@ -1,15 +1,17 @@
 # 07 — Knowledge Engine
 
 **Fase:** 7 — Knowledge Engine
-**Status:** DRAFT — afventer godkendelse. Intet i dokumentet er implementeret.
+**Status:** 🔒 Godkendt og låst specifikation (2026-09-29). Klar til implementering, som
+afventer eksplicit godkendelse. Intet i dokumentet er implementeret endnu.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/06` (låst) og `docs/decisions.md`.
 
 Dokumentet er implementeringsspecifikationen for fase 7. Det konkretiserer `docs/03` §4, §6–8
 og §12 til en datamodel, en livscyklus, en pipeline og et retrieval-lag, der kan bygges og
 testes. Arkitekturen fra `docs/03` ændres ikke. Hvor forslaget fortolker eller udbygger et
-låst dokument, er det markeret som **(udledt)**. Konflikter med låste dokumenter står i §19,
-og beslutninger til godkendelse står i §17.
+låst dokument, er det markeret som **(udledt)**. Alle udledninger er godkendt sammen med
+specifikationen. De afklarede konflikter med låste dokumenter står i §19 og beslutningerne i
+§17. Specifikationen ændres kun ved en eksplicit beslutning om at genåbne den.
 
 ---
 
@@ -973,7 +975,7 @@ adgang pr. dokument via `document_access_grants`, de fire `knowledge.*`-permissi
 rollefordeling, audit append-only, dansk sprog i V1 og multilingual-ready model, AI kun
 server-side.
 
-### 17.2 Beslutninger, fase 7 kræver (til godkendelse)
+### 17.2 Beslutninger for fase 7 (godkendt 2026-09-29)
 
 | # | Beslutning | Anbefaling |
 |---|------------|------------|
@@ -1031,7 +1033,7 @@ forbrugere.
 
 ---
 
-## 18. Implementeringsrækkefølge (når specifikationen er godkendt)
+## 18. Implementeringsrækkefølge (når implementeringen er godkendt)
 
 1. Migrationer: `knowledge`-skema, opslagstabeller, dokumenter, versioner, tildelinger, RLS,
    transitionsfunktioner og audit-triggere + pgTAP
@@ -1042,19 +1044,22 @@ forbrugere.
 6. Retrieval: kandidatfunktion, RRF, reranker-interface, evidensformat og evidensgrad-guardrail (§9.1)
 7. Konflikter, inkl. neutral indikator håndhævet i databasen (§11.4)
 8. Admin-UI (§12), mock-data udskiftes
-9. Integrations- og rutetests, mutationstest, dokumentation (`docs/07` opdateres fra DRAFT)
+9. Integrations- og rutetests, mutationstest, dokumentation (implementeringsstatus tilføjes i `docs/07`)
 
 ---
 
-## 19. Konflikter med fase 1–6
+## 19. Afklarede konflikter med fase 1–6
 
-| # | Konflikt | Låst kilde | Forslag |
-|---|----------|------------|---------|
-| **K-1** | Den ønskede livscyklus har **Approved** og **Published** som to tilstande. `docs/03` §12 fastslår, at overgangen til "aktiv" er den eneste, et menneske foretager, og `docs/04` §14.2 har én primær handling, "Godkend som autoritativ". To menneskelige trin (godkend, derefter publicér) ville stride mod begge | `docs/03` §12, `docs/04` §14.1–14.2 | Én menneskelig handling. Godkendelsen registreres, og publiceringen sker i samme transaktion. "Godkendt" og "Aktiv" i `docs/04` §14.1 vises som afledte tilstande ud fra datoen (§3.3). Ønskes to adskilte trin, kræver det, at `docs/03` §12 og `docs/04` §14 genåbnes eksplicit |
-| **K-2** | Den foreslåede struktur `Admin → Knowledge Base → Documents → Document → Versions → Review → Access` indlejrer Dokumenter og Versioner under Knowledge Base. I den låste IA og i `docs/04` §14 er Produkter, Dokumenter, Knowledge Base og Versioner søstersektioner, og Knowledge Base rummer videnshuller, konfliktkø og dækningsoversigt | `docs/02` §2, `docs/04` §14 | Samme views og handlinger, placeret i de låste sektioner (§12). Document → Versions/Review/Access bliver faner og undersider under **Dokumenter** |
-| **K-3** | "Archived" er ikke en låst betegnelse. `docs/03`/`docs/04` bruger **Erstattet** og **Deaktiveret**. Et nyt ord for samme tilstand ville være et synonym, hvilket `CLAUDE.md` §5 forbyder | `docs/03` §8/§12, `docs/04` §14.3, `CLAUDE.md` §5 | Archived → Deaktiveret (`withdrawn`), Superseded → Erstattet. Ingen ny betegnelse |
+Konflikterne blev identificeret under specifikationen og er **lukket** ved godkendelsen den
+2026-09-29. Ingen låste dokumenter er ændret.
 
-**Fortolkninger (ikke konflikter, men lagt frem til bekræftelse):**
+| # | Konflikt | Afgørelse |
+|---|----------|-----------|
+| **K-1** | Det ønskede flow havde Approved og Published som to menneskelige trin. `docs/03` §12 og `docs/04` §14.1–14.2 har én menneskelig handling | **Lukket.** Én menneskelig handling ("Godkend som autoritativ") godkender og publicerer i samme transaktion. Der bygges ikke et separat four-eyes-flow for godkendelse og publicering i fase 7 (§2, §3.2, B-01, B-10) |
+| **K-2** | Den foreslåede struktur indlejrede Dokumenter og Versioner under Knowledge Base, mens de i `docs/02` §2 og `docs/04` §14 er søstersektioner | **Lukket.** Knowledge Engine-administrationen placeres i de låste Admin-sektioner. Knowledge Engine bliver ikke en ny hovedsektion i navigationen (§12, B-02) |
+| **K-3** | "Archived" og "Superseded" er ikke låste betegnelser. Nye ord ville være synonymer (`CLAUDE.md` §5) | **Lukket.** Archived = **Deaktiveret**, Superseded = **Erstattet** (§2.1, B-03) |
+
+**Fortolkninger (ikke konflikter, godkendt med specifikationen):**
 
 - `docs/03` §8/§12 sætter en gammel version til "erstattet", når den nye aktiveres. Med
   fremtidige versioner ville en status, der skifter ved godkendelsen, efterlade en periode

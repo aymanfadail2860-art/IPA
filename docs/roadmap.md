@@ -4,9 +4,9 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
-adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikation under
-udarbejdelse (`docs/07-knowledge-engine.md`, DRAFT). Der implementeres intet, før
-specifikationen er godkendt.
+adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikationen er
+godkendt og låst (2026-09-29) og klar til implementering. Implementeringen påbegyndes først
+efter eksplicit godkendelse.
 
 ---
 
@@ -20,7 +20,7 @@ specifikationen er godkendt.
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
-| 7 | Knowledge Engine | 📝 Specifikation under udarbejdelse | `docs/07-knowledge-engine.md` (DRAFT) |
+| 7 | Knowledge Engine | 🔒 Specifikation godkendt og låst — klar til implementering | `docs/07-knowledge-engine.md` |
 | 8+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
@@ -275,17 +275,20 @@ Practice og Advise, produktionsdata.
 
 ## Fase 7 — Knowledge Engine
 
-**Status:** 📝 Specifikation under udarbejdelse. `docs/07-knowledge-engine.md` er et DRAFT,
-der afventer godkendelse. Der er ikke ændret kode eller database.
+**Status:** 🔒 Specifikation godkendt og låst (2026-09-29) — klar til implementering.
+Implementeringen påbegyndes først efter eksplicit godkendelse. Der er ikke ændret kode eller
+database.
 
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
 
-**Udestående før implementering:**
+**Afgjort:** Beslutningerne i `docs/07` §17.2 er godkendt. Konflikterne K-1 til K-3 er lukket
+(`docs/07` §19).
 
-- Godkendelse af specifikationen og beslutningerne i `docs/07` §17.2
-- Afklaring af konflikterne K-1 til K-3 i `docs/07` §19
-- [AFKLARES]: virusscanning af uploads (skal afklares før rigtige dokumenter, ikke blokerende for fase 7)
+**Udestående (ikke blokerende for fase 7):**
+
+- [AFKLARES]: virusscanning af uploads. Skal afklares før håndtering af rigtige dokumenter og
+  ændrer ikke fase 7-specifikationen.
 
 ---
 
