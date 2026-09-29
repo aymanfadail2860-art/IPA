@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { navItemForPath } from "@/config/navigation";
 import { useShortcutLabel } from "@/hooks/use-shortcut";
+import { useSession } from "@/lib/auth/session";
 
 import { BreadcrumbTrail } from "./breadcrumbs";
 import { Notifications, type NotificationEntry } from "./notifications";
@@ -19,6 +20,7 @@ import { UserMenu } from "./user-menu";
  */
 export function Topbar({ notifications, mockNotice }: { notifications: readonly NotificationEntry[]; mockNotice: string }) {
   const { setSearchOpen, toggleCopilot, copilotOpen, setMobileNavOpen, breadcrumbs } = useShell();
+  const { demo } = useSession();
   const pathname = usePathname();
   const searchShortcut = useShortcutLabel("globalSearch");
   const copilotShortcut = useShortcutLabel("copilot");
@@ -46,11 +48,15 @@ export function Topbar({ notifications, mockNotice }: { notifications: readonly 
       </div>
 
       <span
-        className="hidden shrink-0 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 py-1 text-caption text-fg-secondary @4xl/content:inline-flex"
+        className={
+          demo
+            ? "inline-flex shrink-0 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 py-1 text-caption font-medium text-fg-primary"
+            : "hidden shrink-0 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 py-1 text-caption text-fg-secondary @4xl/content:inline-flex"
+        }
         title={mockNotice}
       >
         <FlaskConical className="size-3.5" aria-hidden />
-        <span aria-hidden>Fiktive data</span>
+        <span aria-hidden>{demo ? "Demo uden login" : "Fiktive data"}</span>
         <span className="sr-only">{mockNotice}</span>
       </span>
 

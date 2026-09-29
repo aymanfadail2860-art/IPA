@@ -64,8 +64,10 @@ tildelingsfelter: `customer_cases.owner_id`, `user_roles.assigned_by`,
 - **Ingen selvregistrering:** konti oprettes af en administrator (`enable_signup = false`).
 - **Adgangskoder:** mindst 12 tegn.
 - **Uden konfiguration:** mangler `NEXT_PUBLIC_SUPABASE_URL` eller
-  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, viser login-siden, at platformen ikke er forbundet. Der
-  findes ingen mock-fallback.
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, kører appen **midlertidigt** som demo uden login på
+  fiktive udviklingsdata med et markeret rolleskift (beslutning B-003 i `docs/decisions.md`).
+  Med en database koblet på er der ingen demo-tilstand og ingen mock-fallback. Demoen fjernes,
+  når Vercel kobles på Supabase til sidst.
 
 ---
 

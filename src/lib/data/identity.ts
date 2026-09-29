@@ -1,6 +1,16 @@
 import "server-only";
 
+import { isDemoMode } from "@/dev/demo/demo-mode";
+import { readDemoRole } from "@/dev/demo/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  demoAdminTeams,
+  demoAdminUsers,
+  demoEmployeesInScope,
+  demoRoleMatrix,
+  demoScopedTeams,
+  demoVisibility,
+} from "@/dev/demo/data";
 import type { ScopedEmployee, TeamNode } from "@/types/domain";
 
 /* Identity reads for the UI. Every query runs as the signed-in user under RLS. */
@@ -11,6 +21,7 @@ function initials(name: string): string {
 
 /** Teams in the signed-in leader's scope (explicit leader_scopes, incl. descendants where set). */
 export async function getMyScopedTeams(): Promise<TeamNode[]> {
+  if (isDemoMode()) return demoScopedTeams(await readDemoRole());
   const supabase = await createSupabaseServerClient();
   const identity = supabase.schema("identity");
   const { data: ids } = await identity.rpc("my_scoped_team_ids");
@@ -27,6 +38,7 @@ export async function getMyScopedTeams(): Promise<TeamNode[]> {
 /** Employees in the signed-in leader's scope, with the scoped teams they belong to. */
 export async function getEmployeesInScope(teams: readonly TeamNode[], myUserId: string): Promise<ScopedEmployee[]> {
   if (teams.length === 0) return [];
+  if (isDemoMode()) return demoEmployeesInScope(teams, myUserId);
   const supabase = await createSupabaseServerClient();
   const identity = supabase.schema("identity");
   const teamName = new Map(teams.map((team) => [team.id, team.name]));
@@ -58,6 +70,7 @@ export interface VisibilityRow {
 
 /** Which leaders can see the signed-in user's data, and under which permissions (docs/04 §13.1). */
 export async function getMyVisibility(): Promise<VisibilityRow[]> {
+  if (isDemoMode()) return demoVisibility(await readDemoRole());
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase.schema("identity").rpc("my_visibility");
   return ((data ?? []) as { leader_id: string; leader_name: string; team_names: string[]; permission: string }[]).map((row) => ({
@@ -70,6 +83,8 @@ export async function getMyVisibility(): Promise<VisibilityRow[]> {
 
 /** Logs a leader's individual-level view as an access event (docs/03 §10). */
 export async function logIndividualAccess(subjectId: string, permission: "learning.progress.read" | "assessment.result.read") {
+  // The demo has no audit log (B-003); the caller has already checked analytics.team.read.
+  if (isDemoMode()) return true;
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.schema("identity").rpc("log_individual_access", { p_subject_id: subjectId, p_permission: permission });
   return !error;
@@ -86,6 +101,7 @@ export interface AdminUserRow {
 
 /** Users with roles and teams — readable only with identity.user.manage (RLS). */
 export async function listUsersForAdmin(): Promise<AdminUserRow[]> {
+  if (isDemoMode()) return demoAdminUsers();
   const supabase = await createSupabaseServerClient();
   const identity = supabase.schema("identity");
   const [{ data: users }, { data: userRoles }, { data: memberships }] = await Promise.all([
@@ -121,6 +137,7 @@ export interface AdminTeamRow {
 
 /** The team hierarchy with member counts and leader scopes — identity.user.manage (RLS). */
 export async function listTeamsForAdmin(): Promise<AdminTeamRow[]> {
+  if (isDemoMode()) return demoAdminTeams();
   const supabase = await createSupabaseServerClient();
   const identity = supabase.schema("identity");
   const [{ data: teams }, { data: memberships }, { data: scopes }, { data: users }] = await Promise.all([
@@ -158,6 +175,7 @@ export interface RoleMatrix {
 
 /** The permission catalogue and role bundles as stored in the database. */
 export async function getRoleMatrix(): Promise<RoleMatrix> {
+  if (isDemoMode()) return demoRoleMatrix();
   const supabase = await createSupabaseServerClient();
   const identity = supabase.schema("identity");
   const [{ data: roles }, { data: permissions }, { data: rolePermissions }] = await Promise.all([

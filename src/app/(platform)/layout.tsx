@@ -7,6 +7,9 @@ import { listMyCases } from "@/lib/data/cases";
 // Modules not yet built (Learn, Practice, Copilot content …) still use development mock data.
 import { MOCK_DATA_NOTICE, mockChanges, mockCopilotConversations, mockSearchIndex } from "@/mocks";
 
+/** Temporary demo without login (decision B-003). */
+const DEMO_NOTICE = "Demo uden login · fiktive data · ikke rigtig adgangskontrol";
+
 export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
   // Server-side guard: no session → /login. The session and its permissions come from
   // Supabase Auth and the identity schema — never from the client.
@@ -30,7 +33,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           searchEntries={mockSearchIndex}
           cases={cases}
           copilotConversation={mockCopilotConversations[0]}
-          mockNotice={MOCK_DATA_NOTICE}
+          mockNotice={session.demo ? DEMO_NOTICE : MOCK_DATA_NOTICE}
         >
           {children}
         </AppShell>

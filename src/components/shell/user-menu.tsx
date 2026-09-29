@@ -1,6 +1,6 @@
 "use client";
 
-import { Keyboard, LogOut, UserRound } from "lucide-react";
+import { Check, FlaskConical, Keyboard, LogOut, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { InitialsAvatar } from "@/components/common/avatar-stack";
@@ -18,10 +18,12 @@ import { usePlatform } from "@/hooks/use-shortcut";
 import { formatShortcut } from "@/config/shortcuts";
 import { signOut } from "@/lib/auth/actions";
 import { useSession } from "@/lib/auth/session";
+import { switchDemoRole } from "@/dev/demo/actions";
+import { DEMO_ROLE_LABELS, DEMO_ROLES } from "@/dev/demo/demo-mode";
 
 /** User menu — identity, own profile and the documented keyboard shortcuts (§20). */
 export function UserMenu() {
-  const { user } = useSession();
+  const { user, demo } = useSession();
   const platform = usePlatform();
   const shortcuts = Object.values(SHORTCUTS)
     .map((definition) => ({ definition, label: formatShortcut(definition, platform) }))
@@ -68,14 +70,35 @@ export function UserMenu() {
           </>
         ) : null}
         <DropdownMenuSeparator />
-        <form action={signOut}>
-          <DropdownMenuItem asChild>
-            <button type="submit" className="w-full">
-              <LogOut aria-hidden />
-              Log ud
-            </button>
-          </DropdownMenuItem>
-        </form>
+        {demo ? (
+          <>
+            {/* Development tool for the demo without login (B-003) — not authorization. */}
+            <DropdownMenuLabel className="flex items-center gap-2 text-caption font-medium text-fg-tertiary">
+              <FlaskConical className="size-3.5" aria-hidden />
+              Demo uden login · vis som
+            </DropdownMenuLabel>
+            {DEMO_ROLES.map((role) => (
+              <form key={role} action={switchDemoRole}>
+                <input type="hidden" name="role" value={role} />
+                <DropdownMenuItem asChild>
+                  <button type="submit" className="w-full" aria-current={demo.role === role ? "true" : undefined}>
+                    {demo.role === role ? <Check aria-hidden /> : <span className="size-4" aria-hidden />}
+                    {DEMO_ROLE_LABELS[role]}
+                  </button>
+                </DropdownMenuItem>
+              </form>
+            ))}
+          </>
+        ) : (
+          <form action={signOut}>
+            <DropdownMenuItem asChild>
+              <button type="submit" className="w-full">
+                <LogOut aria-hidden />
+                Log ud
+              </button>
+            </DropdownMenuItem>
+          </form>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

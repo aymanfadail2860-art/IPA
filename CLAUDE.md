@@ -10,6 +10,10 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 **Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation under udarbejdelse (DRAFT). Der implementeres intet, før specifikationen er godkendt.**
 
+**Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
+projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
+B-003).
+
 Låst betyder, at dokumenterne fra fase 1–6 er projektets autoritative specifikation. De
 ændres ikke som led i implementeringen, men kun ved en eksplicit beslutning om at genåbne
 dem.

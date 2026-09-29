@@ -8,6 +8,11 @@ adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikat
 godkendt og låst (2026-09-29) og klar til implementering. Implementeringen påbegyndes først
 efter eksplicit godkendelse.
 
+> **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
+> fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
+> Supabase (EU), og demo-tilstanden skal fjernes. Fremgangsmåden står i `docs/decisions.md`
+> B-003.
+
 ---
 
 ## Faseoversigt

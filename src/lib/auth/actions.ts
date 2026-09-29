@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 
+import { isDemoMode } from "@/dev/demo/demo-mode";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -16,6 +17,7 @@ function safeNext(value: FormDataEntryValue | null): string {
 }
 
 export async function signIn(_state: SignInState, formData: FormData): Promise<SignInState> {
+  if (isDemoMode()) redirect("/home");
   if (!getSupabaseConfig()) {
     return { error: "Platformen er ikke forbundet til databasen endnu. Kontakt en administrator." };
   }

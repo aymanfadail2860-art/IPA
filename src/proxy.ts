@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isDemoMode } from "@/dev/demo/demo-mode";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 
 /** Routes reachable without a session. */
@@ -15,6 +16,10 @@ const PUBLIC_PATHS = ["/login"];
  */
 export async function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((path) => request.nextUrl.pathname === path);
+  if (isDemoMode()) {
+    // Temporary demo without login (B-003): only when no database is connected.
+    return isPublic ? NextResponse.redirect(new URL("/home", request.url)) : NextResponse.next();
+  }
   const config = getSupabaseConfig();
   if (!config) {
     // Without configuration nobody can be authenticated; the login page explains why.

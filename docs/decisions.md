@@ -5,6 +5,39 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-003 — Midlertidig demo uden login, indtil projektet er færdigt
+
+**Dato:** 29. september 2026
+**Område:** `docs/06-identity-database-access-control.md` §3 (låst dokument, åbnet eksplicit
+på dette ene punkt efter beslutning fra projektejeren)
+
+**Beslutning:** Den offentlige Vercel-demo kører uden login, indtil projektet er færdigt. Så
+kobles demoen på Supabase, og demo-tilstanden fjernes. Demo-tilstanden gælder kun på fiktive
+udviklingsdata og har et tydeligt markeret rolleskift ("Demo uden login · vis som"), der
+ikke er adgangskontrol.
+
+**Sikring:** Demo-tilstanden er kun aktiv, når der **ikke** er forbundet nogen database
+(`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` mangler). Så snart en database er
+koblet på, lokalt, i tests eller i Vercel, gælder login og server-side autorisation præcis
+som i `docs/06`. Demoen kan derfor aldrig vise rigtige data uden login. Rollerne viser stadig
+kun det, deres permissions giver. Fx får Rådgiveren ikke Admin, og Administratoren får ikke
+Analytics. Det er dækket af tests.
+
+**Overvejede alternativer:**
+- *Koble demoen på et hostet Supabase-projekt nu.* Fravalgt af projektejeren for nu og
+  planlagt til sidst.
+- *Lade demoen stå med login-siden uden database.* Fravalgt, fordi demoen så ikke kan ses.
+
+**Begrundelse:** Projektejeren vil kunne se og vise platformen undervejs uden at oprette en
+database, før projektet er færdigt.
+
+**Skal fjernes igen (påmindelse):** Når projektet er færdigt: opret Supabase-projektet (EU),
+kør migrationerne, sæt de to miljøvariabler i Vercel, sæt `DEMO_WITHOUT_LOGIN_ENABLED` til
+`false` og slet `src/dev/demo/`, `src/mocks/demo.ts` og `isDemoMode()`-grenene. Punktet står
+også i `docs/roadmap.md` og `CLAUDE.md` §1.
+
+---
+
 ## B-002 — Skitsen for "Bed AI om forslag" får fast ramme
 
 **Dato:** 28. september 2026

@@ -2,7 +2,10 @@ import "server-only";
 
 import { cache } from "react";
 
+import { isDemoMode } from "@/dev/demo/demo-mode";
+import { readDemoRole } from "@/dev/demo/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { demoCases } from "@/dev/demo/data";
 import type { CaseParticipant, CaseStatus, CaseSummary } from "@/types/domain";
 
 /*
@@ -58,6 +61,7 @@ async function toSummary(row: CaseRow): Promise<CaseSummary> {
 
 /** Cases the signed-in user owns or is assigned to. */
 export const listMyCases = cache(async (): Promise<CaseSummary[]> => {
+  if (isDemoMode()) return demoCases(await readDemoRole());
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .schema("advise")
@@ -71,6 +75,7 @@ export const listMyCases = cache(async (): Promise<CaseSummary[]> => {
 /** One case, or null when it does not exist OR the user has no access (indistinguishable). */
 export async function getCase(caseId: string): Promise<CaseSummary | null> {
   if (!/^[0-9a-f-]{36}$/i.test(caseId)) return null;
+  if (isDemoMode()) return demoCases(await readDemoRole()).find((summary) => summary.id === caseId) ?? null;
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .schema("advise")

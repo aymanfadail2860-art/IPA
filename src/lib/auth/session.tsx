@@ -3,6 +3,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { PermissionGrant } from "@/lib/auth/permissions";
+import type { DemoRole } from "@/dev/demo/demo-mode";
 
 /**
  * The session the UI renders against.
@@ -23,6 +24,8 @@ export interface SessionUser {
 export interface Session {
   user: SessionUser;
   grants: readonly PermissionGrant[];
+  /** Set only in the temporary demo mode without login (decision B-003). */
+  demo?: { role: DemoRole };
 }
 
 const SessionContext = createContext<Session | null>(null);

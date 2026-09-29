@@ -5,6 +5,9 @@ import { cache } from "react";
 
 import { meetsRequirement, type PermissionGrant, type PermissionKey, type PermissionRequirement, type PermissionScope } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
+import { isDemoMode } from "@/dev/demo/demo-mode";
+import { readDemoRole } from "@/dev/demo/server";
+import { demoSession } from "@/dev/demo/data";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -38,6 +41,8 @@ function initials(name: string): string {
  * the account has no active platform user, or when Supabase is not configured.
  */
 export const getServerSession = cache(async (): Promise<Session | null> => {
+  // Temporary demo without login (B-003): only when no database is connected.
+  if (isDemoMode()) return demoSession(await readDemoRole());
   if (!getSupabaseConfig()) return null;
   const supabase = await createSupabaseServerClient();
 
