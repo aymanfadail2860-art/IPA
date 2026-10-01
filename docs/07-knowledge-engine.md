@@ -1,8 +1,8 @@
 # 07 — Knowledge Engine
 
 **Fase:** 7 — Knowledge Engine
-**Status:** 🔒 Godkendt og låst specifikation (2026-09-29). Klar til implementering, som
-afventer eksplicit godkendelse. Intet i dokumentet er implementeret endnu.
+**Status:** 🔒 Godkendt og låst specifikation (2026-09-29). **Implementeret — afventer
+godkendelse** (2026-10-01). Implementeringsstatus, afklaringer og testresultater står i §20.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/06` (låst) og `docs/decisions.md`.
 
@@ -1121,3 +1121,105 @@ Konflikterne blev identificeret under specifikationen og er **lukket** ved godke
 - `docs/03` §4's `document_access_grants.scope` udbygges med modtagerfelter, og "team" betyder
   her teamets medlemmer (B-09). `docs/03` §4 siger selv, at modellen ikke er en endelig
   SQL-model.
+
+---
+
+## 20. Implementeringsstatus (2026-10-01) — afventer godkendelse
+
+Alle ni trin i §18 er implementeret. Fasen er **ikke** markeret som gennemført. Det sker
+først ved en eksplicit godkendelse. Specifikationen (§0–§19) er ikke ændret under
+implementeringen, bortset fra beslutningerne B-005 og B-006 (`docs/decisions.md`), som blev
+truffet undervejs.
+
+### 20.1 Hvad der er bygget
+
+| Trin | Placering |
+|------|-----------|
+| 1 Skema, RLS, transitioner, audit | `supabase/migrations/20261001000100_knowledge_foundation.sql` |
+| 2 Storage og upload | `…000200_knowledge_storage.sql`, `src/lib/knowledge/upload-*.ts` |
+| 3 Worker | `workers/ingestion/` (kø, validering, udtræk, normalisering, struktur, chunking) og `…000300_knowledge_ingestion.sql` |
+| 4 Embeddings | `…000400_knowledge_embeddings.sql`, `src/lib/knowledge/core/` (interface, test-embedder, register) |
+| 5 Review og publicering | `…000500_knowledge_review.sql`, `src/lib/knowledge/review-actions.ts` |
+| 6 Retrieval og evidensgrad | `…000600_knowledge_retrieval.sql`, `src/lib/knowledge/retrieval*.ts`, `core/{fusion,reranker,selection,evidence}.ts` |
+| 7 Konflikter og huller | `…000700_knowledge_conflicts.sql` |
+| 8 Admin-UI | `src/app/(platform)/admin/{products,documents,knowledge-base,versions,settings}`, `src/components/knowledge-admin/` |
+| 9 Tests og dokumentation | `src/tests/`, `supabase/tests/database/`, dette afsnit |
+
+### 20.2 Afklaringer under implementeringen (udledt — til bekræftelse)
+
+Punkterne nedenfor er implementeringsvalg, som specifikationen ikke afgør. De ændrer ingen
+låste krav, men lægges frem til bekræftelse.
+
+1. **Opstartstjekket (§9.1 pkt. 2).** Ved serverstart konstruerer registret den konfigurerede
+   reranker (`IPA_RERANKER`, standard `none`). Er implementeringen ikke tilladt i miljøet,
+   logges fejlen ved opstart, og retrieval forbliver slået fra (fail-closed). Resten af
+   platformen kører videre. Appen stopper ikke. Embedderen afhænger af den aktive model i
+   databasen og kontrolleres derfor ved første kald i appen. Workeren kontrollerer alle
+   modeller ved sin egen opstart.
+2. **Test-modellen** (`test:test-hash-embedder@1`) oprettes af udviklingsseedet
+   (`scripts/seed-dev.mjs`), ikke af en migration. Der oprettes intet HNSW-indeks for den, så
+   vektorsøgningen med test-modellen er en eksakt scanning. Iterative index scans slås til
+   transaktionslokalt i funktionen (`set_config`), fordi en funktionsattribut kræver
+   superbruger.
+3. **`none`-rerankerens score** er fusionsscoren relativt til forespørgslens bedste kandidat
+   (topkandidaten = 1). Tallene i `DEFAULT_RETRIEVAL_CONFIG` (`candidateK` 50, `rerankN` 30,
+   `topK` 8, `maxPerVersion` 3, `minScore` 0,1, RRF-k 60) er foreløbig konfiguration. Med
+   test-embedderen giver vektorsøgningen altid de nærmeste naboer, også uden reel lighed.
+   Scoren vises i "Afprøv retrieval".
+4. **Sammenlagte nabochunks** bliver ét evidenselement. `chunkId` er det første chunk, og det
+   nye felt `chunkIds` lister alle chunks. Uddraget genskabes præcist som `[char_start,
+   char_end)`. Kan teksten imellem ikke genskabes, lægges chunks ikke sammen.
+5. **Konfliktformatet.** En synlig konflikt har et diskriminatorfelt `visibility: "visible"`
+   ved siden af `conflictId`, `status` og `counterpartEvidenceId`. Den neutrale indikator er
+   uændret fra §11.4.
+6. **Modpart på versionsniveau.** For `overlapping_scope` hentes modpartsdokumentets bedste
+   passage for samme forespørgsel. Findes ingen, bruges versionens første chunk.
+   Modparter hentes uden klientens filtre, fordi en kendt konflikt aldrig skjules, og
+   modparternes egne konflikter følges, indtil der ikke kommer flere.
+7. **Strukturelle regler.** `duplicate_content`s "forskellig metadata" er fortolket som andet
+   produkt eller anden dokumenttype. `overlapping_scope` følger §11.2 bogstaveligt, uden
+   sprogbetingelse. Kandidater registreres ved publicering, én konflikt pr. regel og
+   versionspar. En afvist kandidat oprettes ikke igen. Kandidater vises allerede i
+   kvalitetsrapporten under review.
+8. **Manuel registrering** i Admin sker på versionsniveau (to versioner og en beskrivelse).
+   Databasefunktionen understøtter også passager på chunkniveau. Versioner med status
+   publiceret, klar til review og under review kan vælges.
+9. **Huller (B-006).** Advarslen `gap_after` under review, når en ny version har en slutdato
+   før forgængerens, er bevaret som rådgivende advarsel (§3.5 pkt. 5). Admins hultilstand
+   følger definitionen i §3.5 pkt. 6.
+10. **Videnshuller.** Knowledge Base viser en tom tilstand (§12 og §19). Admin-forsiden viser
+    stadig fase 5's markerede mock-videnshuller ("videnshuller … forbliver mock", §12).
+11. **`sources`** kan kun læses med `write`/`publish`. Retrieval får derfor kildetypen gennem
+    funktionen `knowledge.source_type`, som kun udleverer typen.
+12. **Demoen uden database (B-003)** viser fase 5's markerede mock-rækker i de nye visninger.
+    Handlinger, review-skærmen og "Afprøv retrieval" er ikke tilgængelige i demoen.
+
+### 20.3 Tests
+
+| Lag | Resultat |
+|-----|----------|
+| Lint, typecheck (app og worker), build | Består |
+| Enhedstests (Vitest) | 148 |
+| pgTAP | 238 (identity 9, foundation 40, storage 11, ingestion 23, embeddings 21, review 41, retrieval 39, conflicts 54) |
+| Integrations- og rutetests mod lokal Supabase og den kørende app | 93 |
+
+**Mutationstests.** Hver mekanisme blev fjernet eller svækket enkeltvis, testene blev kørt, og
+koden blev gendannet. Bagefter bestod alle tests igen.
+
+- *Godkendelsens blokeringstjek:* 8 tests fejler, når tjekket fjernes.
+- *Evidensgrad-guardrailen (§9.1):* 16 af 16 mutationer fanges. De omfatter hvert tjek i
+  `requireProductionEvidence`, beregningen af grad, frysningen, fail-closed `runtimeEnv`,
+  registrets gradtjek for reranker og embedder, implementeringernes erklærede grad,
+  opstartstjekket, `server-only` og det mærkede type (via `tsc`).
+- *Database:* den neutrale indikator i `evidence_conflicts` fanges. Det samme gør RLS på
+  chunks og konflikter, adgangsfiltret i `search_chunks` og RLS på versioner og chunks. Det
+  gælder også, når begge statuskrav for deaktiverede versioner fjernes. Kun ét af de to
+  ækvivalente statuskrav i samme forespørgsel kan fjernes uden testfejl, fordi det andet er en
+  bevidst redundans.
+
+### 20.4 Ikke afgjort
+
+- Virusscanning af uploads **[AFKLARES]** (B-26).
+- Workerens adgang er development-only (§14.1, B-16).
+- Embedding- og reranking-udbyder er ikke valgt (§17.4).
+

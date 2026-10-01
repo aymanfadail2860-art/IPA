@@ -5,7 +5,7 @@ status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
 adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikationen er
-godkendt og låst (2026-09-29), og implementeringen er i gang (godkendt 2026-10-01).
+godkendt og låst (2026-09-29) og **implementeret — afventer godkendelse** (2026-10-01).
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -24,7 +24,7 @@ godkendt og låst (2026-09-29), og implementeringen er i gang (godkendt 2026-10-
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
-| 7 | Knowledge Engine | 🔄 Specifikation godkendt og låst — implementering i gang | `docs/07-knowledge-engine.md` |
+| 7 | Knowledge Engine | 🟡 Implementeret — afventer godkendelse | `docs/07-knowledge-engine.md` |
 | 8+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
@@ -279,9 +279,10 @@ Practice og Advise, produktionsdata.
 
 ## Fase 7 — Knowledge Engine
 
-**Status:** 🔄 Specifikation godkendt og låst (2026-09-29) — implementering i gang
-(godkendt 2026-10-01). Implementeringen følger rækkefølgen i `docs/07` §18. Fasen markeres
-som "Implementeret — afventer godkendelse", når alle trin og checks består.
+**Status:** 🟡 Implementeret — afventer godkendelse (2026-10-01). Alle ni trin i `docs/07`
+§18 er bygget, og lint, typecheck, build, enhedstests, pgTAP samt integrations- og rutetests
+består. Status, afklaringer til bekræftelse og mutationstests står i `docs/07` §20. Fasen
+markeres først som gennemført ved eksplicit godkendelse.
 
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
@@ -293,6 +294,7 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 
 - [AFKLARES]: virusscanning af uploads. Skal afklares før håndtering af rigtige dokumenter og
   ændrer ikke fase 7-specifikationen.
+- Afklaringerne i `docs/07` §20.2 skal bekræftes.
 
 ---
 

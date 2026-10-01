@@ -8,7 +8,7 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation godkendt og låst — implementering i gang** (`docs/07-knowledge-engine.md`).
+**Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation godkendt og låst — implementeret, afventer godkendelse** (`docs/07-knowledge-engine.md` §20).
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -73,7 +73,7 @@ fase, der ophæver dem, er nået.
 | 4 | UI/UX-design | **Gennemført og låst** |
 | 5 | Grundplatform | **Gennemført og låst** |
 | 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
-| 7 | Knowledge Engine | **Specifikation godkendt og låst — implementering i gang** |
+| 7 | Knowledge Engine | **Implementeret — afventer godkendelse** (specifikation godkendt og låst) |
 | 8+ | *Ikke fastlagt* | Ikke påbegyndt |
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
@@ -95,7 +95,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
-| `docs/07-knowledge-engine.md` | 7 | Oprettet — specifikation godkendt og låst, implementering i gang |
+| `docs/07-knowledge-engine.md` | 7 | Oprettet — specifikation godkendt og låst, implementeret, afventer godkendelse |
 | `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

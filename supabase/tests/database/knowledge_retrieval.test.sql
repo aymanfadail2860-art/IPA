@@ -5,7 +5,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(36);
+select plan(39);
 
 -- ---------------------------------------------------------------------------
 -- Fiktive data
@@ -14,11 +14,20 @@ insert into auth.users (id, email, aud, role, raw_user_meta_data) values
   ('70000000-0000-4000-a000-000000000001', 's.admin@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Søgeadmin"}'),
   ('70000000-0000-4000-a000-000000000002', 's.hist@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Rådgiver med historik"}'),
   ('70000000-0000-4000-a000-000000000003', 's.read@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Rådgiver uden historik"}'),
-  ('70000000-0000-4000-a000-000000000004', 's.none@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Rådgiver uden tildelinger"}');
+  ('70000000-0000-4000-a000-000000000004', 's.none@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Rådgiver uden tildelinger"}'),
+  ('70000000-0000-4000-a000-000000000005', 's.writer@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Forvalter uden læseret"}');
 insert into identity.user_roles (user_id, role_id)
 select u.id, r.id from identity.users u join identity.roles r on r.key = case u.auth_id
   when '70000000-0000-4000-a000-000000000001' then 'administrator' else 'advisor' end
-where u.auth_id::text like '70000000-0000-4000-a000-00000000000_';
+where u.auth_id::text like '70000000-0000-4000-a000-00000000000_' and u.auth_id <> '70000000-0000-4000-a000-000000000005';
+
+-- En rolle med forvaltning (knowledge.document.write) men uden læserettighed: RLS lader en
+-- forvalter se versionerne, men retrieval må kun bruge læseadgang (filteret i search_chunks).
+insert into identity.roles (key, name) values ('pgtap_writer', 'pgTAP Forvalter');
+insert into identity.role_permissions (role_id, permission_id, scope)
+select r.id, p.id, 'all' from identity.roles r, identity.permissions p where r.key = 'pgtap_writer' and p.key = 'knowledge.document.write';
+insert into identity.user_roles (user_id, role_id)
+select u.id, r.id from identity.users u, identity.roles r where u.auth_id = '70000000-0000-4000-a000-000000000005' and r.key = 'pgtap_writer';
 
 update knowledge.embedding_models set status = 'retired', retired_at = now() where status in ('active', 'candidate');
 insert into knowledge.embedding_models (id, provider, model_name, model_version, dimensions, status, activated_at)
@@ -174,6 +183,15 @@ set local role authenticated;
 select is(pg_temp.versions('trækfuglepolice'), '{}'::text[], 'en deaktiveret version findes aldrig i retrieval — heller ikke for administrator');
 select is(pg_temp.versions('trækfuglepolice', 'as_of', '2021-01-01'), '{}'::text[], '— heller ikke historisk');
 select is(pg_temp.versions('zebrakvæg'), array['Y1:current'], 'administratorens rolle med scope "all" giver læseadgang (permission, ikke rollenavn)');
+reset role;
+
+select pg_temp.as_user('70000000-0000-4000-a000-000000000005');
+set local role authenticated;
+select ok((select count(*) from knowledge.document_versions where id = '74000000-0000-4000-a000-000000000002') = 1,
+  'forvalteren ser versionen gennem RLS (forvaltning)');
+select is(pg_temp.versions('gradvis forurening'), '{}'::text[],
+  'men forvaltning giver ingen retrieval: search_chunks filtrerer selv på læseadgang');
+select is(pg_temp.versions('trækfuglepolice', 'as_of', '2021-01-01'), '{}'::text[], '— og finder heller ikke den deaktiverede version');
 reset role;
 
 set local role anon;
