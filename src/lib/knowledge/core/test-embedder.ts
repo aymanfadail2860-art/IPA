@@ -48,13 +48,14 @@ export function hashEmbedding(text: string, dimensions: number): number[] {
   return vector.map((value) => Math.round((value / norm) * 1e6) / 1e6);
 }
 
+/** Only the registry constructs it (registry.ts); frozen, so its grade cannot be changed. */
 export function createTestEmbedder(): Embedder {
-  return {
+  return Object.freeze({
     id: `${TEST_EMBEDDER.provider}:${TEST_EMBEDDER.model_name}@${TEST_EMBEDDER.model_version}`,
-    grade: "development",
+    grade: "development" as const,
     dimensions: TEST_EMBEDDER.dimensions,
-    async embed(texts) {
+    async embed(texts: string[]) {
       return texts.map((text) => hashEmbedding(text, TEST_EMBEDDER.dimensions));
     },
-  };
+  });
 }

@@ -1,7 +1,7 @@
 /**
  * The eight document types from docs/03 §6 (docs/07 §1.2), as seeded in
  * supabase/migrations/20261001000100_knowledge_foundation.sql. Kept in sync by
- * src/tests/knowledge-catalog.test.ts. No further types are invented.
+ * src/tests/knowledge-upload.test.ts. No further types are invented.
  */
 export const DOCUMENT_TYPES = [
   { key: "policy_text", label: "Policetekst" },
