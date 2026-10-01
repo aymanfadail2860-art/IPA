@@ -5,8 +5,7 @@ status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
 adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikationen er
-godkendt og låst (2026-09-29) og klar til implementering. Implementeringen påbegyndes først
-efter eksplicit godkendelse.
+godkendt og låst (2026-09-29), og implementeringen er i gang (godkendt 2026-10-01).
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -25,7 +24,7 @@ efter eksplicit godkendelse.
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
-| 7 | Knowledge Engine | 🔒 Specifikation godkendt og låst — klar til implementering | `docs/07-knowledge-engine.md` |
+| 7 | Knowledge Engine | 🔄 Specifikation godkendt og låst — implementering i gang | `docs/07-knowledge-engine.md` |
 | 8+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
@@ -280,9 +279,9 @@ Practice og Advise, produktionsdata.
 
 ## Fase 7 — Knowledge Engine
 
-**Status:** 🔒 Specifikation godkendt og låst (2026-09-29) — klar til implementering.
-Implementeringen påbegyndes først efter eksplicit godkendelse. Der er ikke ændret kode eller
-database.
+**Status:** 🔄 Specifikation godkendt og låst (2026-09-29) — implementering i gang
+(godkendt 2026-10-01). Implementeringen følger rækkefølgen i `docs/07` §18. Fasen markeres
+som "Implementeret — afventer godkendelse", når alle trin og checks består.
 
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.

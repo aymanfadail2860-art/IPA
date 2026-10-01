@@ -8,15 +8,15 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation under udarbejdelse (DRAFT). Der implementeres intet, før specifikationen er godkendt.**
+**Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation godkendt og låst — implementering i gang** (`docs/07-knowledge-engine.md`).
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
 B-003).
 
-Låst betyder, at dokumenterne fra fase 1–6 er projektets autoritative specifikation. De
-ændres ikke som led i implementeringen, men kun ved en eksplicit beslutning om at genåbne
-dem.
+Låst betyder, at dokumenterne fra fase 1–6 og den godkendte specifikation for fase 7 er
+projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
+ved en eksplicit beslutning om at genåbne dem.
 
 Se `docs/roadmap.md` for den aktuelle status. Produktdefinitionen ligger i
 `docs/01-product-definition.md` og informationsarkitekturen i
@@ -67,13 +67,13 @@ fase, der ophæver dem, er nået.
 
 | Fase | Navn | Status |
 |------|------|--------|
-| 1 | Produktdefinition | **Gennemført** |
-| 2 | Informationsarkitektur | **Gennemført** |
+| 1 | Produktdefinition | **Gennemført og låst** |
+| 2 | Informationsarkitektur | **Gennemført og låst** |
 | 3 | Teknisk arkitektur | **Gennemført og låst** |
 | 4 | UI/UX-design | **Gennemført og låst** |
 | 5 | Grundplatform | **Gennemført og låst** |
 | 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
-| 7 | Knowledge Engine | **Specifikation under udarbejdelse** |
+| 7 | Knowledge Engine | **Specifikation godkendt og låst — implementering i gang** |
 | 8+ | *Ikke fastlagt* | Ikke påbegyndt |
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
@@ -95,7 +95,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
-| `docs/07-knowledge-engine.md` | 7 | Oprettet (DRAFT) |
+| `docs/07-knowledge-engine.md` | 7 | Oprettet — specifikation godkendt og låst, implementering i gang |
 | `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

@@ -377,8 +377,12 @@ Følgende er bekræftet som bevidste antagelser i fase 5. De er ikke krav:
 ## 12. Kom i gang lokalt
 
 **Demo:** https://ipa-alpha-self.vercel.app — Vercel-projektet `ipa`, koblet til `main`, så
-hvert push til `main` deployes automatisk. Miljøvariablen `NEXT_PUBLIC_IPA_DEV_TOOLS=true` er
-sat, så rolle-switcheren er aktiv. Alle data er fiktive udviklingsdata.
+hvert push til `main` deployes automatisk. Rolle-switcheren og `NEXT_PUBLIC_IPA_DEV_TOOLS` fra
+fase 5 findes ikke længere. Siden fase 6 kræver platformen login via Supabase Auth
+(`docs/06-identity-database-access-control.md`). Er der ingen database koblet på, som i
+Vercel-demoen indtil videre, kører appen midlertidigt som demo uden login på fiktive
+udviklingsdata med et markeret rolleskift ("Demo uden login · vis som"). Det er beslutning
+B-003 i `docs/decisions.md`. Rettelsen af denne note er B-004.
 
 
 Kræver Node.js 20.9 eller nyere (udviklet på Node 22).

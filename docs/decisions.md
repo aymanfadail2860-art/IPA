@@ -5,6 +5,30 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-004 — Demo-noten i `docs/05` §12 beskriver den nuværende tilstand
+
+**Dato:** 1. oktober 2026
+**Område:** `docs/05-foundation-implementation.md` §12 (låst dokument, åbnet eksplicit på
+dette ene punkt efter beslutning fra projektejeren)
+
+**Beslutning:** Demo-noten i §12 er rettet. Den nævnte miljøvariablen
+`NEXT_PUBLIC_IPA_DEV_TOOLS=true` og den aktive rolle-switcher, som begge blev fjernet i fase 6.
+Noten beskriver nu, at platformen kræver login via Supabase Auth, og at appen uden
+databaseforbindelse kører som demo uden login (B-003). Resten af `docs/05` er uændret.
+
+**Overvejede alternativer:**
+- *Lade noten stå som historisk beskrivelse af fase 5.* Fravalgt, fordi noten beskriver en
+  kørende demo og en miljøvariabel, der ikke længere virker, og derfor kan misforstås som
+  gældende vejledning.
+- *Flytte demo-oplysningen til `docs/06` og slette noten i `docs/05`.* Fravalgt, fordi
+  CLAUDE.md §5 siger, at det dokument, der ejer emnet, rettes frem for at dublere. Demo-adressen
+  blev dokumenteret i `docs/05`.
+
+**Begrundelse:** Statusoverblikket den 1. oktober 2026 viste, at noten modsagde koden og
+`docs/06`. Et låst dokument, der beskriver noget, som ikke findes, er værre end en rettelse.
+
+---
+
 ## B-003 — Midlertidig demo uden login, indtil projektet er færdigt
 
 **Dato:** 29. september 2026
