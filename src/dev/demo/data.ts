@@ -15,3 +15,4 @@ export {
   demoSession,
   demoVisibility,
 } from "@/mocks/demo";
+export { demoKnowledgeConflicts, demoKnowledgeCoverage, demoKnowledgeProducts, demoKnowledgeVersions } from "@/mocks/demo-knowledge";

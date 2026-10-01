@@ -13,6 +13,8 @@ import { sourceAccessibleName, sourceLocation, sourceStatus } from "./source-val
  * SourceCard — level 2 of the citation UX (docs/04-ui-ux-design.md §17). Always shows
  * number, title, version, section and page, a short excerpt and validity with icon + text.
  * Variants: current, historical (tinted), in conflict (conflict edge) and deactivated.
+ * A repeated lead-in is shown as context above the excerpt, visually separated from the
+ * quoted passage, so "undtagelse 7" can be read with the list it belongs to (B-005).
  */
 export function SourceCard({
   source,
@@ -54,7 +56,13 @@ export function SourceCard({
         </div>
       </header>
 
-      <blockquote className="mt-3 flex gap-2 text-body text-fg-secondary">
+      {source.leadIn ? (
+        <p className="mt-3 border-l-2 border-border-strong pl-2 text-caption text-fg-tertiary">
+          <span className="sr-only">Indledning til uddraget: </span>
+          {source.leadIn}
+        </p>
+      ) : null}
+      <blockquote className={cn("flex gap-2 text-body text-fg-secondary", source.leadIn ? "mt-1.5" : "mt-3")}>
         <Quote className="mt-0.5 size-3.5 shrink-0 text-fg-tertiary" aria-hidden />
         <p className="line-clamp-4">{source.excerpt}</p>
       </blockquote>

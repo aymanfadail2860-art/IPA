@@ -21,6 +21,11 @@ export interface SourceReference {
   section: string;
   page?: number;
   excerpt: string;
+  /**
+   * Repeated introduction of a split list or table (e.g. "Forsikringen dækker ikke:"). Context,
+   * not part of the quoted passage — shown separated from the excerpt (B-005).
+   */
+  leadIn?: string;
   validity: SourceValidity;
   validFrom: IsoDate;
   validTo?: IsoDate;

@@ -4,22 +4,15 @@ import { notFound } from "next/navigation";
 import { AccessDenied } from "@/components/common/access-denied";
 import { adminSectionById } from "@/config/admin-sections";
 import { ADMIN_REQUIREMENT } from "@/config/navigation";
-import { SHORTCUTS } from "@/config/shortcuts";
 import { authorize } from "@/lib/auth/server-session";
 import { getRoleMatrix, listTeamsForAdmin, listUsersForAdmin } from "@/lib/data/identity";
-// Documents, products, learning content and versions are later phases: mock data.
-import {
-  mockAdminDocuments,
-  mockAdminLearningContent,
-  mockAdminProducts,
-  mockAdminVersions,
-  mockDocumentConflicts,
-  mockKnowledgeGaps,
-} from "@/mocks";
+// Learning content is a later phase: mock data. Products, documents, Knowledge Base, versions and
+// settings have their own routes backed by the database (docs/07 §12).
+import { mockAdminLearningContent } from "@/mocks";
 
 import { AdminSectionView } from "./admin-section-view";
 
-const SECTIONS = ["products", "documents", "knowledge-base", "learning-content", "users", "teams", "permissions", "versions", "settings"];
+const SECTIONS = ["learning-content", "users", "teams", "permissions"];
 /** Sections backed by the identity database require identity.user.manage (also enforced by RLS). */
 const IDENTITY_SECTIONS = ["users", "teams", "permissions"];
 
@@ -44,13 +37,7 @@ export default async function AdminSectionPage(props: PageProps<"/admin/[section
     <AdminSectionView
       section={section}
       data={{
-        documents: mockAdminDocuments,
-        products: mockAdminProducts,
-        gaps: mockKnowledgeGaps,
-        conflicts: mockDocumentConflicts,
         learningContent: mockAdminLearningContent,
-        versions: mockAdminVersions,
-        shortcuts: Object.values(SHORTCUTS),
         ...identityData,
       }}
     />
