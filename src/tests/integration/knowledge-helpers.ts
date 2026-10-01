@@ -26,6 +26,8 @@ export interface UploadOptions {
   validFrom?: string | null;
   validTo?: string | null;
   contentType?: string;
+  /** Declared checksum (defaults to the real SHA-256 of the bytes). */
+  declaredChecksum?: string;
 }
 
 export interface UploadedVersion {
@@ -62,7 +64,7 @@ export async function uploadVersion(client: SupabaseClient, bytes: Uint8Array, o
     p_language: "da",
     p_valid_from: options.validFrom === undefined ? "2026-01-01" : options.validFrom,
     p_valid_to: options.validTo ?? null,
-    p_checksum_sha256: sha256(bytes),
+    p_checksum_sha256: options.declaredChecksum ?? sha256(bytes),
     p_original_filename: "testbetingelser.pdf",
   });
   if (error) throw new Error(`register: ${error.message}`);
@@ -74,3 +76,21 @@ export async function versionRow(client: SupabaseClient, versionId: string) {
   if (error) throw error;
   return data as Record<string, unknown> | null;
 }
+
+/** Runs the real ingestion worker (node workers/ingestion/main.ts --once) against the local stack. */
+export async function runWorkerOnce(): Promise<string> {
+  const { execFile } = await import("node:child_process");
+  const path = await import("node:path");
+  const root = path.resolve(__dirname, "../../..");
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["workers/ingestion/main.ts", "--once"],
+      { cwd: root, env: { ...process.env, IPA_WORKER_ID: `test-${RUN}` }, timeout: 120_000 },
+      (error, stdout, stderr) => (error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout)),
+    );
+  });
+}
+
+/** The worker needs its development-only access; integration runs without it skip the worker tests. */
+export const workerConfigured = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);

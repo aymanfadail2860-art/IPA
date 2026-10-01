@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "verbatimModuleSyntax": true,
+    "plugins": [],
+    "incremental": false
+  },
+  "include": ["./**/*.ts", "../src/lib/knowledge/core/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

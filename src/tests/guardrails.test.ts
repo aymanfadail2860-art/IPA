@@ -53,6 +53,11 @@ describe("secrets and AI boundary (docs/03 §9, §11)", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("never imports the ingestion worker into the app — the worker's service-role access stays out of src/ (docs/07 §14.1)", () => {
+    const offenders = sources.filter(({ text }) => /from ["'][^"']*workers\//.test(text)).map(({ file }) => file);
+    expect(offenders).toEqual([]);
+  });
+
   it("contains no API keys or client-side AI calls", () => {
     const offenders = sources
       .filter(({ text }) =>
