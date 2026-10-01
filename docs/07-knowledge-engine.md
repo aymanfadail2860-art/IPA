@@ -144,14 +144,15 @@ konceptuelle felter (`document_id`, `permission_key`, `scope`) **(udledt)**:
 |------|------------|
 | `id`, `document_version_id`, `chunk_index` | Rækkefølge inden for versionen, unik pr. version |
 | `kind` | `prose` \| `list` \| `table` |
-| `text` | Segmentets egen tekst, uden overskriftskæde |
+| `text` | Segmentets egen tekst, uden overskriftskæde. Altid præcis `[char_start, char_end)` af versionens normaliserede tekst |
+| `lead_in` | Gentaget indledning (B-005): listeindledningen eller tabellens overskriftsrække, når en lang liste eller tabel er delt. Ligger uden for `[char_start, char_end)`. Indgår i leksikalsk søgning og embedding og vises i kildekortet som kontekst, visuelt adskilt fra den citerede passage |
 | `heading`, `heading_path` (text[]) | Nærmeste overskrift og hele kæden, f.eks. `{"§4 Undtagelser","4.2 Forurening"}` |
 | `section_number` | F.eks. `4.2`, når det kan genkendes |
 | `page_start`, `page_end` | Chunks kan krydse en sidegrænse |
 | `char_start`, `char_end` | Position i versionens normaliserede tekst |
 | `overlap_chars` | Hvor meget af begyndelsen der er overlap fra forrige chunk (§6) |
 | `content_hash`, `char_count`, `token_estimate` | Et eksakt tokenantal afhænger af modellen og beregnes ikke |
-| `fts_da`, `fts_simple` | Genererede `tsvector`-kolonner til leksikalsk søgning (§8) |
+| `fts_da`, `fts_simple` | Genererede `tsvector`-kolonner til leksikalsk søgning (§8) over overskriftskæde, `lead_in` og tekst |
 
 Chunks er immutable. Sprog, produkt og gyldighed arves via versionen og kopieres ikke
 (`docs/03` §4: "Krydsreferencer sker via id, ikke via kopier").
@@ -356,6 +357,23 @@ Når en ny version N med `valid_from = F` publiceres, sker følgende:
    systemet fik kendskab til versionen.
 5. Opstår der et hul (dage uden gyldig version), vises det som advarsel i kvalitetsrapporten
    og i Versioner-tidslinjen.
+6. **Et hul forbliver et hul (B-006).** Deaktiveres en version, der har erstattet en
+   forgænger, får forgængeren **ikke** sin gyldighed tilbage. Systemet ændrer aldrig selv
+   gyldighed ud over afkortningen i pkt. 1.
+   - Begrundelse: hvis forgængeren automatisk fik sin gyldighed tilbage, ville systemet selv
+     afgøre, hvad der er gældende viden, og det er forbudt i hele arkitekturen. Deaktiveringen
+     kan netop skyldes, at efterfølgeren var forkert, og så er en genoplivet forgænger det
+     værste udfald. Et hul giver i stedet "ingen tilstrækkelig dokumentation", som er et
+     ærligt og korrekt svar (KRAV-AI-004).
+   - Hullet må ikke være tyst. Et hul i gyldigheden vises i Admin som en tilstand, der kræver
+     opmærksomhed, på samme måde som dokumentkonflikter flages (§12).
+   - Hullet lukkes kun ved en menneskelig handling: at publicere en ny version. Systemet
+     foreslår ikke selv en løsning.
+
+   Et hul er en periode uden publiceret, ikke-deaktiveret version af dokumentet på sproget:
+   mellem to versioner, eller efter en version, der blev erstattet af en efterfølger, som
+   siden er deaktiveret. En version, der fra start er uploadet med en slutdato, giver ikke et
+   hul efter sin slutdato.
 
 "Erstattet" er således en afledt markering og ikke en status, der skifter på et bestemt
 tidspunkt. Det fortolker `docs/03` §8 ("gammel sættes til erstattet med `superseded_by`") på
@@ -505,8 +523,8 @@ enkeltpunkt, hvor fejl gør mest skade.
 | **Overskriftskæde** | Hvert chunk bærer hele kæden (`heading_path`). Kæden indgår i embedding-input og leksikalsk tekst, men ikke i `text`, så uddraget forbliver kildens egen tekst |
 | **Afsnit** | Sektioner pakkes afsnit for afsnit op til en målstørrelse. Et afsnit deles kun, hvis det alene overskrider maksimum, og så ved sætningsgrænser |
 | **Semantiske grænser** | Deling sker ved (i prioriteret rækkefølge) overskrift, afsnit, listepunkt og sætning. Aldrig midt i en sætning |
-| **Lister** | Indledningen til en liste ("Forsikringen dækker ikke:") følger altid med listepunkterne. Deles en lang liste, gentages indledningen i hvert chunk. En undtagelse må ikke skilles fra det, den undtager fra |
-| **Tabeller** | En tabel er sit eget chunk (`kind = table`) og blandes aldrig med prosa. Store tabeller deles efter rækker, og overskriftsrækken gentages. Usikker tabelstruktur markeres i kvalitetsrapporten |
+| **Lister** | Indledningen til en liste ("Forsikringen dækker ikke:") følger altid med listepunkterne. Deles en lang liste, gentages indledningen i hvert chunk som `lead_in` (B-005). En undtagelse må ikke skilles fra det, den undtager fra |
+| **Tabeller** | En tabel er sit eget chunk (`kind = table`) og blandes aldrig med prosa. Store tabeller deles efter rækker, og overskriftsrækken gentages som `lead_in` (B-005). Usikker tabelstruktur markeres i kvalitetsrapporten |
 | **Sider** | `page_start`/`page_end` registreres. Sidegrænsen er ikke en chunkgrænse, men positionen bevares |
 | **Overlap** | Kun inden for samme sektion: op til to sætninger fra forrige chunk (højst ca. 15 %). Aldrig på tværs af overskrifter. `overlap_chars` gør det muligt at vise uddraget uden gentagelse |
 | **Sporbarhed** | `document_version_id`, `chunk_index`, `page_start`/`page_end`, `section_number`, `heading`, `heading_path`, `char_start`/`char_end` og `content_hash`. Et chunk kan altid føres tilbage til sin placering i den bestemte version af den bestemte fil |
@@ -514,6 +532,20 @@ enkeltpunkt, hvor fejl gør mest skade.
 | **Versionering** | `chunker_version` registreres pr. version. En ændret chunker gælder nye versioner, og publicerede chunks ændres ikke (§2.3) |
 
 Chunkeren er ren, deterministisk kode uden I/O. Den testes med faste fiktive dokumenter.
+
+**Gentaget indledning (`lead_in`, B-005).** De to krav ovenfor, at indledningen gentages i
+hvert chunk af en delt liste, og at chunkets tekst er præcis udsnittet `[char_start, char_end)`,
+kan ikke opfyldes i samme felt. Derfor:
+
+- `text` er altid præcis udsnittet af den normaliserede tekst. En citation kan dermed
+  verificeres ord for ord mod dokumentet.
+- Den gentagne indledning eller overskriftsrække ligger i `lead_in`, uden for udsnittet. Den
+  indgår i leksikalsk søgning og i embedding-input, så en undtagelse aldrig søges uden sin
+  overskrift.
+- `lead_in` følger med i evidensen (`excerpt.leadIn`, §10) og **vises i kildekortet som
+  kontekst, visuelt adskilt fra den citerede passage**. Det skal være tydeligt, hvad der er
+  citeret, og hvad der er kontekst. Et menneske, der læser "undtagelse 7", skal kunne se,
+  hvilken liste den hører til.
 
 ---
 
@@ -692,7 +724,8 @@ brugeres adgang.
       "document": { "title": "Testbetingelser A (fiktiv)", "type": "terms", "versionLabel": "3", "language": "da" },
       "location": { "pageStart": 12, "pageEnd": 12, "sectionNumber": "4.2",
                     "heading": "4.2 Forurening", "headingPath": ["§4 Undtagelser", "4.2 Forurening"] },
-      "excerpt": "…kildens egen tekst…",
+      "excerpt": { "text": "…kildens egen tekst, præcis [char_start, char_end)…",
+                   "leadIn": "Forsikringen dækker ikke:" },
       "validity": { "validFrom": "2025-07-01", "validTo": null, "temporalStatus": "current" },
       "authority": { "status": "published", "authoritative": true, "approvedAt": "…",
                      "supersededBy": null, "withdrawn": false },
@@ -711,6 +744,8 @@ brugeres adgang.
 ```
 
 `sourceReference.label` følger kildekortet i `docs/04` §17.1: titel, version, afsnit og side.
+`excerpt.leadIn` er kontekst og ikke en del af den citerede passage (B-005). Kildekortet viser
+den adskilt fra uddraget.
 Til `temporalStatus` og `authority` svarer kildekortets varianter gældende, historisk og
 deaktiveret. `conflicts` svarer til varianten "i konflikt".
 
@@ -803,10 +838,13 @@ layouts).
 | **Dokument → Adgang** | Tildelinger (alle brugere / team ± underteams / bruger) for læsning og historisk læsning | Tilføj, fjern | `knowledge.document.write` |
 | **Version / Review** (`docs/04` §14.2) | Venstre: strukturvisning (normaliseret tekst med sider, overskrifter og chunkgrænser) og "Åbn original" (signeret URL). Højre: kvalitetsrapport, metadata, adgang | Påbegynd review, Godkend som autoritativ (eneste primære knap, bekræftelsesdialog), Afvis (begrundelse), Genbehandl, Kassér | `publish` for review/godkend/afvis; `write` for genbehandl/kassér |
 | **Version (publiceret)** | Status, gyldighed, godkender, efterfølger | Deaktivér (begrundelse + kategori, bekræftelsesdialog) | `knowledge.version.publish` |
-| **Versioner** | Tidslinje pr. dokument: gyldighedsperioder, publicering, erstatning, deaktivering, huller | — | `write` eller `publish` |
-| **Knowledge Base** | Konfliktkø (begge passager side om side, `docs/04` §14.3); dækningsoversigt pr. produkt (publicerede dokumenter pr. type, manglende typer); videnshuller som tom tilstand ("registreres, når Copilot tages i brug") | Registrér, løs, afvis konflikt | Læs: `write` eller `publish`; løs/afvis: `publish` |
+| **Versioner** | Tidslinje pr. dokument: gyldighedsperioder, publicering, erstatning, deaktivering, huller (markeret som "Kræver opmærksomhed") | — | `write` eller `publish` |
+| **Knowledge Base** | Konfliktkø (begge passager side om side, `docs/04` §14.3); **huller i gyldigheden** (B-006) som tilstand, der kræver opmærksomhed, ved siden af konflikterne; dækningsoversigt pr. produkt (publicerede dokumenter pr. type, manglende typer); videnshuller som tom tilstand ("registreres, når Copilot tages i brug") | Registrér, løs, afvis konflikt. Et hul har ingen handling: det lukkes kun ved at publicere en ny version, og systemet foreslår ikke selv en løsning | Læs: `write` eller `publish`; løs/afvis: `publish` |
 | **Knowledge Base → Afprøv retrieval** (§12.1, §17, B-21) | EvidenceSet for den indloggede bruger med tekniske debug-oplysninger | Søg (read-only) | `knowledge.document.read` + Admin-adgang |
 | **Systemindstillinger → Embedding** | Aktiv model, kandidat, re-embedding-dækning (kun visning) | — | `system.settings.manage` |
+
+Et dokument med et hul i gyldigheden markeres også i dokumentlisten og på dokumentet. Før en
+deaktivering viser bekræftelsesdialogen, om den efterlader et hul (B-006).
 
 Fejl- og tomme tilstande følger `docs/04` §14.3 og §18. Statuslabels bruger de danske
 betegnelser fra §2.1, og statusfarver bruger tokens fra fase 5. Det gælder f.eks.

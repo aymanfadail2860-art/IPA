@@ -8,8 +8,8 @@
 --     migration — en planlagt operation (docs/03 §12).
 --   * Højst én aktiv model. Modelskifte: kandidat → re-embedding → evaluering → skifte i én
 --     transaktion, kun ved 100 % dækning og kun med system.settings.manage.
---   * Test-embedderen (provider "test") er en tydeligt markeret udviklingsmodel. Den kan ikke
---     aktiveres gennem funktionen; kun det lokale udviklingsseed sætter den aktiv.
+--   * Test-embedderen (provider "test") er en tydeligt markeret udviklingsmodel. Den oprettes
+--     og aktiveres kun af det lokale udviklingsseed og kan ikke aktiveres gennem funktionen.
 -- ============================================================================
 
 create table knowledge.embedding_models (
@@ -88,16 +88,14 @@ create trigger chunk_embeddings_check_write
   before insert or update or delete on knowledge.chunk_embeddings
   for each row execute function knowledge.check_embedding_write();
 
--- ----------------------------------------------------------------------------
--- Udviklingsmodellen (test-embedder) og dens partielle HNSW-indeks
--- ----------------------------------------------------------------------------
-
-insert into knowledge.embedding_models (id, provider, model_name, model_version, dimensions, status)
-values ('00000000-0000-4000-b000-000000000001', 'test', 'test-hash-embedder', '1', 256, 'candidate');
-
-create index chunk_embeddings_test_hash_embedder_1_hnsw on knowledge.chunk_embeddings
-  using hnsw ((embedding::extensions.vector(256)) extensions.vector_cosine_ops)
-  where embedding_model_id = '00000000-0000-4000-b000-000000000001';
+-- Ingen model oprettes her. En rigtig model tilføjes med sin egen migration: rækken og dens
+-- partielle HNSW-indeks, fx
+--   create index ... on knowledge.chunk_embeddings
+--     using hnsw ((embedding::extensions.vector(<n>)) extensions.vector_cosine_ops)
+--     where embedding_model_id = '<model-id>';
+-- Udviklingsmodellen (test-embedder) er mock-data og oprettes kun af det lokale
+-- udviklingsseed (scripts/seed-dev.mjs) — aldrig af en migration (CLAUDE.md §2, B-005/B-006-
+-- runden). Uden indeks søges der eksakt; resultatet er det samme, blot langsommere.
 
 -- ----------------------------------------------------------------------------
 -- Funktioner

@@ -126,9 +126,17 @@ for (const product of SEED_PRODUCTS) {
   );
 }
 
-// The test embedder (development grade) is the active model locally — the database refuses
-// to activate it through knowledge.activate_embedding_model, so only this local seed does it.
+// ⚠ MOCK: the test embedder (development grade, src/lib/knowledge/core/test-embedder.ts) is the
+// active model locally. Its row exists only here — never in a migration — and the database
+// refuses to activate it through knowledge.activate_embedding_model, so only this seed does.
 const TEST_EMBEDDING_MODEL_ID = "00000000-0000-4000-b000-000000000001";
+await check(
+  knowledge.from("embedding_models").upsert(
+    { id: TEST_EMBEDDING_MODEL_ID, provider: "test", model_name: "test-hash-embedder", model_version: "1", dimensions: 256 },
+    { onConflict: "id", ignoreDuplicates: true },
+  ),
+  "test embedder model",
+);
 const activeModels = await check(knowledge.from("embedding_models").select("id").eq("status", "active"), "embedding models");
 if (activeModels.length === 0) {
   await check(

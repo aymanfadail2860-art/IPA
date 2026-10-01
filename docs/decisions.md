@@ -5,6 +5,54 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-006 — Et hul i gyldigheden forbliver et hul, men må ikke være tyst
+
+**Dato:** 1. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §3.5 og §12
+
+**Beslutning:** Deaktiveres en version, der har erstattet en forgænger, får forgængeren ikke
+sin gyldighed tilbage. Systemet ændrer aldrig selv gyldighed ud over afkortningen ved
+erstatning. Et hul i gyldigheden vises i Admin som en tilstand, der kræver opmærksomhed, på
+samme måde som dokumentkonflikter flages. Hullet lukkes kun ved en menneskelig handling, nemlig
+at publicere en ny version. Systemet foreslår ikke selv en løsning.
+
+**Overvejede alternativer:**
+- *Genoplive forgængerens gyldighed automatisk.* Fravalgt: så ville systemet selv afgøre, hvad
+  der er gældende viden.
+- *Lade hullet være uden markering.* Fravalgt: et tyst hul ville først opdages, når en rådgiver
+  ikke får svar.
+
+**Begrundelse:** At systemet selv afgør, hvad der er gældende viden, er forbudt i hele
+arkitekturen. Deaktiveringen af efterfølgeren kan netop skyldes, at den var forkert, og så er
+en genoplivet forgænger det værste udfald. Et hul giver i stedet "ingen tilstrækkelig
+dokumentation", som er et ærligt og korrekt svar (KRAV-AI-004).
+
+---
+
+## B-005 — Gentaget indledning (`lead_in`) for delte lister og tabeller
+
+**Dato:** 1. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §1.2, §6 og §10
+
+**Beslutning:** Når en lang liste eller tabel deles, gemmes den gentagne listeindledning eller
+overskriftsrække i feltet `lead_in` på chunket, uden for chunkets `[char_start, char_end)`.
+`text` er fortsat præcis udsnittet af den normaliserede tekst. `lead_in` indgår i leksikalsk
+søgning og embedding. Når chunket optræder som kilde, vises `lead_in` i kildekortet som
+kontekst, visuelt adskilt fra den citerede passage.
+
+**Overvejede alternativer:**
+- *Indledningen i selve teksten.* Fravalgt: så er chunkets tekst ikke længere et præcist udsnit
+  af dokumentet, og en citation kan ikke verificeres mod dokumentet.
+- *Ingen gentagelse.* Fravalgt: en undtagelse ville kunne søges og vises uden sin overskrift.
+
+**Begrundelse:** De to krav i §6 kan ikke opfyldes samtidig i ét felt. Løsningen bevarer det
+væsentlige i begge: chunkets tekst er et præcist udsnit, så en citation kan verificeres mod
+dokumentet, og indledningen følger med i søgning og embedding, så en undtagelse ikke står uden
+sin overskrift. I kildekortet skal det være tydeligt, hvad der er citeret, og hvad der er
+kontekst. Et menneske, der læser "undtagelse 7", skal kunne se, hvilken liste den hører til.
+
+---
+
 ## B-004 — Demo-noten i `docs/05` §12 beskriver den nuværende tilstand
 
 **Dato:** 1. oktober 2026

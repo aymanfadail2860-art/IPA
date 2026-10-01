@@ -22,12 +22,13 @@ update knowledge.document_versions set status = 'discarded' where status in ('pr
 update knowledge.document_versions set status = 'withdrawn', withdrawn_at = now(), withdrawal_category = 'other',
   withdrawal_reason = 'pgTAP-isolation' where status = 'published';
 
--- Kun testens egne modeller er aktive/kandidater.
-update knowledge.embedding_models set status = 'retired', retired_at = now() where status in ('active', 'candidate')
-  and id <> '00000000-0000-4000-b000-000000000001';
-update knowledge.embedding_models set status = 'candidate', activated_at = null where id = '00000000-0000-4000-b000-000000000001';
-insert into knowledge.embedding_models (id, provider, model_name, model_version, dimensions, status)
-values ('51000000-0000-4000-a000-000000000001', 'pgtap', 'fiktiv-model', '1', 3, 'candidate');
+-- Kun testens egne modeller er aktive/kandidater. Udviklingsmodellen (provider "test") findes
+-- ikke i migrationerne; testen opretter sin egen.
+update knowledge.embedding_models set status = 'retired', retired_at = now() where status in ('active', 'candidate');
+insert into knowledge.embedding_models (id, provider, model_name, model_version, dimensions, status) values
+  ('51000000-0000-4000-a000-000000000001', 'pgtap', 'fiktiv-model', '1', 3, 'candidate'),
+  ('51000000-0000-4000-a000-000000000003', 'pgtap', 'anden-model', '1', 3, 'candidate'),
+  ('51000000-0000-4000-a000-000000000009', 'test', 'pgtap-test-embedder', '1', 3, 'candidate');
 
 insert into knowledge.products (id, name) values ('52000000-0000-4000-a000-000000000001', 'pgTAP Embeddingprodukt');
 insert into knowledge.documents (id, product_id, document_type, source_id, title)
@@ -41,8 +42,13 @@ insert into knowledge.document_chunks (id, document_version_id, chunk_index, kin
 values ('55000000-0000-4000-a000-000000000001', '54000000-0000-4000-a000-000000000001', 0, 'prose', 'Fiktiv tekst.', '{}',
   1, 1, 0, 13, repeat('6', 64), 13, 4);
 
-select ok(exists (select 1 from pg_indexes where schemaname = 'knowledge' and indexname = 'chunk_embeddings_test_hash_embedder_1_hnsw'
-                  and indexdef ilike '%hnsw%vector(256)%WHERE%'), 'udviklingsmodellen har et partielt HNSW-indeks på sin dimension');
+-- Et partielt HNSW-indeks pr. model (oprettes med modellens migration) kan bygges på den
+-- utypede vektorkolonne.
+create index pgtap_model_hnsw on knowledge.chunk_embeddings
+  using hnsw ((embedding::extensions.vector(3)) extensions.vector_cosine_ops)
+  where embedding_model_id = '51000000-0000-4000-a000-000000000001';
+select ok(exists (select 1 from pg_indexes where schemaname = 'knowledge' and indexname = 'pgtap_model_hnsw'
+                  and indexdef ilike '%hnsw%vector(3)%WHERE%'), 'en model kan få et partielt HNSW-indeks på sin dimension');
 select is((select count(*)::int from knowledge.embedding_models where status = 'active'), 0, 'ingen model er aktiv ved start af testen');
 
 select throws_ok(
@@ -74,9 +80,7 @@ update knowledge.document_versions set status = 'published', approved_at = now()
 
 -- Re-embedding af en publiceret version tilføjer vektorer uden at ændre chunks.
 insert into knowledge.chunk_embeddings (chunk_id, embedding_model_id, embedding, language, input_hash)
-values ('55000000-0000-4000-a000-000000000001', '00000000-0000-4000-b000-000000000001',
-        (select ('[' || array_to_string(array_fill(0::real, array[255]) || array[1::real], ',') || ']'))::extensions.vector,
-        'da', repeat('8', 64));
+values ('55000000-0000-4000-a000-000000000001', '51000000-0000-4000-a000-000000000003', '[3,2,1]', 'da', repeat('8', 64));
 select pass('re-embedding af en publiceret version tilføjer en vektor for en anden model');
 select throws_ok(
   $$ delete from knowledge.chunk_embeddings where chunk_id = '55000000-0000-4000-a000-000000000001' $$,
@@ -94,8 +98,8 @@ reset role;
 
 select set_config('request.jwt.claims', '{"sub":"50000000-0000-4000-a000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
-select throws_ok($$ select knowledge.activate_embedding_model('00000000-0000-4000-b000-000000000001') $$,
-  '23514', null, 'udviklingsmodellen kan ikke aktiveres gennem funktionen');
+select throws_like($$ select knowledge.activate_embedding_model('51000000-0000-4000-a000-000000000009') $$,
+  '%Udviklingsmodellen kan ikke aktiveres%', 'udviklingsmodellen kan ikke aktiveres gennem funktionen');
 select throws_ok(
   $$ insert into knowledge.embedding_models (provider, model_name, model_version, dimensions) values ('pgtap', 'x', '1', 3) $$,
   '42501', null, 'modeller oprettes kun via migrationer, ikke af brugere'
