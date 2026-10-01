@@ -2,8 +2,8 @@
 /**
  * ⚠ DEVELOPMENT SEED — LOCAL SUPABASE ONLY.
  *
- * Creates clearly fictional test users, teams, leader scopes and cases so access control
- * can be tested (docs/06-identity-database-access-control.md §10). Idempotent.
+ * Creates clearly fictional test users, teams, leader scopes, cases and knowledge products so
+ * access control can be tested (docs/06 §10, docs/07 §15). Idempotent.
  *
  * Refuses to run against anything but a local Supabase (localhost / 127.0.0.1).
  * No password is stored in the repository: the shared test password comes from
@@ -16,7 +16,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-import { SEED_CASES, SEED_TEAMS, SEED_USERS } from "./seed-fixtures.mjs";
+import { SEED_CASES, SEED_PRODUCTS, SEED_TEAMS, SEED_USERS } from "./seed-fixtures.mjs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -37,6 +37,7 @@ if (!["localhost", "127.0.0.1"].includes(host)) {
 const admin = createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
 const identity = admin.schema("identity");
 const advise = admin.schema("advise");
+const knowledge = admin.schema("knowledge");
 
 async function check(promise, what) {
   const { data, error } = await promise;
@@ -116,6 +117,13 @@ for (const entry of SEED_CASES) {
       "case share",
     );
   }
+}
+
+for (const product of SEED_PRODUCTS) {
+  await check(
+    knowledge.from("products").upsert({ id: product.id, name: product.name, category: product.category, status: "active" }),
+    `product ${product.name}`,
+  );
 }
 
 console.log("seed-dev: færdig. Testbrugere:");

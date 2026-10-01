@@ -110,3 +110,15 @@ export const SEED_CASES = [
     shares: [{ user: "advisorA", access: "editor" }],
   },
 ];
+
+// Knowledge Engine (fase 7): fiktive produkter. Dokumenter oprettes kun gennem
+// upload-flowet (docs/07 §5), aldrig direkte i seedet.
+export const SEED_PRODUCT_IDS = {
+  ansvar: "00000000-0000-4000-a000-000000000301",
+  bygning: "00000000-0000-4000-a000-000000000302",
+};
+
+export const SEED_PRODUCTS = [
+  { id: SEED_PRODUCT_IDS.ansvar, name: "Testprodukt Ansvar (fiktiv)", category: null },
+  { id: SEED_PRODUCT_IDS.bygning, name: "Testprodukt Bygning (fiktiv)", category: null },
+];
