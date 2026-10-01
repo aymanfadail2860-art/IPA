@@ -3,9 +3,18 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_RRF_K, fuse, fusedScore } from "@/lib/knowledge/core/fusion";
 import { createEmbedder, createReranker } from "@/lib/knowledge/core/registry";
 import { mergeExcerpt, selectChunks, type SelectableChunk } from "@/lib/knowledge/core/selection";
-import { sourceReferenceLabel } from "@/lib/knowledge/core/evidence";
+import { RESTRICTED_CONFLICT_MESSAGE, sourceReferenceLabel } from "@/lib/knowledge/core/evidence";
 import { TEST_EMBEDDER } from "@/lib/knowledge/core/test-embedder";
-import { DEFAULT_RETRIEVAL_CONFIG, MAX_QUERY_CHARS, normalizeRequest, runRetrieval, type KnowledgeRpcClient, type RetrievalRequest, type SearchRow } from "@/lib/knowledge/retrieval-core";
+import {
+  DEFAULT_RETRIEVAL_CONFIG,
+  MAX_QUERY_CHARS,
+  normalizeRequest,
+  runRetrieval,
+  type ConflictRow,
+  type KnowledgeRpcClient,
+  type RetrievalRequest,
+  type SearchRow,
+} from "@/lib/knowledge/retrieval-core";
 
 import { chunkDocument, DEFAULT_CHUNKER_CONFIG } from "../../workers/ingestion/chunker.ts";
 import { extractPdf } from "../../workers/ingestion/extract.ts";
@@ -56,12 +65,39 @@ function row(overrides: Partial<SearchRow> & Pick<SearchRow, "chunk_id">): Searc
   };
 }
 
-function fakeDb(rows: SearchRow[], error: { code?: string; message: string } | null = null) {
+interface FakeDbOptions {
+  error?: { code?: string; message: string } | null;
+  /** Rows of knowledge.evidence_conflicts per queried chunk id. */
+  conflicts?: ConflictRow[];
+  /** Rows knowledge.evidence_chunks can return (filtered by the requested ids). */
+  chunkRows?: SearchRow[];
+  /** Rows of a search restricted to one document (version-level counterparts). */
+  documentRows?: Record<string, SearchRow[]>;
+}
+
+function fakeDb(rows: SearchRow[], options: FakeDbOptions | { code?: string; message: string } | null = null) {
+  const opts: FakeDbOptions = options && "message" in options ? { error: options } : (options ?? {});
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const db: KnowledgeRpcClient = {
     async rpc(fn, args) {
       calls.push({ fn, args });
-      return { data: error ? null : rows, error };
+      if (opts.error) return { data: null, error: opts.error };
+      if (fn === "search_chunks") {
+        const documents = args.p_document_ids as string[] | null;
+        const scoped = documents?.length === 1 && opts.documentRows?.[documents[0]!];
+        return { data: scoped || rows, error: null };
+      }
+      if (fn === "evidence_conflicts") {
+        const ids = args.p_chunk_ids as string[];
+        return { data: (opts.conflicts ?? []).filter((row) => ids.includes(row.chunk_id)), error: null };
+      }
+      if (fn === "evidence_chunks") {
+        const chunkIds = args.p_chunk_ids as string[];
+        const versionIds = args.p_version_ids as string[];
+        const data = (opts.chunkRows ?? []).filter((row) => chunkIds.includes(row.chunk_id) || (versionIds.includes(row.version_id) && row.chunk_index === 0));
+        return { data, error: null };
+      }
+      return { data: null, error: { code: "42883", message: `unknown function ${fn}` } };
     },
   };
   return { db, calls };
@@ -309,6 +345,107 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
     expect(set.retrieval.grade).toBe("development");
     expect(set.retrieval.reranker.id).toBe("none");
     expect(calls[0]!.args.p_candidate_k).toBe(DEFAULT_RETRIEVAL_CONFIG.candidateK);
+  });
+});
+
+const A1 = "aaaaaaaa-0000-4000-8000-000000000001";
+const B1 = "bbbbbbbb-0000-4000-8000-000000000001";
+const B2 = "bbbbbbbb-0000-4000-8000-000000000002";
+const C1 = "cccccccc-0000-4000-8000-000000000001";
+const DOC_B = "d0000000-0000-4000-8000-0000000000bb";
+const DOC_C = "d0000000-0000-4000-8000-0000000000cc";
+const CONFLICT_1 = "f0000000-0000-4000-8000-000000000001";
+const CONFLICT_2 = "f0000000-0000-4000-8000-000000000002";
+
+const chunkA = row({ chunk_id: A1, lexical_rank: 1, lexical_score: 0.5, lexical_terms: ["forurening"] });
+const chunkB = row({ chunk_id: B1, version_id: VERSION_B, document_id: DOC_B, document_title: "Acceptregler (fiktiv)", document_type: "acceptance_rules", text: "Gradvis forurening accepteres." });
+const chunkC = row({ chunk_id: C1, version_id: "c1000000-0000-4000-8000-00000000000c", document_id: DOC_C, document_title: "Vejledning (fiktiv)", text: "Tredje kilde." });
+
+function visible(chunkId: string, conflictId: string, target: SearchRow, chunkLevel = true): ConflictRow {
+  return {
+    chunk_id: chunkId,
+    restricted: false,
+    conflict_id: conflictId,
+    counterpart_document_id: target.document_id,
+    counterpart_version_id: target.version_id,
+    counterpart_chunk_id: chunkLevel ? target.chunk_id : null,
+  };
+}
+
+function restricted(chunkId: string): ConflictRow {
+  return { chunk_id: chunkId, restricted: true, conflict_id: null, counterpart_document_id: null, counterpart_version_id: null, counterpart_chunk_id: null };
+}
+
+describe("conflicts in retrieval (docs/07 §11.4)", () => {
+  it("fetches an accessible counterpart that did not score, and links both ways", async () => {
+    const { db, calls } = fakeDb([chunkA], { conflicts: [visible(A1, CONFLICT_1, chunkB), visible(B1, CONFLICT_1, chunkA)], chunkRows: [chunkB] });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items.map((item) => [item.evidenceId, item.chunkId])).toEqual([["e1", A1], ["e2", B1]]);
+    expect(set.items[0]!.conflicts).toEqual([{ visibility: "visible", conflictId: CONFLICT_1, status: "open", counterpartEvidenceId: "e2" }]);
+    expect(set.items[1]!.conflicts).toEqual([{ visibility: "visible", conflictId: CONFLICT_1, status: "open", counterpartEvidenceId: "e1" }]);
+    expect(set.items[1]!.relevance).toMatchObject({ score: 0, rank: 2, fusedScore: 0 });
+    expect(set.signals.hasConflicts).toBe(true);
+    expect(calls.find((call) => call.fn === "evidence_chunks")!.args).toMatchObject({ p_chunk_ids: [B1], p_version_ids: [], p_date: "2026-10-01" });
+  });
+
+  it("links to a counterpart that is already evidence instead of fetching it again", async () => {
+    const scoredB = { ...chunkB, lexical_rank: 2, lexical_score: 0.4 };
+    const { db, calls } = fakeDb([chunkA, scoredB], { conflicts: [visible(A1, CONFLICT_1, scoredB), visible(B1, CONFLICT_1, chunkA)] });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items).toHaveLength(2);
+    expect(set.items[0]!.conflicts).toEqual([{ visibility: "visible", conflictId: CONFLICT_1, status: "open", counterpartEvidenceId: "e2" }]);
+    expect(calls.some((call) => call.fn === "evidence_chunks")).toBe(false);
+  });
+
+  it("shows an inaccessible counterpart as exactly one neutral indicator — however many there are", async () => {
+    const { db } = fakeDb([chunkA], { conflicts: [restricted(A1), restricted(A1)] });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items).toHaveLength(1);
+    expect(set.items[0]!.conflicts).toEqual([{ visibility: "restricted", message: RESTRICTED_CONFLICT_MESSAGE }]);
+    expect(set.signals.hasConflicts).toBe(true);
+  });
+
+  it("returns accessible counterparts as full evidence and the rest as one indicator", async () => {
+    const { db } = fakeDb([chunkA], { conflicts: [visible(A1, CONFLICT_1, chunkB), restricted(A1)], chunkRows: [chunkB] });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items[0]!.conflicts).toEqual([
+      { visibility: "visible", conflictId: CONFLICT_1, status: "open", counterpartEvidenceId: "e2" },
+      { visibility: "restricted", message: RESTRICTED_CONFLICT_MESSAGE },
+    ]);
+  });
+
+  it("on version level, takes the counterpart document's best passage for the same query", async () => {
+    const bestOfB = { ...chunkB, chunk_id: B2, chunk_index: 3, lexical_rank: 1, lexical_score: 0.3, lexical_terms: ["forurening"] };
+    const { db, calls } = fakeDb([chunkA], { conflicts: [visible(A1, CONFLICT_1, chunkB, false)], documentRows: { [DOC_B]: [bestOfB] } });
+    const set = await runRetrieval({ query: "forurening", documentIds: [chunkA.document_id] }, deps(db));
+    expect(set.items.map((item) => item.chunkId)).toEqual([A1, B2]);
+    const scoped = calls.filter((call) => call.fn === "search_chunks")[1]!;
+    expect(scoped.args).toMatchObject({ p_document_ids: [DOC_B], p_product_ids: null, p_document_types: null });
+    expect(set.items[1]!.relevance.reasons).toEqual([{ kind: "lexical_match", terms: ["forurening"] }]);
+  });
+
+  it("on version level, falls back to the counterpart's first chunk when the query finds nothing there", async () => {
+    const { db, calls } = fakeDb([chunkA], { conflicts: [visible(A1, CONFLICT_1, chunkB, false)], documentRows: { [DOC_B]: [] }, chunkRows: [chunkB] });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items.map((item) => item.chunkId)).toEqual([A1, B1]);
+    expect(calls.find((call) => call.fn === "evidence_chunks")!.args).toMatchObject({ p_chunk_ids: [], p_version_ids: [VERSION_B] });
+  });
+
+  it("follows the counterparts' own conflicts until nothing new is found", async () => {
+    const { db } = fakeDb([chunkA], {
+      conflicts: [visible(A1, CONFLICT_1, chunkB), visible(B1, CONFLICT_1, chunkA), visible(B1, CONFLICT_2, chunkC), visible(C1, CONFLICT_2, chunkB), restricted(C1)],
+      chunkRows: [chunkB, chunkC],
+    });
+    const set = await runRetrieval({ query: "forurening" }, deps(db));
+    expect(set.items.map((item) => item.chunkId)).toEqual([A1, B1, C1]);
+    expect(set.items[1]!.conflicts.map((conflict) => (conflict.visibility === "visible" ? conflict.counterpartEvidenceId : "restricted"))).toEqual(["e1", "e3"]);
+    expect(set.items[2]!.conflicts.map((conflict) => (conflict.visibility === "visible" ? conflict.counterpartEvidenceId : "restricted"))).toEqual(["e2", "restricted"]);
+  });
+
+  it("never puts a restricted counterpart's data in the evidence", async () => {
+    const { db } = fakeDb([chunkA], { conflicts: [restricted(A1)] });
+    const serialized = JSON.stringify(await runRetrieval({ query: "forurening" }, deps(db)));
+    for (const value of [B1, VERSION_B, DOC_B, "Acceptregler", CONFLICT_1, "overlapping_scope", "duplicate_content"]) expect(serialized).not.toContain(value);
   });
 });
 

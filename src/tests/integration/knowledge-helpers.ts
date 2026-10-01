@@ -36,6 +36,22 @@ export interface UploadedVersion {
   path: string;
 }
 
+/**
+ * A fictional product for this test run only. Structural conflict detection (docs/07 §11.2)
+ * compares documents of the same product, so tests that must not meet documents from earlier
+ * runs use their own product.
+ */
+export async function runProduct(client: SupabaseClient, label: string): Promise<string> {
+  const { data, error } = await client
+    .schema("knowledge")
+    .from("products")
+    .insert({ name: `Testprodukt ${label} ${RUN} (fiktiv)` })
+    .select("id")
+    .single();
+  if (error) throw new Error(`product: ${error.message}`);
+  return (data as { id: string }).id;
+}
+
 /** Signed upload URL → upload → register. Throws with the failing step on error. */
 export async function uploadVersion(client: SupabaseClient, bytes: Uint8Array, options: UploadOptions = {}): Promise<UploadedVersion> {
   const isNew = !options.documentId;

@@ -8,7 +8,7 @@ import { runRetrieval, RetrievalError, type RetrievalRequest } from "@/lib/knowl
 import { buildPdf, longListFixturePages, type PdfPage } from "../fixtures/knowledge-pdfs";
 
 import { anonClient, integrationConfigured, signedInClient, userIdOf, type SeedUserKey } from "./helpers";
-import { RUN, runWorkerOnce, uploadVersion, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
+import { RUN, runProduct, runWorkerOnce, uploadVersion, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
 
 /**
  * Fase 7, trin 6 — retrieval mod den rigtige lokale Supabase med den rigtige worker, den
@@ -77,19 +77,33 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("retrieval end to e
     const { data: models, error } = await admin.schema("knowledge").rpc("active_embedding_model");
     if (error) throw error;
     activeModel = (models as EmbeddingModelSpec[])[0]!;
+    // Own product and a different document type per document: no structural conflicts here
+    // (they are tested in knowledge-conflicts.integration.test.ts).
+    const productId = await runProduct(admin, "Søgning");
 
     x1 = await uploadVersion(admin, await buildPdf(termsPage(`Søgebetingelser X ${RUN}`, `Forsikringen dækker ikke gradvis forurening. Fiktiv markør ${xMarker} i første version.`)), {
       title: `Søgebetingelser X ${RUN}`,
+      productId,
+      documentType: "terms",
       versionLabel: "1",
       validFrom: "2020-01-01",
     });
     y = await uploadVersion(admin, await buildPdf(termsPage(`Hemmelige betingelser Y ${RUN}`, `Hemmelig fiktiv klausul ${yMarker} om gradvis forurening.`)), {
       title: `Hemmelige betingelser Y ${RUN}`,
+      productId,
+      documentType: "product_description",
       validFrom: "2020-01-01",
     });
-    list = await uploadVersion(admin, await buildPdf(longListFixturePages(50)), { title: `Listebetingelser ${RUN}`, validFrom: "2020-01-01" });
+    list = await uploadVersion(admin, await buildPdf(longListFixturePages(50, RUN)), {
+      title: `Listebetingelser ${RUN}`,
+      productId,
+      documentType: "guidance",
+      validFrom: "2020-01-01",
+    });
     withdrawn = await uploadVersion(admin, await buildPdf(termsPage(`Tilbagekaldte betingelser ${RUN}`, `Tilbagekaldt fiktiv klausul ${wMarker}.`)), {
       title: `Tilbagekaldte betingelser ${RUN}`,
+      productId,
+      documentType: "sales_material",
       validFrom: "2020-01-01",
     });
     await runWorkerOnce();

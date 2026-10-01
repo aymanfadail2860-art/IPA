@@ -149,13 +149,14 @@ export function termsFixturePages(): PdfPage[] {
 }
 
 /** A section with a long list (forces the list to be split with a repeated lead-in). */
-export function longListFixturePages(items = 24): PdfPage[] {
+export function longListFixturePages(items = 24, marker = ""): PdfPage[] {
   const lines: PdfLine[] = [
     { text: "§ 7 Særlige undtagelser", size: 13, bold: true },
     { text: "Forsikringen dækker heller ikke:", spaceBefore: 4 },
   ];
+  // One page holds about 50 items; more would be drawn below the page and never extracted.
   for (let i = 1; i <= items; i += 1) {
-    lines.push({ text: `• fiktiv undtagelse nummer ${i}, som kun findes i dette testdokument`, indent: 10 });
+    lines.push({ text: `• fiktiv undtagelse nummer ${i}, som kun findes i dette testdokument${marker ? ` ${marker}` : ""}`, indent: 10 });
   }
   return [{ lines }];
 }
