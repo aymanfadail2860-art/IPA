@@ -261,6 +261,10 @@ describe("pipeline (docs/07 §5.2)", () => {
     const calls: string[] = [];
     const db: WorkerDb = {
       claim: async () => null,
+      embeddingModels: async () => [],
+      chunksToEmbed: async () => [],
+      storeEmbeddings: async (_job, _model, rows) => rows.length,
+      verifyIndex: async () => [],
       heartbeat: async () => void calls.push("heartbeat"),
       checkpoint: async (_job, step) => void calls.push(`checkpoint:${step}`),
       storePages: async () => void calls.push("storePages"),
@@ -346,6 +350,8 @@ describe("pipeline (docs/07 §5.2)", () => {
     });
     expect(outcome).toBe("succeeded");
     expect(downloaded).toBe(false);
-    expect(calls).toEqual(["complete"]);
+    expect(calls).not.toContain("storePages");
+    expect(calls.some((call) => call.startsWith("storeChunks"))).toBe(false);
+    expect(calls[calls.length - 1]).toBe("complete");
   });
 });

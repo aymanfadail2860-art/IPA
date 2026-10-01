@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Chunk } from "./chunker.ts";
-import type { ClaimedJob, OriginalStore, WorkerDb } from "./pipeline.ts";
+import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, OriginalStore, WorkerDb } from "./pipeline.ts";
 
 /**
  * The worker's only ways into the database and Storage (docs/07 §14.1): a narrow set of
@@ -29,6 +29,18 @@ export function supabaseWorkerDb(client: SupabaseClient, workerId: string): Work
     async claim() {
       const rows = await call<ClaimedJob[]>(knowledge.rpc("worker_claim_job", { p_worker: workerId, p_lease_seconds: LEASE_SECONDS }));
       return rows?.[0] ?? null;
+    },
+    async embeddingModels() {
+      return (await call<EmbeddingModelRow[]>(knowledge.rpc("worker_embedding_models"))) ?? [];
+    },
+    async chunksToEmbed(jobId, modelId) {
+      return (await call<ChunkToEmbed[]>(knowledge.rpc("worker_chunks_to_embed", { p_job_id: jobId, p_worker: workerId, p_model_id: modelId }))) ?? [];
+    },
+    async storeEmbeddings(jobId, modelId, rows) {
+      return call<number>(knowledge.rpc("worker_store_embeddings", { p_job_id: jobId, p_worker: workerId, p_model_id: modelId, p_rows: rows }));
+    },
+    async verifyIndex(jobId) {
+      return (await call<IntegrityRow[]>(knowledge.rpc("worker_verify_index", { p_job_id: jobId, p_worker: workerId }))) ?? [];
     },
     async heartbeat(jobId) {
       await call(knowledge.rpc("worker_heartbeat", { p_job_id: jobId, p_worker: workerId, p_lease_seconds: LEASE_SECONDS }));

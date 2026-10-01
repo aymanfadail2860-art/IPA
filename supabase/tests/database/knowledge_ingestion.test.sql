@@ -28,8 +28,9 @@ select ok(not has_function_privilege('anon', 'knowledge.worker_store_chunks(uuid
   'anon kan ikke skrive chunks');
 select ok(not exists (
   select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'knowledge' and p.proname like 'worker_%' and p.prosrc ~* 'published'
-), 'ingen workerfunktion kan publicere');
+  where n.nspname = 'knowledge' and p.proname like 'worker_%'
+    and p.prosrc ~* $re$(set\s+status\s*=\s*'published'|published_at\s*=|approved_at\s*=)$re$
+), 'ingen workerfunktion sætter en version til publiceret eller godkendt');
 
 set local role service_role;
 

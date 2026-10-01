@@ -92,5 +92,20 @@ export async function runWorkerOnce(): Promise<string> {
   });
 }
 
+/** Runs the worker with environment overrides and reports how it exited (for startup checks). */
+export async function runWorkerWith(env: Record<string, string>): Promise<{ code: number; stderr: string }> {
+  const { execFile } = await import("node:child_process");
+  const path = await import("node:path");
+  const root = path.resolve(__dirname, "../../..");
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ["workers/ingestion/main.ts", "--once"],
+      { cwd: root, env: { ...process.env, IPA_WORKER_ID: `test-${RUN}`, ...env }, timeout: 120_000 },
+      (error, _stdout, stderr) => resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, stderr }),
+    );
+  });
+}
+
 /** The worker needs its development-only access; integration runs without it skip the worker tests. */
 export const workerConfigured = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);

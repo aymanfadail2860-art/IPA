@@ -1,3 +1,6 @@
+import { embeddingInput, inputHash, modelLabel, type Embedder, type EmbeddingModelSpec } from "../../src/lib/knowledge/core/embedding.ts";
+import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
+
 import { CHUNKER_VERSION, chunkDocument, type Chunk } from "./chunker.ts";
 import { EXTRACTOR_VERSION, extractPdf } from "./extract.ts";
 import { normalizePages } from "./normalize.ts";
@@ -8,7 +11,8 @@ import { validateOriginal } from "./validate.ts";
 
 /**
  * One ingestion job (docs/07 §5.2): validation → extraction → normalization → structuring →
- * chunking → (embedding and indexing, step 4) → quality report → "Klar til review".
+ * chunking → embedding → indexing → quality report → "Klar til review". A "reembed" job only
+ * adds embeddings for a candidate model to an already processed version (docs/07 §7).
  *
  * Technical processing only. Nothing here can make a version authoritative: the database
  * functions the worker calls cannot publish, and only `processed` is ever reached.
@@ -33,8 +37,33 @@ export interface StoredPage {
   char_end: number;
 }
 
+export interface EmbeddingModelRow extends EmbeddingModelSpec {
+  status: "active" | "candidate";
+}
+
+export interface ChunkToEmbed {
+  chunk_id: string;
+  text: string;
+  lead_in: string | null;
+  heading_path: string[];
+  language: string;
+}
+
+export interface IntegrityRow {
+  model_id: string;
+  model: string;
+  status: string;
+  chunks: number;
+  embeddings: number;
+  wrong_dimensions: number;
+}
+
 export interface WorkerDb {
   claim(): Promise<ClaimedJob | null>;
+  embeddingModels(): Promise<EmbeddingModelRow[]>;
+  chunksToEmbed(jobId: string, modelId: string): Promise<ChunkToEmbed[]>;
+  storeEmbeddings(jobId: string, modelId: string, rows: { chunk_id: string; embedding: number[]; language: string; input_hash: string }[]): Promise<number>;
+  verifyIndex(jobId: string): Promise<IntegrityRow[]>;
   heartbeat(jobId: string): Promise<void>;
   checkpoint(jobId: string, step: string, state: Record<string, unknown>): Promise<void>;
   storePages(jobId: string, pages: StoredPage[], info: { pageCount: number; byteSize: number; mimeType: string; extractorVersion: string }): Promise<void>;
@@ -51,6 +80,44 @@ export interface PipelineDeps {
   db: WorkerDb;
   originals: OriginalStore;
   log: (event: Record<string, unknown>) => void;
+  /** Defaults to the fail-closed registry (docs/07 §9.1). */
+  embedderFor?: (model: EmbeddingModelSpec) => Embedder;
+}
+
+const EMBED_BATCH = 64;
+
+/** Embeds every chunk that lacks an embedding for each active/candidate model, then verifies. */
+async function embedAndIndex(job: ClaimedJob, deps: PipelineDeps): Promise<{ models: IntegrityRow[]; active_model: string | null }> {
+  const { db } = deps;
+  const models = await db.embeddingModels();
+  for (const model of models) {
+    const embedder = (deps.embedderFor ?? createEmbedder)(model);
+    const pending = await db.chunksToEmbed(job.job_id, model.id);
+    for (let i = 0; i < pending.length; i += EMBED_BATCH) {
+      const batch = pending.slice(i, i + EMBED_BATCH);
+      const inputs = batch.map((chunk) => embeddingInput(chunk));
+      const vectors = await embedder.embed(inputs);
+      if (vectors.length !== batch.length || vectors.some((vector) => vector.length !== model.dimensions)) {
+        throw new Error("Embedderen returnerede et forkert antal vektorer eller en forkert dimension.");
+      }
+      await db.storeEmbeddings(
+        job.job_id,
+        model.id,
+        batch.map((chunk, index) => ({
+          chunk_id: chunk.chunk_id,
+          embedding: vectors[index]!,
+          language: chunk.language,
+          input_hash: inputHash(embedder.id, inputs[index]!),
+        })),
+      );
+      await db.heartbeat(job.job_id);
+    }
+  }
+  const integrity = await db.verifyIndex(job.job_id);
+  const incomplete = integrity.filter((row) => row.embeddings !== row.chunks || row.wrong_dimensions > 0);
+  if (incomplete.length > 0) throw new Error("Indekset er ufuldstændigt efter embedding.");
+  const active = models.find((model) => model.status === "active");
+  return { models: integrity, active_model: active ? modelLabel(active) : null };
 }
 
 export type JobOutcome = "succeeded" | "retry" | "failed" | "lost";
@@ -71,6 +138,13 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
   };
 
   try {
+    if (job.kind === "reembed") {
+      const embeddings = await step("embedding", () => embedAndIndex(job, deps));
+      await db.complete(job.job_id, { reembed: embeddings } as unknown as WorkerQualityReport);
+      log({ job: job.job_id, version: job.version_id, outcome: "succeeded", kind: "reembed", ms: Date.now() - started });
+      return "succeeded";
+    }
+
     const resumed = job.step_state.chunking;
     let report: WorkerQualityReport;
 
@@ -125,6 +199,10 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
       });
     }
 
+    const embeddings = await step("embedding", () => embedAndIndex(job, deps));
+    await db.checkpoint(job.job_id, "embedding", { models: embeddings.models.map((row) => row.model) });
+    report = { ...report, versions: { ...report.versions, embedding_model: embeddings.active_model }, embeddings };
+
     await db.complete(job.job_id, report);
     log({ job: job.job_id, version: job.version_id, outcome: "succeeded", ms: Date.now() - started });
     return "succeeded";
@@ -132,6 +210,11 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
     if (isLeaseLost(error)) {
       log({ job: job.job_id, version: job.version_id, outcome: "lost" });
       return "lost";
+    }
+    if (["GradeNotAllowedError", "ProviderNotConfiguredError"].includes((error as Error).name)) {
+      const outcome = await db.fail(job.job_id, "embedding_unavailable", (error as Error).message, false);
+      log({ job: job.job_id, version: job.version_id, outcome, code: "embedding_unavailable" });
+      return outcome;
     }
     if (error instanceof FileRejected) {
       const outcome = await db.fail(job.job_id, error.code, error.message, false);

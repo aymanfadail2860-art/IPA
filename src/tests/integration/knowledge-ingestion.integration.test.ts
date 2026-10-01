@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildPdf, partlyScannedFixturePages, simplePdf, termsFixturePages } from "../fixtures/knowledge-pdfs";
 
 import { integrationConfigured, signedInClient } from "./helpers";
-import { RUN, runWorkerOnce, uploadVersion, versionRow, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
+import { RUN, runWorkerOnce, runWorkerWith, uploadVersion, versionRow, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
 
 /**
  * Fase 7, trin 3 — den rigtige ingestion-worker mod lokal Supabase (docs/07 §5). Upload
@@ -17,6 +17,8 @@ interface QualityReport {
   tables: Record<string, unknown>;
   metadata: { complete: boolean };
   access: { no_grants: boolean };
+  versions: { embedding_model: string | null };
+  embeddings: { active_model: string | null; models: { model: string; chunks: number; embeddings: number; wrong_dimensions: number }[] };
 }
 
 describe.skipIf(!integrationConfigured || !workerConfigured)("ingestion worker end to end", () => {
@@ -76,6 +78,30 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("ingestion worker e
     expect(report.tables).toMatchObject({ found: 1, uncertain: 0 });
     expect(report.metadata.complete).toBe(true);
     expect(report.access.no_grants).toBe(true);
+  });
+
+  it("embeds every chunk with the active model and verifies the index (docs/07 §5.2 steps 8–9)", async () => {
+    const admin = (await signedInClient("admin")).schema("knowledge");
+    const { data: chunks } = await admin.from("document_chunks").select("id").eq("document_version_id", uploads.terms!.versionId);
+    const ids = chunks!.map((chunk) => chunk.id);
+    const { data: embeddings } = await admin.from("chunk_embeddings").select("chunk_id, embedding_model_id, input_hash, language").in("chunk_id", ids);
+    const active = embeddings!.filter((row) => row.embedding_model_id === "00000000-0000-4000-b000-000000000001");
+    expect(active).toHaveLength(ids.length);
+    expect(active.every((row) => /^[0-9a-f]{64}$/.test(row.input_hash) && row.language === "da")).toBe(true);
+
+    const report = (await job(uploads.terms!.versionId)).quality_report;
+    expect(report.versions.embedding_model).toBe("test:test-hash-embedder@1");
+    expect(report.embeddings.active_model).toBe("test:test-hash-embedder@1");
+    const integrity = report.embeddings.models.find((row) => row.model === "test:test-hash-embedder@1")!;
+    expect(integrity).toMatchObject({ chunks: ids.length, embeddings: ids.length, wrong_dimensions: 0 });
+  });
+
+  it("refuses to start with the test embedder outside local/test (fail-closed, docs/07 §9.1)", async () => {
+    for (const value of ["production", ""]) {
+      const result = await runWorkerWith({ IPA_RUNTIME_ENV: value });
+      expect(result.code, `IPA_RUNTIME_ENV=${value}`).not.toBe(0);
+      expect(result.stderr).toContain("udviklingsimplementering");
+    }
   });
 
   it("fails visibly, without retry, when the file is not a PDF, has no text layer or differs from the upload", async () => {

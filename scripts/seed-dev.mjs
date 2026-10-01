@@ -126,5 +126,16 @@ for (const product of SEED_PRODUCTS) {
   );
 }
 
+// The test embedder (development grade) is the active model locally — the database refuses
+// to activate it through knowledge.activate_embedding_model, so only this local seed does it.
+const TEST_EMBEDDING_MODEL_ID = "00000000-0000-4000-b000-000000000001";
+const activeModels = await check(knowledge.from("embedding_models").select("id").eq("status", "active"), "embedding models");
+if (activeModels.length === 0) {
+  await check(
+    knowledge.from("embedding_models").update({ status: "active", activated_at: new Date().toISOString() }).eq("id", TEST_EMBEDDING_MODEL_ID),
+    "activate test embedder",
+  );
+}
+
 console.log("seed-dev: færdig. Testbrugere:");
 for (const user of SEED_USERS) console.log(`  ${user.email.padEnd(28)} ${user.displayName}`);

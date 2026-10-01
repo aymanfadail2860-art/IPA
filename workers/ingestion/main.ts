@@ -2,6 +2,8 @@ import { hostname } from "node:os";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
+
 import { supabaseOriginals, supabaseWorkerDb } from "./db.ts";
 import { processJob } from "./pipeline.ts";
 
@@ -17,6 +19,8 @@ import { processJob } from "./pipeline.ts";
  * Environment (never committed; see .env.example):
  *   NEXT_PUBLIC_SUPABASE_URL    Supabase API URL
  *   SUPABASE_SERVICE_ROLE_KEY   development-only worker access; never in src/ or the browser
+ *   IPA_RUNTIME_ENV             local | test — required for the test embedder (development
+ *                               grade). Missing or anything else = production (fail-closed).
  *   IPA_WORKER_ID               optional, defaults to ingestion-<host>-<pid>
  */
 
@@ -36,6 +40,17 @@ const db = supabaseWorkerDb(client, workerId);
 const originals = supabaseOriginals(client);
 // Structured log lines: job, version, step and duration — never document content.
 const log = (event: Record<string, unknown>) => console.log(JSON.stringify({ worker: workerId, ...event }));
+
+// Fail fast at startup (docs/07 §9.1): every active/candidate model must have an allowed
+// implementation in this environment — e.g. the test embedder only in local/test.
+for (const model of await db.embeddingModels()) {
+  try {
+    createEmbedder(model);
+  } catch (error) {
+    console.error(`worker: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
 
 let stopping = false;
 process.on("SIGTERM", () => (stopping = true));

@@ -15,6 +15,8 @@ export interface WorkerQualityReport {
   tables: { found: number; uncertain: number };
   normalization: { header_footer_lines_removed: number; encoding_warnings: string[] };
   versions: { extractor: string; chunker: string; embedding_model: string | null };
+  /** Added by the embedding/indexing step: integrity per active/candidate model. */
+  embeddings?: { models: unknown[]; active_model: string | null };
 }
 
 export function buildQualityReport(input: {
