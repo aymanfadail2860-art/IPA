@@ -12,8 +12,8 @@ import { NONE_RERANKER_ID, type RankReason } from "./reranker.ts";
  *     deep-freezes the set and records it, so a copy, a hand-built object or a mutation is
  *     never production evidence. Only retrieval-core.ts calls it (guardrail test).
  *   * `requireProductionEvidence` is the only way to obtain a ProductionEvidenceSet (branded
- *     type). It throws for development grade and for the "none" reranker. Later AI modules
- *     and the AI Gateway accept only ProductionEvidenceSet.
+ *     type). It throws for development grade and for the "none" reranker. A production model
+ *     accepts only ProductionEvidenceSet (B-012, enforced in src/lib/ai/core/invoke.ts).
  */
 
 export const EVIDENCE_SCHEMA_VERSION = 1;

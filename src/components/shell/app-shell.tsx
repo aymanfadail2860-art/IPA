@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, type ReactNode } from "react";
 
 import { CopilotPanel } from "@/components/copilot/copilot-panel";
+import type { CopilotMode } from "@/components/copilot/use-copilot-questions";
 import { useShortcut } from "@/hooks/use-shortcut";
 
 import type { SearchEntry } from "@/lib/search";
@@ -28,6 +29,7 @@ export function AppShell({
   searchEntries,
   cases,
   copilotConversation,
+  copilotMode,
   mockNotice,
 }: {
   children: ReactNode;
@@ -35,7 +37,9 @@ export function AppShell({
   searchEntries: readonly SearchEntry[];
   /** Customer cases; the search shows only those the user owns or is assigned to. */
   cases: readonly CaseSummary[];
-  copilotConversation: CopilotConversation;
+  /** The demo's mock conversation; null with a database (live Copilot through the AI Gateway). */
+  copilotConversation: CopilotConversation | null;
+  copilotMode: CopilotMode;
   mockNotice: string;
 }) {
   const { setSearchOpen, toggleCopilot } = useShell();
@@ -70,7 +74,7 @@ export function AppShell({
           {children}
         </main>
       </div>
-      {pathname.startsWith("/copilot") ? null : <CopilotPanel conversation={copilotConversation} />}
+      {pathname.startsWith("/copilot") ? null : <CopilotPanel mode={copilotMode} conversation={copilotConversation} />}
       <GlobalSearch entries={searchEntries} cases={cases} />
     </div>
   );

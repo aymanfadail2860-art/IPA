@@ -14,23 +14,26 @@ import type { CopilotConversation } from "@/types/domain";
 import { useShell } from "../shell/shell-context";
 import { CopilotAnswer } from "./copilot-answer";
 import { CopilotInput } from "./copilot-input";
-import { PendingQuestion } from "./pending-question";
+import { CopilotQuestion } from "./copilot-result";
+import { useCopilotQuestions, type CopilotMode } from "./use-copilot-questions";
 
 const PANEL_INPUT_ID = "copilot-panel-input";
 
 function PanelBody({
+  mode,
   conversation,
   onClose,
   showWidthToggle,
 }: {
-  conversation: CopilotConversation;
+  mode: CopilotMode;
+  conversation: CopilotConversation | null;
   onClose: () => void;
   showWidthToggle: boolean;
 }) {
   const { copilotContext, copilotWide, setCopilotWide } = useShell();
   const [contextRemoved, setContextRemoved] = useState(false);
-  const [asked, setAsked] = useState<string[]>([]);
-  const effectiveContext = contextRemoved ? null : (copilotContext ?? conversation.context ?? null);
+  const effectiveContext = contextRemoved ? null : (copilotContext ?? conversation?.context ?? null);
+  const { entries, ask } = useCopilotQuestions(mode, { label: effectiveContext });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -73,19 +76,21 @@ function PanelBody({
 
       <div className="min-h-0 flex-1 space-y-8 overflow-y-auto px-4 py-5">
         <p className="rounded-md bg-surface-sunken px-3 py-2 text-caption text-fg-secondary">
-          Eksempelsamtale · fiktive data. Copilot er ikke forbundet til vidensgrundlaget endnu.
+          {mode === "demo"
+            ? "Demo uden database: eksempelsamtale og faste mock-svar med fiktive data. Ingen AI."
+            : "Udviklingsversion: svar fra en stub-model uden AI gennem AI Gateway. Samtaler gemmes ikke."}
         </p>
-        {conversation.exchanges.map((exchange) => (
+        {(conversation?.exchanges ?? []).map((exchange) => (
           <CopilotAnswer
             key={exchange.id}
             exchange={exchange}
             inlineSources
             compact
-            onFollowUp={(question) => setAsked((list) => [...list, question])}
+            onFollowUp={ask}
           />
         ))}
-        {asked.map((question, index) => (
-          <PendingQuestion key={`${question}-${index}`} question={question} compact />
+        {entries.map((entry) => (
+          <CopilotQuestion key={entry.id} entry={entry} mode={mode} compact inlineSources onFollowUp={ask} onRetry={ask} />
         ))}
       </div>
 
@@ -95,7 +100,7 @@ function PanelBody({
           context={effectiveContext}
           onRemoveContext={() => setContextRemoved(true)}
           placeholder="Stil et fagligt spørgsmål"
-          onSubmit={(question) => setAsked((list) => [...list, question])}
+          onSubmit={ask}
         />
       </div>
     </div>
@@ -107,7 +112,7 @@ function PanelBody({
  * the content aside, so the current context stays visible. Below the desktop breakpoint
  * it opens as an overlay (tablet) or full screen (mobile).
  */
-export function CopilotPanel({ conversation }: { conversation: CopilotConversation }) {
+export function CopilotPanel({ mode, conversation }: { mode: CopilotMode; conversation: CopilotConversation | null }) {
   const { copilotOpen, closeCopilot, copilotWide } = useShell();
   const isDesktop = useMediaQuery(BREAKPOINTS.desktop);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -139,7 +144,7 @@ export function CopilotPanel({ conversation }: { conversation: CopilotConversati
           copilotWide ? "w-[50vw]" : "w-[var(--context-panel-width)]",
         )}
       >
-        <PanelBody conversation={conversation} onClose={closeCopilot} showWidthToggle />
+        <PanelBody mode={mode} conversation={conversation} onClose={closeCopilot} showWidthToggle />
       </aside>
     );
   }
@@ -157,7 +162,7 @@ export function CopilotPanel({ conversation }: { conversation: CopilotConversati
       >
         <SheetTitle className="sr-only">Copilot</SheetTitle>
         <SheetDescription className="sr-only">Stil faglige spørgsmål uden at forlade siden.</SheetDescription>
-        <PanelBody conversation={conversation} onClose={closeCopilot} showWidthToggle={false} />
+        <PanelBody mode={mode} conversation={conversation} onClose={closeCopilot} showWidthToggle={false} />
       </SheetContent>
     </Sheet>
   );

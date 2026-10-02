@@ -64,6 +64,7 @@ const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   "knowledge.version.publish": "Godkende og aktivere dokumentversioner",
   "identity.user.manage": "Administrere brugere, roller, teams og lederscopes",
   "system.settings.manage": "Administrere systemindstillinger",
+  "ai.quality.read": "Læse metadata og videnshuller fra AI-loggen til kvalitetsarbejde (kun når det er slået til)",
 };
 
 /** Which fixture user the demo shows for each role. */

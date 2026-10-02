@@ -3,7 +3,7 @@
  * answer anatomy, source components and special answer states. No AI produced them.
  * Must never be used as or mixed with production data.
  */
-import type { CopilotConversation } from "@/types/domain";
+import type { CopilotConversation, CopilotExchange, SourceReference } from "@/types/domain";
 
 import { mockSources, withNumber } from "./sources";
 
@@ -131,3 +131,42 @@ export const mockCopilotExampleQuestions = [
   "Hvornår skal en kunde forelægges tegningsafdelingen?",
   "Hvilke oplysninger skal jeg indhente ved nytegning?",
 ];
+
+/* ── Demo answers (phase 8, docs/08 §13) ──────────────────────────────────────────────────
+ * ⚠ MOCK — the Vercel demo has no database, so the AI Gateway cannot run there (and the stub
+ * model is refused outside local/test). A question asked in the demo gets a FIXED mock answer
+ * from this list; no model and no search is involved. Never used when a database is connected.
+ */
+
+const UNVERIFIABLE_EXAMPLE = "Eksempel: et svar, der ikke kan dokumenteres";
+const LOCKED_EXAMPLE = "Eksempel: Copilot under en aktiv prøve";
+
+/** The questions the demo can answer — every one has a fixed mock answer. */
+export const mockCopilotDemoExamples: readonly string[] = [
+  ...mockCopilotConversations.flatMap((conversation) => conversation.exchanges.map((exchange) => exchange.question)),
+  UNVERIFIABLE_EXAMPLE,
+  LOCKED_EXAMPLE,
+];
+
+export type MockCopilotDemoResult =
+  | { kind: "exchange"; exchange: CopilotExchange }
+  | { kind: "unverifiable"; sources: SourceReference[] }
+  | { kind: "locked"; message: string }
+  | { kind: "notice"; message: string };
+
+/** The fixed mock answer for a question asked in the demo. */
+export function mockCopilotDemoAnswer(question: string): MockCopilotDemoResult {
+  const normalized = question.trim().toLocaleLowerCase("da");
+  const exchange = mockCopilotConversations
+    .flatMap((conversation) => conversation.exchanges)
+    .find((entry) => entry.question.toLocaleLowerCase("da") === normalized);
+  if (exchange) return { kind: "exchange", exchange: { ...exchange, id: `${exchange.id}-demo` } };
+  if (normalized === UNVERIFIABLE_EXAMPLE.toLocaleLowerCase("da")) {
+    return { kind: "unverifiable", sources: [withNumber(mockSources.liabilityTermsV3, 1), withNumber(mockSources.liabilityGuideV4, 2)] };
+  }
+  if (normalized === LOCKED_EXAMPLE.toLocaleLowerCase("da")) return { kind: "locked", message: "Copilot er slået fra under prøven." };
+  return {
+    kind: "notice",
+    message: "I demoen uden database besvares kun eksempelspørgsmålene med faste mock-svar. Vælg et af dem herunder.",
+  };
+}

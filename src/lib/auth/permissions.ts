@@ -23,7 +23,9 @@ export type PermissionKey =
   | "knowledge.document.write"
   | "knowledge.version.publish"
   | "identity.user.manage"
-  | "system.settings.manage";
+  | "system.settings.manage"
+  /** Phase 8 (B-014): reading AI-log metadata for quality work — gives no access while switched off. */
+  | "ai.quality.read";
 
 export interface PermissionGrant {
   key: PermissionKey;

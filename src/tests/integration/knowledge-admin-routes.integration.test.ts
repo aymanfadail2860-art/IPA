@@ -117,7 +117,7 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
 
   it("shows the Knowledge Base with the conflict queue, gaps, coverage and the retrieval tool", async () => {
     const page = await get("/admin/knowledge-base", "admin");
-    for (const text of ["Konfliktkø", "Huller i gyldigheden", "Dækning pr. produkt", "Registreres, når Copilot tages i brug", productName]) {
+    for (const text of ["Konfliktkø", "Huller i gyldigheden", "Dækning pr. produkt", "Registreres i AI-loggen — visningen er slået fra", productName]) {
       expect(page.body, text).toContain(text);
     }
     const tool = await get("/admin/knowledge-base/retrieval", "admin");
@@ -138,7 +138,7 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
 
   it("shows the real (empty) state of knowledge gaps on the overview — no mock numbers next to real ones", async () => {
     const page = await get("/admin", "admin");
-    expect(page.body).toContain("Registreres, når Copilot tages i brug");
+    expect(page.body).toContain("Registreres i AI-loggen — visningen er slået fra");
     for (const mock of ["Dækning ved brug af droner", "Solceller på erhvervsbygninger", "Ransomware-betaling"]) expect(page.body, mock).not.toContain(mock);
     expect(page.body).not.toMatch(/\d+ forespørgsler/);
   });

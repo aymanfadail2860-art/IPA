@@ -2,12 +2,14 @@
 
 import { MessagesSquare, PanelLeft, Plus, Sparkles } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Chip } from "@/components/common/chip";
 import { CopilotAnswer } from "@/components/copilot/copilot-answer";
 import { CopilotInput } from "@/components/copilot/copilot-input";
-import { PendingQuestion } from "@/components/copilot/pending-question";
+import { CopilotQuestion } from "@/components/copilot/copilot-result";
+import { useCopilotQuestions, type CopilotDevFlags, type CopilotMode } from "@/components/copilot/use-copilot-questions";
+import { CopilotDevTools } from "@/dev/ai/copilot-dev-tools";
 import { DocumentViewer } from "@/components/knowledge/document-viewer";
 import { SourceCard } from "@/components/knowledge/source-card";
 import { COPILOT_PAGE_INPUT_ID } from "@/components/shell/app-shell";
@@ -40,6 +42,9 @@ function ConversationList({
         <Plus aria-hidden />
         Ny samtale
       </Button>
+      {conversations.length === 0 ? (
+        <p className="px-2 text-caption text-fg-tertiary">Samtaler gemmes ikke i denne udviklingsversion.</p>
+      ) : null}
       {(Object.keys(GROUP_LABELS) as ConversationGroup[]).map((group) => {
         const items = conversations.filter((conversation) => conversation.group === group);
         if (items.length === 0) return null;
@@ -83,11 +88,17 @@ function ConversationList({
  * source column on the right that is always visible when there is an answer.
  */
 export function CopilotWorkspace({
+  mode,
   conversations,
   exampleQuestions,
+  devTools = false,
 }: {
+  /** live: every question goes through the AI Gateway. demo: fixed mock answers (no database). */
+  mode: CopilotMode;
   conversations: readonly CopilotConversation[];
   exampleQuestions: readonly string[];
+  /** Development tools (local/test only, docs/08 §13). */
+  devTools?: boolean;
 }) {
   const searchParams = useSearchParams();
   const initialQuestion = searchParams.get("q");
@@ -95,18 +106,31 @@ export function CopilotWorkspace({
   const isDesktop = useMediaQuery(BREAKPOINTS.desktop);
 
   const [selectedId, setSelectedId] = useState<string | null>(initialQuestion ? null : (conversations[0]?.id ?? null));
-  const [asked, setAsked] = useState<string[]>(initialQuestion ? [initialQuestion] : []);
+  const [devFlags, setDevFlags] = useState<CopilotDevFlags>({ forceUnverifiable: false, forceInsufficient: false });
+  const { entries, ask, clear } = useCopilotQuestions(mode, { dev: devTools ? devFlags : undefined });
+  const askedInitial = useRef(false);
+  useEffect(() => {
+    if (initialQuestion && !askedInitial.current) {
+      askedInitial.current = true;
+      ask(initialQuestion);
+    }
+  }, [initialQuestion, ask]);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [openDocument, setOpenDocument] = useState<SourceReference | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const conversation = conversations.find((entry) => entry.id === selectedId) ?? null;
-  const latest = conversation?.exchanges.at(-1) ?? null;
-  const sources = latest?.sources ?? [];
+  const latestEntry = entries.at(-1)?.result;
+  const sources =
+    entries.length > 0
+      ? latestEntry?.kind === "exchange"
+        ? latestEntry.exchange.sources
+        : []
+      : (conversation?.exchanges.at(-1)?.sources ?? []);
 
   function selectConversation(id: string) {
     setSelectedId(id);
-    setAsked([]);
+    clear();
     setActiveSourceId(null);
     setOpenDocument(null);
     setHistoryOpen(false);
@@ -114,7 +138,7 @@ export function CopilotWorkspace({
 
   function newConversation() {
     setSelectedId(null);
-    setAsked([]);
+    clear();
     setOpenDocument(null);
     setHistoryOpen(false);
     document.getElementById(COPILOT_PAGE_INPUT_ID)?.focus();
@@ -168,10 +192,13 @@ export function CopilotWorkspace({
 
         <div className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-4 py-8 md:px-8">
           <p className="rounded-md bg-surface-sunken px-3 py-2 text-caption text-fg-secondary">
-            Eksempelsamtaler med fiktive data. Copilot er ikke forbundet til vidensgrundlaget i denne udviklingsversion.
+            {mode === "demo"
+              ? "Demo uden database: eksempelsamtaler og faste mock-svar med fiktive data. Ingen AI og ingen søgning."
+              : "Udviklingsversion: svarene dannes gennem AI Gateway af en stub-model uden AI, ud fra det godkendte vidensgrundlag. Samtaler gemmes ikke."}
           </p>
+          {devTools ? <CopilotDevTools flags={devFlags} onFlags={setDevFlags} /> : null}
 
-          {conversation === null && asked.length === 0 ? (
+          {conversation === null && entries.length === 0 ? (
             <div className="space-y-4">
               <p className="flex items-center gap-2 text-heading-2 text-fg-primary">
                 <MessagesSquare className="size-5 text-fg-tertiary" aria-hidden />
@@ -184,7 +211,7 @@ export function CopilotWorkspace({
               <ul className="flex flex-wrap gap-2">
                 {exampleQuestions.map((question) => (
                   <li key={question}>
-                    <Chip onClick={() => setAsked((items) => [...items, question])}>{question}</Chip>
+                    <Chip onClick={() => ask(question)}>{question}</Chip>
                   </li>
                 ))}
               </ul>
@@ -198,13 +225,31 @@ export function CopilotWorkspace({
               activeSourceId={activeSourceId}
               onSelectSource={selectSource}
               inlineSources={!showSourceColumn}
-              onFollowUp={(question) => setAsked((items) => [...items, question])}
+              onFollowUp={ask}
             />
           ))}
 
-          {asked.map((question, index) => (
-            <PendingQuestion key={`${question}-${index}`} question={question} />
+          {entries.map((entry) => (
+            <CopilotQuestion
+              key={entry.id}
+              entry={entry}
+              mode={mode}
+              activeSourceId={activeSourceId}
+              onSelectSource={selectSource}
+              inlineSources={!showSourceColumn}
+              onFollowUp={ask}
+              onRetry={ask}
+            />
           ))}
+          {mode === "demo" && entries.at(-1)?.result?.kind === "notice" ? (
+            <ul className="flex flex-wrap gap-2">
+              {exampleQuestions.map((question) => (
+                <li key={question}>
+                  <Chip onClick={() => ask(question)}>{question}</Chip>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
 
         <div className="sticky bottom-0 border-t border-border-subtle bg-surface-base/95 px-4 py-4 backdrop-blur-sm md:px-8">
@@ -214,7 +259,7 @@ export function CopilotWorkspace({
               label="Stil et opfølgende spørgsmål"
               placeholder={conversation ? "Stil et opfølgende spørgsmål" : "Stil et fagligt spørgsmål"}
               context={conversation?.context ?? null}
-              onSubmit={(question) => setAsked((items) => [...items, question])}
+              onSubmit={ask}
             />
           </div>
         </div>

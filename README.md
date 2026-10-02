@@ -4,7 +4,7 @@ AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instr
 `CLAUDE.md`, specifikationen i `docs/` og faseoversigten i `docs/roadmap.md`.
 
 **Status:** Fase 7 — Knowledge Engine er gennemført og låst (`docs/07-knowledge-engine.md`).
-Fase 8 — AI Gateway er specificeret og afventer godkendelse (`docs/08-ai-gateway.md`).
+Fase 8 — AI Gateway er implementeret og afventer godkendelse (`docs/08-ai-gateway.md`).
 Fase 9 er foreslået (`docs/roadmap.md`). Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
@@ -38,6 +38,17 @@ Log ind som `admin@ipa.test` med adgangskoden fra `IPA_DEV_SEED_PASSWORD`. Gå d
 5. **Dokumentkonflikter:** upload et andet dokument med samme produkt og dokumenttype og
    overlappende gyldighed, og godkend det. Konflikten står i **Knowledge Base → Konfliktkø**.
 6. **Knowledge Base → Afprøv retrieval** viser evidensen for den indloggede bruger.
+
+### Copilot på AI Gateway (lokalt, fase 8)
+
+Med en database går hvert spørgsmål i **Copilot** gennem AI Gateway (`docs/08`). Svaret dannes
+af en stub-model uden AI ud fra det godkendte vidensgrundlag og er markeret "Udviklingssvar —
+ingen AI-model". Rådgivere ser kun svar fra dokumenter, de er tildelt.
+**Udviklingsværktøjet** øverst i Copilot (kun med `IPA_RUNTIME_ENV=local`/`test`) kan starte og
+aflevere en prøve og starte og afslutte et rollespil, så den låste tilstand kan ses. Det kan også
+fremtvinge "kan ikke dokumenteres" og "utilstrækkeligt grundlag". Kør migrationen
+`20261002000100_ai_gateway.sql`. Skemaerne `ai`, `assessment` og `practice` er eksponeret i
+`supabase/config.toml`.
 
 | Script | Formål |
 |--------|--------|

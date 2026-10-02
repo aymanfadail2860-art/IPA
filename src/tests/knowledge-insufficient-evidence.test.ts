@@ -175,6 +175,8 @@ describe("development tool: force 'insufficient' (B-009) — never a production 
       .sort();
     expect(users).toEqual([
       "app/(platform)/admin/knowledge-base/retrieval/retrieval-tool.tsx",
+      // Phase 8: the same per-call development tool in Copilot's development tools (docs/08 §13).
+      "lib/ai/core/gateway-core.ts",
       "lib/knowledge/admin-actions.ts",
       "lib/knowledge/retrieval-core.ts",
       "lib/knowledge/retrieval.ts",

@@ -4,7 +4,7 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–7 er gennemført og **låst**. Fase 7 — Knowledge Engine er godkendt
-(2026-10-02). Fase 8 — AI Gateway: **specifikation godkendt — under implementering**
+(2026-10-02). Fase 8 — AI Gateway: **implementeret — afventer godkendelse**
 (`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
 afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 
@@ -26,7 +26,7 @@ afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
-| 8 | AI Gateway | 🔨 Specifikation godkendt — under implementering | `docs/08-ai-gateway.md` |
+| 8 | AI Gateway | 🔨 Implementeret — afventer godkendelse | `docs/08-ai-gateway.md` |
 | 9 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
 | 10+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
@@ -297,8 +297,11 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 
 ## Fase 8 — AI Gateway
 
-**Status:** 🔨 Specifikationen er godkendt 2026-10-02 (B-012 til B-017). Implementeringen er i gang
-(`docs/08-ai-gateway.md`). Fasen blev besluttet 2026-10-02 (B-011).
+**Status:** 🔨 Implementeret — afventer godkendelse. Specifikationen blev godkendt 2026-10-02
+(B-012 til B-017). Lint, typecheck, build, enhedstests (213), pgTAP (302) samt integrations- og
+rutetests (107) består, og mutationstestene fanger 25 af 25 kodemutationer og 14 af 14
+databasemutationer. Status og kendte begrænsninger står i `docs/08` §18. Fasen blev besluttet
+2026-10-02 (B-011).
 
 **Formål:** Politiklaget mellem applikationen og AI-modeller (`docs/03` §9). Det skal bygges
 uanset udbyder og kan testes uden en. Det afgør, hvilke kundedata der forlader platformen,

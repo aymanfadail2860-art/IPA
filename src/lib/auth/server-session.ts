@@ -24,6 +24,7 @@ const PERMISSION_KEYS = new Set<PermissionKey>([
   "knowledge.version.publish",
   "identity.user.manage",
   "system.settings.manage",
+  "ai.quality.read",
 ]);
 
 function initials(name: string): string {

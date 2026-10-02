@@ -1,7 +1,7 @@
 import "server-only";
 
 import { isDemoMode } from "@/dev/demo/demo-mode";
-import { authorize } from "@/lib/auth/server-session";
+import { getServerSession } from "@/lib/auth/server-session";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -20,13 +20,12 @@ import type { RetrievalOutcome } from "./result-presentation";
  *
  *   * Runs as the signed-in user: the database filters by that user's document access (RLS
  *     and the access filter in knowledge.search_chunks). There is no way to search as someone
- *     else, and no admin shortcut.
+ *     else, and no admin shortcut. Advisors and leaders reach knowledge only through document
+ *     grants (docs/07 §4.3), so no role permission is required here — the database decides.
  *   * The embedder and the reranker come from the fail-closed registry (docs/07 §9.1). They are
  *     never parameters, so a caller cannot choose a reranker or set the evidence grade.
  *   * The query is not stored or logged.
  */
-
-const READ = { allOf: ["knowledge.document.read"] } as const;
 
 let configuredReranker: Reranker | null = null;
 const embedders = new Map<string, Embedder>();
@@ -72,7 +71,10 @@ export interface RetrievalDevOptions {
 
 export async function retrieveEvidence(request: RetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
-  if (!(await authorize(READ))) throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
+  // An active platform user is required. WHICH documents the user may read is decided by the
+  // database (docs/07 §4.1): administrators through the role, advisors and leaders through
+  // document grants — never through a role permission, so the role is not checked here.
+  if (!(await getServerSession())) throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
 
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
   const model = await activeModel(knowledge);

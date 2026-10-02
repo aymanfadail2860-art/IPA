@@ -1,8 +1,9 @@
 # 08 — AI Gateway
 
 **Fase:** 8 — AI Gateway
-**Status:** Specifikationen er godkendt 2026-10-02 med afgørelserne B-012 til B-017.
-Implementeringsstatus står i §18.
+**Status:** 🔨 **Implementeret — afventer godkendelse.** Specifikationen blev godkendt
+2026-10-02 med afgørelserne B-012 til B-017. Implementeringsstatus, tests og kendte
+begrænsninger står i §18.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/07` (låst) og `docs/decisions.md` (B-011 til B-017).
 
@@ -33,7 +34,7 @@ konstrueres uden for `local` og `test`.
 | Stub-model og fail-closed modelregister (§3) | Valg af embedding- og reranking-udbyder (fase 9) |
 | Fem workflow-profiler med prompt, handlinger og output-kontrakt (§4) | Learn AI, Practice AI, Advise AI og Assessment AI som moduler med brugerflade |
 | Datakategori-matricen som data (§5) | Samtalelagring og -historik (`ai.conversations`, `messages`), se §16 Q-5 |
-| Dataminimering (§6) og redaction (§7) | Citations-tabellen og videnshuller (kræver rigtige svar) |
+| Dataminimering (§6) og redaction (§7) | Citations-tabellen og en Admin-visning af videnshuller (læsningen er slået fra, B-014) |
 | Permission-tjek i gatewayen (§8) | Endelig compliancebeslutning om kundedata (`docs/03` §17 pkt. 4) |
 | Server-side gating under Assessment og AI-rollespil (§9) | Assessment og Practice som moduler |
 | Logning af kald, kilder og indhold (§11) | Retentionsperioder (`docs/03` §17 pkt. 5) — kun mekanismen |
@@ -59,6 +60,7 @@ AiRequest (profil, handling, brugerens input, kontekst-reference)
  → 2. Profil                     slås op i registret; ukendt profil/handling → afvist
  → 3. Permission-tjek            §8 — mod databasen, med brugerens egen identitet
  → 4. Gating                     §9 — sessionstilstand i databasen
+ → (redaction af brugerens tekst §7 — før retrieval, se nedenfor)
  → 6. Retrieval                  retrieveEvidence med profilens retrieval-profil (docs/03 §7)
  → 7. Evidenskrav                ingen evidens → "utilstrækkeligt grundlag"; modellen kaldes ikke
  → 8. Dataminimering             §6 — kun profilens tilladte dele og felter
@@ -72,7 +74,13 @@ AiRequest (profil, handling, brugerens input, kontekst-reference)
 ```
 
 Trinene kører i den rækkefølge. Et trin, der afviser, stopper flowet, og intet efterfølgende
-trin kører. Især når intet afvist kald frem til modellen. Logningen (trin 14) sker altid.
+trin kører. Især når intet afvist kald frem til modellen. Logningen (trin 14) sker altid for en
+indlogget bruger. Kan et kald ikke logges, vises det ikke (`unavailable`), for det, der har
+forladt platformen, skal altid kunne spores. **(udledt)**
+
+Brugerens tekst redigeres **før retrieval** og ikke først i trin 9. Så søges der på det faglige
+spørgsmål og ikke på kundens identitet (`docs/03` §9, "Advise er privacy-first"). Kontekstens
+allowlist (§6) anvendes allerede ved trin 2. **(udledt under implementeringen)**
 
 **`AiOutcome`** er eksplicit, ligesom `RetrievalOutcome` i fase 7 (B-007):
 
@@ -523,7 +531,7 @@ Admin-oversigten viser tilstanden. En utilgængelig gateway vises altid som syst
 
 | Miljø | Hvad sker der |
 |-------|---------------|
-| **Lokalt og i test, med database** | Copilot (hovedområde og globalt panel) sender spørgsmålet via en server action til `runAiRequest` med Copilot-profilen. Svaret vises med de eksisterende komponenter: svar med kildemarkører, grundlagslinje, kildekort (med `leadIn`), konflikt- og historisk markering. Et banner viser "Udviklingssvar — ingen AI-model". "Utilstrækkeligt grundlag" og låst tilstand kommer fra gatewayens udfald. Gating sættes til og fra med et markeret udviklingsværktøj (kun `local`/`test`, som B-009), der starter og afslutter et forsøg eller rollespil gennem funktionerne i §9.2. "Kan ikke dokumenteres" kan fremtvinges med et udviklingsværktøj, der vælger en stub-variant, som bryder kontrakten (kun `local`/`test`) |
+| **Lokalt og i test, med database** | Copilot (hovedområde og globalt panel) sender spørgsmålet via en server action til `runAiRequest` med Copilot-profilen. Svaret vises med de eksisterende komponenter: svar med kildemarkører, grundlagslinje, kildekort (med `leadIn`), konflikt- og historisk markering. Et banner viser "Udviklingssvar — ingen AI-model". "Utilstrækkeligt grundlag" og låst tilstand kommer fra gatewayens udfald. Gating sættes til og fra med et markeret udviklingsværktøj (kun `local`/`test`, som B-009), der starter og afslutter et forsøg eller rollespil gennem funktionerne i §9.2. "Kan ikke dokumenteres" kan fremtvinges med en stub-variant, der bryder kontrakten, og "utilstrækkeligt grundlag" med samme værktøj som B-009. Begge er valg pr. kald og afvises af gatewayen uden for `local`/`test` |
 | **Vercel-demoen uden database** | Gatewayen kan ikke køre: ingen database, og stubben nægtes uden for `local`/`test`. Copilot viser i stedet realistiske mock-svar med kildekomponenter fra `src/mocks/`, tydeligt markeret som mock, så brugerfladen kan vurderes. Et nyt spørgsmål besvares med et fast mock-svar, ikke af en model. Eksempelsamtalerne dækker også "kan ikke dokumenteres". Se §16 Q-6 |
 
 Mock-svar og stub-svar blandes aldrig: i et miljø med database vises ingen mock-samtaler.
@@ -595,3 +603,74 @@ Desuden blev henvisningen i `docs/07` §20.6 rettet fra fase 8 til fase 9 (B-012
 6. `runAiRequest` med alle trin, udfald, tilgængelighed og logning.
 7. Copilot-brugerfladen lokalt og mock-svar i demoen.
 8. Integrations-, rute- og mutationstests. Opdatering af dokumentet og roadmap.
+
+---
+
+## 18. Implementeringsstatus — implementeret, afventer godkendelse (2026-10-02)
+
+Alle otte trin i §17 er bygget. Lint, typecheck, build, enhedstests, pgTAP, integrations- og
+rutetests består. Fasen er **ikke** markeret som gennemført.
+
+### 18.1 Hvad der er bygget
+
+| Del | Hvor |
+|-----|------|
+| Migration: `ai`-skemaet (matrice, indstillinger, opdelt log, `record_call`, administratorfunktioner), de minimale tabeller i `assessment` og `practice`, permissionen `ai.quality.read` | `supabase/migrations/20261002000100_ai_gateway.sql` |
+| Kerne: typer, model-interface, `invokeModel` (B-012), fail-closed register, stub-model, profiler, output-kontrakter, matrice, redaction, gating og pipelinen | `src/lib/ai/core/` |
+| Server: `runAiRequest`, `getGatewayAvailability`, databaseafhængigheder, Copilots server action | `src/lib/ai/gateway.ts`, `gateway-deps.ts`, `copilot-actions.ts` |
+| Visning: `AiOutcome`, `presentAi`, afbildning til Copilots svarvisning | `src/lib/ai/outcome.ts`, `copilot-view.ts` |
+| Brugerflade: Copilot (hovedområde og globalt panel) på gatewayen, tilstanden "kan ikke dokumenteres", gatewayens tilstand i Admin | `src/components/copilot/`, `src/components/knowledge/unverifiable-answer.tsx`, `src/components/knowledge-admin/gateway-status.tsx` |
+| Udviklingsværktøjer (kun `local`/`test`) og demoens faste mock-svar | `src/dev/ai/`, `src/dev/demo/copilot-demo.ts`, `src/mocks/copilot.ts` |
+
+### 18.2 Afklaringer under implementeringen (udledt — til bekræftelse)
+
+1. **Rettelse i fase 7-koden: `retrieveEvidence` krævede rollerettigheden
+   `knowledge.document.read`.** Rådgivere og ledere har kun adgang gennem dokumenttildelinger
+   (`docs/07` §4.1 og §4.3). Med kravet ville de altid blive afvist, når en AI-funktion søgte for
+   dem. Fejlen viste sig først nu, fordi Admin-værktøjet var den eneste bruger i fase 7. Koden
+   kræver nu en aktiv session, og databasen afgør adgangen, som `docs/07` foreskriver.
+   `docs/07` er ikke ændret, for det var koden, der afveg. "Afprøv retrieval" kræver fortsat
+   Admin-adgang og `knowledge.document.read`.
+2. **Logningsfejl er fail-closed.** Kan et kald ikke logges, vises svaret ikke (§1).
+3. **Redaction før retrieval** (§1).
+4. **Svarets kilder er de citerede.** Copilot viser de kilder, svaret hviler på, i
+   citationsrækkefølge. "Kan ikke dokumenteres" viser alle de fundne kilder (B-016).
+5. **Sletning af en kundecase.** Fremmednøglen nulstiller `case_id` i metadata, og indholdet
+   slettes. Append-only-triggeren tillader netop den ene ændring. pgTAP-testen fandt problemet.
+6. **Et forsøg med udløbet tidsgrænse** får status `expired`, når brugeren starter et nyt. Det
+   låser ikke i mellemtiden (§9.2).
+7. **Ukendt model eller manglende matrice-rækker** gør gatewayen `unavailable` i Admin og
+   `blocked_policy` for et kald.
+
+### 18.3 Tests
+
+| Lag | Antal | Hvad |
+|-----|-------|------|
+| Enhedstests (vitest) | 213 i alt, heraf 46 nye | Parringsreglen (B-012) med typetest, fail-closed register, guardrails i kildekoden (kun `invokeModel` kalder modeller, ingen klientimport af gatewayen), pipelinen med falske afhængigheder (svar, alle afvisninger, gating, matrice, minimering, redaction, gen-identifikation, kontraktbrud, logning) og redaction-korpus |
+| pgTAP | 302 i alt, heraf 64 nye (`ai_gateway.test.sql`) | Matricen (fail-closed, audit med hvem, hvad og hvornår, ingen direkte skrivning), gating-tabellerne, loggen (én vej ind, egne rækker, sagsbundet indhold, videnshuller, append-only, sletning med sagen) og administratorlæsning (slået fra, permission, audit, intet bruger- eller sags-id) |
+| Integration og rute | 107 i alt, heraf 10 nye | Gatewayen mod den rigtige database som rådgiver og administrator: svar gennem retrieval, utilstrækkeligt uden tildeling, privat log, sagsbundet kald uden virksomhedsnavn hos modellen, gating læst fra databasen, matricen i databasen. Copilot i den kørende app og gatewayen nægtet med `IPA_RUNTIME_ENV=production` |
+
+**Mutationstests** (testriggen, ikke i repoet), samme standard som fase 7:
+
+- **Kode, 25 af 25 fanget:** parringsreglen (fire mekanismer og typen), registret, `runtimeEnv`,
+  stubbens grad og frysning, gating (Assessment, rollespil, ulæselig tilstand), matricen
+  (manglende række, `audit_access`, profilens indsnævring), redaction (CPR, kendte navne, CVR
+  uden kontekst), kontrakterne, B-016-afbildningen, logningsfejl, evidenskravet og minimering.
+- **Database, 14 af 14 fanget:** matricens audit, constraint, permission og direkte skrivning,
+  administratorlæsningens kontakt og audit, RLS på indhold og metadata, sagsbinding i
+  `record_call`, videnshul med tekst, append-only, aflevering af andres forsøg, gating-funktionen
+  og direkte skrivning af forsøg.
+- Fase 7's 20 guardrail-mutationer er kørt igen og fanges stadig.
+
+### 18.4 Kendte begrænsninger
+
+- **Prompterne er udkast og ikke validerede** (§4.2). Det kræver en rigtig model og
+  evalueringssættet (fase 9).
+- **Redaction er regelbaseret** (§7.2): navne og adresser i fri tekst og policenumre findes ikke.
+- **Practice-replikker kan ikke kontrolleres maskinelt** for produktfakta (§4.3).
+- **Ingen rate limiting** (Q-3) og ingen samtalelagring (Q-5).
+- **Retentionsperioder** er ikke fastlagt. Der slettes intet automatisk (§11.4).
+- **Evidensen er udviklingsgrad.** Copilots svar er stubbens citater af test-embedderens
+  nærmeste naboer. De viser mekanikken, ikke svarkvaliteten.
+- **Demoen** svarer kun på eksempelspørgsmålene med faste mock-svar.
+

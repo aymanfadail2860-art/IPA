@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 
 import { ConflictView } from "@/components/knowledge/conflict-view";
 import { GroundingLine } from "@/components/knowledge/grounding-line";
@@ -53,6 +53,7 @@ export function CopilotAnswer({
   onFollowUp,
   inlineSources = false,
   compact = false,
+  insufficientActions,
 }: {
   exchange: CopilotExchange;
   activeSourceId?: string | null;
@@ -61,6 +62,8 @@ export function CopilotAnswer({
   /** Narrow context panel: sources are listed under the answer instead of in a column. */
   inlineSources?: boolean;
   compact?: boolean;
+  /** Actions under "insufficient". Undefined: the phase 5 example actions; null: none. */
+  insufficientActions?: ReactNode | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
@@ -103,17 +106,21 @@ export function CopilotAnswer({
       {exchange.kind === "insufficient" ? (
         <InsufficientEvidence
           actions={
-            <>
-              <Button size="sm" variant="secondary" onClick={() => onFollowUp?.("Omformulér spørgsmålet")}>
-                Omformulér
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => onFollowUp?.("Søg kun i Erhvervsansvar")}>
-                Søg i et bestemt produkt
-              </Button>
-              <Button size="sm" variant="ghost">
-                Kontakt fagligt ansvarlig
-              </Button>
-            </>
+            insufficientActions !== undefined ? (
+              insufficientActions
+            ) : (
+              <>
+                <Button size="sm" variant="secondary" onClick={() => onFollowUp?.("Omformulér spørgsmålet")}>
+                  Omformulér
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => onFollowUp?.("Søg kun i Erhvervsansvar")}>
+                  Søg i et bestemt produkt
+                </Button>
+                <Button size="sm" variant="ghost">
+                  Kontakt fagligt ansvarlig
+                </Button>
+              </>
+            )
           }
         >
           {body}
@@ -128,7 +135,7 @@ export function CopilotAnswer({
 
       <GroundingLine kind={exchange.kind} sources={exchange.sources} historicalAsOf={exchange.historicalAsOf} />
 
-      {inlineSources ? (
+      {inlineSources && exchange.sources.length > 0 ? (
         <div className="space-y-2">
           <h3 className="text-caption font-medium text-fg-tertiary">Kilder</h3>
           {exchange.sources.map((source) => (

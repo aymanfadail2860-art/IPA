@@ -11,30 +11,11 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { testRetrieval } from "@/lib/knowledge/admin-actions";
-import type { EvidenceItem, EvidenceSet } from "@/lib/knowledge/admin-types";
+import type { EvidenceSet } from "@/lib/knowledge/admin-types";
 import { INSUFFICIENT_TITLE, presentRetrieval, UNAVAILABLE_TITLE, type RetrievalOutcome } from "@/lib/knowledge/result-presentation";
 import { FORCE_INSUFFICIENT_LABEL } from "@/dev/knowledge/force-insufficient";
 import { DOCUMENT_TYPES } from "@/lib/knowledge/document-types";
-import type { SourceReference } from "@/types/domain";
-
-function toSource(item: EvidenceItem, items: readonly EvidenceItem[]): SourceReference {
-  const counterpart = item.conflicts.find((conflict) => conflict.visibility === "visible");
-  return {
-    id: item.evidenceId,
-    number: items.indexOf(item) + 1,
-    documentTitle: item.document.title,
-    version: item.document.versionLabel ?? "—",
-    section: item.location.sectionNumber ? `§${item.location.sectionNumber}` : (item.location.heading ?? ""),
-    page: item.location.pageStart,
-    excerpt: item.excerpt.text,
-    leadIn: item.excerpt.leadIn ?? undefined,
-    validity: item.validity.temporalStatus === "historical" ? "historical" : "current",
-    validFrom: item.validity.validFrom ?? "",
-    validTo: item.validity.validTo ?? undefined,
-    conflictsWith:
-      counterpart && counterpart.visibility === "visible" ? items.findIndex((entry) => entry.evidenceId === counterpart.counterpartEvidenceId) + 1 : undefined,
-  };
-}
+import { evidenceToSource } from "@/lib/knowledge/evidence-source";
 
 /**
  * "Afprøv retrieval" (docs/07 §12.1) — read only, for the signed-in user only. Calls the same
@@ -207,7 +188,7 @@ function Result({ set }: { set: EvidenceSet }) {
       <ol className="space-y-4">
         {set.items.map((item) => (
           <li key={item.evidenceId} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-            <SourceCard source={toSource(item, set.items)} />
+            <SourceCard source={evidenceToSource(item, set.items)} />
             <Card className="space-y-1 text-caption">
               <p className="font-mono text-fg-secondary">
                 {item.evidenceId} · rank {item.relevance.rank} · score {item.relevance.score}

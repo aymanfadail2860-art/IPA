@@ -21,6 +21,8 @@ import { publishedState, type AdminVersionRow, type VersionStatus } from "@/lib/
 import { danishDate } from "@/lib/knowledge/retrieval-core";
 import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
 import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
+import { GatewayStatus } from "@/components/knowledge-admin/gateway-status";
+import { getGatewayAvailability } from "@/lib/ai/gateway";
 import { EmptyState } from "@/components/states/empty-state";
 
 export const metadata: Metadata = { title: "Admin" };
@@ -39,7 +41,7 @@ export default async function AdminOverviewPage() {
     : manager
       ? await Promise.all([listVersions(), listConflicts({ status: "open" }), listGaps()])
       : [[], [], []];
-  const availability = manager ? await getRetrievalAvailability() : null;
+  const [availability, gateway] = manager ? await Promise.all([getRetrievalAvailability(), getGatewayAvailability()]) : [null, null];
   const today = danishDate(new Date());
   const count = (...statuses: VersionStatus[]) => versions.filter((version) => statuses.includes(version.status)).length;
   const published = (key: "future" | "current") =>
@@ -144,12 +146,21 @@ export default async function AdminOverviewPage() {
         </Section>
       ) : null}
 
+      {gateway ? (
+        <Section title="AI Gateway">
+          <GatewayStatus availability={gateway} />
+        </Section>
+      ) : null}
+
       <Section
         title="Videnshuller"
         description="Spørgsmål, Copilot ikke kunne besvare med tilstrækkelig dokumentation."
         action={<Link href="/admin/knowledge-base" className="text-label font-medium text-fg-link hover:underline">Knowledge Base →</Link>}
       >
-        <EmptyState title="Registreres, når Copilot tages i brug">Videnshuller opstår af AI-forespørgsler, som kommer i en senere fase.</EmptyState>
+        <EmptyState title="Registreres i AI-loggen — visningen er slået fra">
+          Videnshuller registreres, når Copilot ikke finder dokumentation. Administratorers læsning af dem er slået fra, indtil
+          det besluttes før produktion (B-014). Fra en kundecase registreres kun, at grundlaget manglede.
+        </EmptyState>
       </Section>
     </PageContainer>
   );

@@ -32,7 +32,8 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           notifications={notifications}
           searchEntries={mockSearchIndex}
           cases={cases}
-          copilotConversation={mockCopilotConversations[0]}
+          copilotConversation={session.demo ? (mockCopilotConversations[0] ?? null) : null}
+          copilotMode={session.demo ? "demo" : "live"}
           mockNotice={session.demo ? DEMO_NOTICE : MOCK_DATA_NOTICE}
         >
           {children}

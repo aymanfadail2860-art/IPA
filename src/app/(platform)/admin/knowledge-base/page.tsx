@@ -135,7 +135,10 @@ export default async function AdminKnowledgeBasePage() {
       </Section>
 
       <Section title="Videnshuller" description="Spørgsmål uden tilstrækkelig dokumentation.">
-        <EmptyState title="Registreres, når Copilot tages i brug">Videnshuller opstår af AI-forespørgsler, som kommer i en senere fase.</EmptyState>
+        <EmptyState title="Registreres i AI-loggen — visningen er slået fra">
+          Videnshuller registreres, når Copilot ikke finder dokumentation. Administratorers læsning af dem er slået fra, indtil
+          det besluttes før produktion (B-014).
+        </EmptyState>
       </Section>
 
       {closed.length > 0 ? (
