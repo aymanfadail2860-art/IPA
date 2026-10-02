@@ -5,6 +5,28 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-008 — Retrieval-tallene skal valideres, før production-evidens må bruges
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §9, §8.3 og §20.4
+
+**Beslutning:** Tallene for reranking og evidensudvælgelse er ikke validerede. Test-embedderen
+giver altid træffere uden reel lighed, og med `none`-rerankeren er tærsklen virkningsløs.
+Tallene vurderes først med et evalueringssæt samt en rigtig embedder og reranker. Det er en
+forudsætning, før AI-modulerne må bruge production-evidens. Stien "Der findes ikke tilstrækkelig
+dokumentation" testes deterministisk uden embedder.
+
+**Overvejede alternativer:**
+- *At nøjes med en note i implementeringsstatus.* Fravalgt: begrænsningen rammer den sti, der
+  forhindrer svar uden dokumentation, og må ikke kunne overses.
+- *At tune tallene med test-embedderen.* Fravalgt: test-embedderen har ingen semantik, så tal
+  tunet med den ville give falsk sikkerhed.
+
+**Begrundelse:** "Utilstrækkeligt grundlag" er det vigtigste svar, systemet kan give
+(`docs/04` §16, KRAV-AI-004). Under test med test-implementeringerne udløses det næsten aldrig.
+
+---
+
 ## B-007 — Utilgængelig retrieval er en systemfejl; ingen mock-videnshuller i Admin
 
 **Dato:** 2. oktober 2026

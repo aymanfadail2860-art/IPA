@@ -4,6 +4,7 @@ import { createEmbedder, createReranker } from "@/lib/knowledge/core/registry";
 import { requireProductionEvidence, EvidenceGradeError } from "@/lib/knowledge/core/evidence";
 import type { EmbeddingModelSpec } from "@/lib/knowledge/core/embedding";
 import { runRetrieval, RetrievalError, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
+import { presentRetrieval } from "@/lib/knowledge/result-presentation";
 
 import { buildPdf, longListFixturePages, type PdfPage } from "../fixtures/knowledge-pdfs";
 
@@ -137,9 +138,16 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("retrieval end to e
     expect(item!.documentVersionId).toBe(x2.versionId);
     expect(item!.validity.temporalStatus).toBe("current");
     expect(item!.excerpt.text).toContain(`${xMarker} i anden version`);
-    expect(item!.relevance.reasons.map((reason) => reason.kind)).toEqual(expect.arrayContaining(["lexical_match", "vector_similarity", "fused_rank"]));
+    expect(item!.relevance.reasons.map((reason) => reason.kind)).toEqual(expect.arrayContaining(["lexical_match", "fused_rank"]));
     expect(set.items.filter((entry) => entry.documentId === x1.documentId)).toHaveLength(1);
     expect(set.retrieval).toMatchObject({ grade: "development", embeddingModel: { id: "test:test-hash-embedder@1" }, reranker: { id: "none" } });
+
+    // The vector retriever, asserted within the document itself: across all readable documents the
+    // hash-based test embedder ranks by chance collisions, not meaning (docs/07 §20.4), so whether
+    // this chunk is among the vector candidates there depends on the accumulated test data.
+    const scoped = await search("advisorB", { query: xMarker, documentIds: [x1.documentId] });
+    expect(scoped.items.map((entry) => entry.documentVersionId)).toEqual([x2.versionId]);
+    expect(scoped.items[0]!.relevance.reasons.map((reason) => reason.kind)).toEqual(expect.arrayContaining(["lexical_match", "vector_similarity", "fused_rank"]));
   });
 
   it("isolates documents: a verbatim unique phrase from a document without a grant gives 0 chunks", async () => {
@@ -226,5 +234,14 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("retrieval end to e
     const set = await search("advisorB", { query: xMarker });
     expect(set.items.length).toBeGreaterThan(0);
     expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
+  });
+
+  it('gives "Der findes ikke tilstrækkelig dokumentation" against the real database when nothing matches (no embedder)', async () => {
+    const set = await runRetrieval(
+      { query: `ingenmatch${RUN}xyz` },
+      { db: (await signedInClient("admin")).schema("knowledge"), embedding: null, reranker: createReranker("none", "test") },
+    );
+    expect(set.items).toEqual([]);
+    expect(presentRetrieval({ kind: "evidence", set })).toBe("insufficient");
   });
 });

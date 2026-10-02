@@ -295,6 +295,9 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 - [AFKLARES]: virusscanning af uploads. Skal afklares før håndtering af rigtige dokumenter og
   ændrer ikke fase 7-specifikationen.
 - Afklaringerne i `docs/07` §20.2 skal bekræftes.
+- Forudsætning før AI-modulerne må bruge production-evidens: tallene for reranking og
+  evidensudvælgelse skal valideres med et evalueringssæt og en rigtig embedder og reranker
+  (`docs/07` §20.4, B-008).
 
 ---
 

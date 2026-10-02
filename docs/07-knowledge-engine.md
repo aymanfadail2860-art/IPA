@@ -1175,10 +1175,8 @@ gennemgangen (B-007). Resten afventer bekræftelse.
    transaktionslokalt i funktionen (`set_config`), fordi en funktionsattribut kræver
    superbruger.
 3. **`none`-rerankerens score** er fusionsscoren relativt til forespørgslens bedste kandidat
-   (topkandidaten = 1). Tallene i `DEFAULT_RETRIEVAL_CONFIG` (`candidateK` 50, `rerankN` 30,
-   `topK` 8, `maxPerVersion` 3, `minScore` 0,1, RRF-k 60) er foreløbig konfiguration. Med
-   test-embedderen giver vektorsøgningen altid de nærmeste naboer, også uden reel lighed.
-   Scoren vises i "Afprøv retrieval".
+   (topkandidaten = 1). Tallene i `DEFAULT_RETRIEVAL_CONFIG` er ikke validerede. Se §20.4,
+   som er en forudsætning for production-evidens.
 4. **Sammenlagte nabochunks** bliver ét evidenselement. `chunkId` er det første chunk, og det
    nye felt `chunkIds` lister alle chunks. Uddraget genskabes præcist som `[char_start,
    char_end)`. Kan teksten imellem ikke genskabes, lægges chunks ikke sammen.
@@ -1219,9 +1217,9 @@ gennemgangen (B-007). Resten afventer bekræftelse.
 | Lag | Resultat |
 |-----|----------|
 | Lint, typecheck (app og worker), build | Består |
-| Enhedstests (Vitest) | 157 |
+| Enhedstests (Vitest) | 161 |
 | pgTAP | 238 (identity 9, foundation 40, storage 11, ingestion 23, embeddings 21, review 41, retrieval 39, conflicts 54) |
-| Integrations- og rutetests mod lokal Supabase og den kørende app (også en instans med `IPA_RUNTIME_ENV=production`, hvor retrieval er utilgængelig) | 96 |
+| Integrations- og rutetests mod lokal Supabase og den kørende app (også en instans med `IPA_RUNTIME_ENV=production`, hvor retrieval er utilgængelig) | 97 |
 
 **Mutationstests.** Hver mekanisme blev fjernet eller svækket enkeltvis, testene blev kørt, og
 koden blev gendannet. Bagefter bestod alle tests igen.
@@ -1241,7 +1239,43 @@ koden blev gendannet. Bagefter bestod alle tests igen.
   ækvivalente statuskrav i samme forespørgsel kan fjernes uden testfejl, fordi det andet er en
   bevidst redundans.
 
-### 20.4 Ikke afgjort
+### 20.4 Begrænsning: retrieval-tallene er ikke validerede (B-008)
+
+**Det er en forudsætning, før AI-modulerne må bruge production-evidens.**
+
+- **Tallene for reranking og evidensudvælgelse er ikke validerede.** `candidateK` 50,
+  `rerankN` 30, `topK` 8, `maxPerVersion` 3, `minScore` 0,1 og RRF-k 60 er foreløbige
+  standardværdier i `DEFAULT_RETRIEVAL_CONFIG`. Ingen af dem er målt mod rigtige spørgsmål og
+  rigtige dokumenter.
+- **Test-embedderen giver altid træffere uden reel lighed.** Den hasher ord og har ingen
+  semantisk forståelse. Vektorsøgningen returnerer derfor altid de nærmeste naboer, også når
+  intet ligner forespørgslen.
+- **Med `none`-rerankeren er tærsklen virkningsløs.** Scoren er relativ, og den bedste
+  kandidat får altid 1. "Der findes ikke tilstrækkelig dokumentation" opstår derfor i dag kun,
+  når der slet ingen kandidater er. Med test-embedderen er der næsten altid kandidater. Stien,
+  der forhindrer et svar uden dokumentation, er dermed den vigtigste i hele Knowledge Engine,
+  og den kan ikke vurderes realistisk med test-implementeringerne.
+- **Test-embedderens tilfældighed har vist sig i testene.** En integrationstest, der krævede,
+  at et bestemt dokument blev fundet af vektorsøgningen blandt alle læsbare dokumenter,
+  fejlede én gang, fordi ældre testdokumenter ramte de samme hash-felter. Testen kræver nu
+  vektortræf inden for dokumentet selv. Det viser samme begrænsning: vektorrangen med
+  test-embedderen er tilfældig og siger intet om relevans.
+- **Stien er testet deterministisk uden embedder.** Enhedstests stubber retrieval til at
+  returnere ingenting eller kun kandidater under tærsklen og fastholder, at resultatet bliver
+  "Der findes ikke tilstrækkelig dokumentation", og at intet med svagt grundlag kommer igennem
+  (`src/tests/knowledge-insufficient-evidence.test.ts`). En integrationstest gør det samme mod
+  den rigtige database.
+- **Tallene kan først vurderes med et evalueringssæt og en rigtig embedder og reranker.**
+  Evalueringssættet skal bestå af rigtige spørgsmål med kendte svar, også spørgsmål uden
+  dokumentation. Det hører til uden for fase 7 (§16). Indtil det er gjort:
+  - må ingen AI-forbruger tage imod production-evidens,
+  - skal en production-reranker og production-embedder ikke kun konfigureres, men også
+    valideres mod evalueringssættet, herunder tærsklen for "utilstrækkeligt grundlag".
+
+`requireProductionEvidence` håndhæver allerede den tekniske del (§9.1). Valideringen er den
+faglige del, og den kan ikke håndhæves af koden alene.
+
+### 20.5 Ikke afgjort
 
 - Virusscanning af uploads **[AFKLARES]** (B-26).
 - Workerens adgang er development-only (§14.1, B-16).
