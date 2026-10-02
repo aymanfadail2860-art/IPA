@@ -8,9 +8,9 @@ import { authorize } from "@/lib/auth/server-session";
 import type { PermissionRequirement } from "@/lib/auth/permissions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-import type { EvidenceSet } from "./core/evidence";
 import { isDocumentTypeKey } from "./document-types";
-import { retrieveEvidence, RetrievalError, type RetrievalRequest } from "./retrieval";
+import { retrieveEvidenceOutcome, type RetrievalRequest } from "./retrieval";
+import type { RetrievalOutcome } from "./result-presentation";
 import { isUuid } from "./upload-validation";
 
 /*
@@ -165,30 +165,24 @@ export async function closeConflict(id: string, outcome: "resolved" | "dismissed
 
 // ---------------------------------------------------------------------------- Afprøv retrieval
 
-export type RetrievalTestResult = { ok: true; set: EvidenceSet } | { ok: false; error: string };
-
 /**
  * "Afprøv retrieval" (docs/07 §12.1): the SAME retrieveEvidence as later modules, for the
  * signed-in user only, with the same configuration. Read-only; the query is not stored or
- * logged. Requires knowledge.document.read and Admin access.
+ * logged. Requires knowledge.document.read and Admin access. The outcome is explicit: an
+ * unavailable retrieval is a system error, never an empty result (docs/04 §16).
  */
-export async function testRetrieval(request: RetrievalRequest): Promise<RetrievalTestResult> {
-  if (isDemoMode()) return { ok: false, error: DEMO };
-  if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return { ok: false, error: DENIED };
-  try {
-    const set = await retrieveEvidence({
-      query: request.query,
-      mode: request.mode,
-      asOf: request.asOf,
-      language: request.language,
-      productIds: request.productIds,
-      documentIds: request.documentIds,
-      documentTypes: request.documentTypes,
-      topK: request.topK,
-    });
-    return { ok: true, set: structuredClone(set) };
-  } catch (error) {
-    if (error instanceof RetrievalError) return { ok: false, error: error.message };
-    return { ok: false, error: "Søgningen kunne ikke gennemføres. Prøv igen." };
-  }
+export async function testRetrieval(request: RetrievalRequest): Promise<RetrievalOutcome> {
+  if (isDemoMode()) return { kind: "unavailable", message: DEMO };
+  if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return { kind: "denied", message: DENIED };
+  const outcome = await retrieveEvidenceOutcome({
+    query: request.query,
+    mode: request.mode,
+    asOf: request.asOf,
+    language: request.language,
+    productIds: request.productIds,
+    documentIds: request.documentIds,
+    documentTypes: request.documentTypes,
+    topK: request.topK,
+  });
+  return outcome.kind === "evidence" ? { kind: "evidence", set: structuredClone(outcome.set) } : outcome;
 }

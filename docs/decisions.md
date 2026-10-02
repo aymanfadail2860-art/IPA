@@ -5,6 +5,31 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-007 — Utilgængelig retrieval er en systemfejl; ingen mock-videnshuller i Admin
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §9.1, §12 og §20.2; `docs/04` §16
+
+**Beslutning:**
+1. Om retrieval kan køre, er en tilstand, som resten af systemet kan læse, og ikke kun en
+   linje i serverloggen. Når retrieval er utilgængelig, får brugeren en systemfejl ("Retrieval
+   er utilgængelig"), aldrig "Der findes ikke tilstrækkelig dokumentation". Administratoren
+   ser tilstanden i Admin, og tests fastholder, at de to tilstande ikke kan forveksles.
+2. Videnshuller vises som tom tilstand overalt i Admin, også på forsiden, indtil de kan opstå
+   af AI-forespørgsler. Mock-videnshullerne fra fase 5 er fjernet. §12 i `docs/07` er rettet,
+   så den ikke længere modsiger §19.
+
+**Overvejede alternativer:**
+- *Kun at logge ved opstart.* Fravalgt: en tilstand, der kun står i en log, kan ikke vises
+  korrekt, og et tomt resultat kunne forveksles med manglende dokumentation.
+- *At beholde mock-tal på forsiden.* Fravalgt: falske tal ved siden af rigtige på samme side
+  kan forveksles med produktionsdata (`CLAUDE.md` §2).
+
+**Begrundelse:** `docs/04` §16: "Insufficient" er et kompetent svar, "Error" er et
+systemsvigt. Forveksles de, lærer brugerne at ignorere det vigtigste svar, systemet kan give.
+
+---
+
 ## B-006 — Et hul i gyldigheden forbliver et hul, men må ikke være tyst
 
 **Dato:** 1. oktober 2026

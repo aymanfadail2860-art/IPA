@@ -849,8 +849,9 @@ deaktivering viser bekræftelsesdialogen, om den efterlader et hul (B-006).
 Fejl- og tomme tilstande følger `docs/04` §14.3 og §18. Statuslabels bruger de danske
 betegnelser fra §2.1, og statusfarver bruger tokens fra fase 5. Det gælder f.eks.
 `knowledge.authoritative`, `knowledge.historical` og `knowledge.conflict`. Mock-data fra fase 5
-for dokumenter, produkter, versioner og konflikter udskiftes med databasen. Videnshuller og
-læringsindhold forbliver mock.
+for dokumenter, produkter, versioner og konflikter udskiftes med databasen. Videnshuller vises
+som tom tilstand ("registreres, når Copilot tages i brug") overalt i Admin, også på forsiden,
+fordi de først kan opstå af AI-forespørgsler (§19, B-007). Læringsindhold forbliver mock.
 
 ### 12.1 Afprøv retrieval — read-only
 
@@ -1148,14 +1149,26 @@ truffet undervejs.
 ### 20.2 Afklaringer under implementeringen (udledt — til bekræftelse)
 
 Punkterne nedenfor er implementeringsvalg, som specifikationen ikke afgør. De ændrer ingen
-låste krav, men lægges frem til bekræftelse.
+låste krav. Punkt 4, 5, 7 og 8 er **godkendt** (2026-10-02). Punkt 1 og 10 er rettet efter
+gennemgangen (B-007). Resten afventer bekræftelse.
 
-1. **Opstartstjekket (§9.1 pkt. 2).** Ved serverstart konstruerer registret den konfigurerede
-   reranker (`IPA_RERANKER`, standard `none`). Er implementeringen ikke tilladt i miljøet,
-   logges fejlen ved opstart, og retrieval forbliver slået fra (fail-closed). Resten af
-   platformen kører videre. Appen stopper ikke. Embedderen afhænger af den aktive model i
-   databasen og kontrolleres derfor ved første kald i appen. Workeren kontrollerer alle
-   modeller ved sin egen opstart.
+1. **Retrieval-tilgængelighed som tilstand (§9.1 pkt. 2, rettet, B-007).** Om retrieval kan
+   køre, er en tilstand, som resten af systemet kan læse (`getRetrievalAvailability()`), og
+   ikke kun en linje i serverloggen. Tilstanden er `available` med reranker, embedding-model
+   og evidensgrad, eller `unavailable` med årsag. Den beregnes af registret (fail-closed) ud
+   fra konfigurationen og den aktive model. Ved serverstart beregnes og logges den. Appen
+   stopper ikke, og resten af platformen kører videre.
+   - **Utilgængelig er en systemfejl, aldrig manglende dokumentation** (`docs/04` §16).
+     `retrieveEvidence` kontrollerer tilstanden før hver søgning og kaster en fejl. En
+     fejlende søgning bliver aldrig til et tomt resultat. Resultatvisninger går gennem
+     `presentRetrieval()`, hvor `unavailable` kun kan blive til `ErrorState` ("Retrieval er
+     utilgængelig", med genforsøg). "Der findes ikke tilstrækkelig dokumentation"
+     (`InsufficientEvidence`) vises kun for en søgning, der kørte uden at finde noget.
+   - Administratoren ser tilstanden på Admin-forsiden, i Knowledge Base, i "Afprøv retrieval"
+     og under Systemindstillinger. Udviklingsgrad markeres som "Udviklingsgrad — ikke
+     produktionsevidens".
+   - Tests fastholder adskillelsen: enhedstests af tilstand og visning, og rutetests mod appen
+     med og uden tilladt reranker.
 2. **Test-modellen** (`test:test-hash-embedder@1`) oprettes af udviklingsseedet
    (`scripts/seed-dev.mjs`), ikke af en migration. Der oprettes intet HNSW-indeks for den, så
    vektorsøgningen med test-modellen er en eksakt scanning. Iterative index scans slås til
@@ -1169,9 +1182,15 @@ låste krav, men lægges frem til bekræftelse.
 4. **Sammenlagte nabochunks** bliver ét evidenselement. `chunkId` er det første chunk, og det
    nye felt `chunkIds` lister alle chunks. Uddraget genskabes præcist som `[char_start,
    char_end)`. Kan teksten imellem ikke genskabes, lægges chunks ikke sammen.
-5. **Konfliktformatet.** En synlig konflikt har et diskriminatorfelt `visibility: "visible"`
-   ved siden af `conflictId`, `status` og `counterpartEvidenceId`. Den neutrale indikator er
-   uændret fra §11.4.
+5. **Konfliktformatet (godkendt).** `conflicts` på et evidenselement har to varianter med
+   diskriminatoren `visibility`:
+   - `{ "visibility": "visible", "conflictId", "status": "open", "counterpartEvidenceId" }`.
+     Brugeren har adgang til modparten, som er med som eget evidenselement.
+   - `{ "visibility": "restricted", "message": "Der findes en konflikt mellem kilder, som ikke
+     er fuldt synlig for denne bruger." }`. Brugeren har ikke adgang til modparten. Der vises
+     en neutral besked i stedet for modparten og intet, der identificerer den (§11.4, B-20).
+     Højst én pr. element. Databasen udleverer kun et ja/nej, så modpartens metadata aldrig
+     forlader den.
 6. **Modpart på versionsniveau.** For `overlapping_scope` hentes modpartsdokumentets bedste
    passage for samme forespørgsel. Findes ingen, bruges versionens første chunk.
    Modparter hentes uden klientens filtre, fordi en kendt konflikt aldrig skjules, og
@@ -1187,8 +1206,9 @@ låste krav, men lægges frem til bekræftelse.
 9. **Huller (B-006).** Advarslen `gap_after` under review, når en ny version har en slutdato
    før forgængerens, er bevaret som rådgivende advarsel (§3.5 pkt. 5). Admins hultilstand
    følger definitionen i §3.5 pkt. 6.
-10. **Videnshuller.** Knowledge Base viser en tom tilstand (§12 og §19). Admin-forsiden viser
-    stadig fase 5's markerede mock-videnshuller ("videnshuller … forbliver mock", §12).
+10. **Videnshuller (rettet, B-007).** Videnshuller vises som tom tilstand både i Knowledge Base
+    og på Admin-forsiden. Mock-videnshullerne fra fase 5 er fjernet, så opdigtede tal aldrig
+    står ved siden af rigtige. §12 er rettet, så dokumentet kun siger én ting.
 11. **`sources`** kan kun læses med `write`/`publish`. Retrieval får derfor kildetypen gennem
     funktionen `knowledge.source_type`, som kun udleverer typen.
 12. **Demoen uden database (B-003)** viser fase 5's markerede mock-rækker i de nye visninger.
@@ -1199,15 +1219,19 @@ låste krav, men lægges frem til bekræftelse.
 | Lag | Resultat |
 |-----|----------|
 | Lint, typecheck (app og worker), build | Består |
-| Enhedstests (Vitest) | 148 |
+| Enhedstests (Vitest) | 157 |
 | pgTAP | 238 (identity 9, foundation 40, storage 11, ingestion 23, embeddings 21, review 41, retrieval 39, conflicts 54) |
-| Integrations- og rutetests mod lokal Supabase og den kørende app | 93 |
+| Integrations- og rutetests mod lokal Supabase og den kørende app (også en instans med `IPA_RUNTIME_ENV=production`, hvor retrieval er utilgængelig) | 96 |
 
 **Mutationstests.** Hver mekanisme blev fjernet eller svækket enkeltvis, testene blev kørt, og
 koden blev gendannet. Bagefter bestod alle tests igen.
 
 - *Godkendelsens blokeringstjek:* 8 tests fejler, når tjekket fjernes.
-- *Evidensgrad-guardrailen (§9.1):* 16 af 16 mutationer fanges. De omfatter hvert tjek i
+- *Evidensgrad-guardrailen (§9.1) og adskillelsen af utilgængelig og utilstrækkelig (B-007):*
+  20 af 20 mutationer fanges. Ud over guardrailen gælder det også, hvis en utilgængelig
+  retrieval vises som "ikke tilstrækkelig dokumentation", hvis tilgængeligheden ignorerer et
+  afvist reranker, hvis `retrieveEvidence` kører trods utilgængelighed, og hvis værktøjet viser
+  en systemfejl som manglende dokumentation. De omfatter hvert tjek i
   `requireProductionEvidence`, beregningen af grad, frysningen, fail-closed `runtimeEnv`,
   registrets gradtjek for reranker og embedder, implementeringernes erklærede grad,
   opstartstjekket, `server-only` og det mærkede type (via `tsc`).

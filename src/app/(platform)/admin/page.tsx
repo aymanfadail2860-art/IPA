@@ -19,8 +19,9 @@ import { listConflicts, listGaps, listVersions } from "@/lib/knowledge/admin-dat
 import { KNOWLEDGE_MANAGER } from "@/lib/knowledge/admin-requirements";
 import { publishedState, type AdminVersionRow, type VersionStatus } from "@/lib/knowledge/admin-types";
 import { danishDate } from "@/lib/knowledge/retrieval-core";
-// Knowledge gaps need AI queries (a later phase): mock data.
-import { mockKnowledgeGaps } from "@/mocks";
+import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
+import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
+import { EmptyState } from "@/components/states/empty-state";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -38,6 +39,7 @@ export default async function AdminOverviewPage() {
     : manager
       ? await Promise.all([listVersions(), listConflicts({ status: "open" }), listGaps()])
       : [[], [], []];
+  const availability = manager ? await getRetrievalAvailability() : null;
   const today = danishDate(new Date());
   const count = (...statuses: VersionStatus[]) => versions.filter((version) => statuses.includes(version.status)).length;
   const published = (key: "future" | "current") =>
@@ -136,24 +138,18 @@ export default async function AdminOverviewPage() {
         </Section>
       </div>
 
+      {availability ? (
+        <Section title="Retrieval">
+          <RetrievalStatus availability={availability} />
+        </Section>
+      ) : null}
+
       <Section
         title="Videnshuller"
-        description="Spørgsmål, Copilot ikke kunne besvare med tilstrækkelig dokumentation — sorteret efter hyppighed."
+        description="Spørgsmål, Copilot ikke kunne besvare med tilstrækkelig dokumentation."
         action={<Link href="/admin/knowledge-base" className="text-label font-medium text-fg-link hover:underline">Knowledge Base →</Link>}
       >
-        <Card className="p-0">
-          <ul className="divide-y divide-border-subtle">
-            {mockKnowledgeGaps.slice(0, 3).map((gap) => (
-              <li key={gap.id} className="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
-                <span>
-                  <span className="block text-body font-medium text-fg-primary">{gap.question}</span>
-                  <span className="block text-caption text-fg-secondary">{gap.product}</span>
-                </span>
-                <StatusBadge status="insufficient" label={`${gap.occurrences} forespørgsler`} />
-              </li>
-            ))}
-          </ul>
-        </Card>
+        <EmptyState title="Registreres, når Copilot tages i brug">Videnshuller opstår af AI-forespørgsler, som kommer i en senere fase.</EmptyState>
       </Section>
     </PageContainer>
   );

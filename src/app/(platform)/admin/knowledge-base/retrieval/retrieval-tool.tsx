@@ -5,12 +5,14 @@ import { useState, useTransition } from "react";
 
 import { Field, FormError, SelectInput, TextInput } from "@/components/knowledge-admin/form";
 import { SourceCard } from "@/components/knowledge/source-card";
-import { EmptyState } from "@/components/states/empty-state";
+import { InsufficientEvidence } from "@/components/knowledge/insufficient-evidence";
+import { ErrorState } from "@/components/states/error-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { testRetrieval } from "@/lib/knowledge/admin-actions";
 import type { EvidenceItem, EvidenceSet } from "@/lib/knowledge/admin-types";
+import { INSUFFICIENT_TITLE, presentRetrieval, UNAVAILABLE_TITLE, type RetrievalOutcome } from "@/lib/knowledge/result-presentation";
 import { DOCUMENT_TYPES } from "@/lib/knowledge/document-types";
 import type { SourceReference } from "@/types/domain";
 
@@ -41,7 +43,7 @@ function toSource(item: EvidenceItem, items: readonly EvidenceItem[]): SourceRef
 export function RetrievalTool({ products }: { products: readonly { id: string; name: string }[] }) {
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<string[]>([]);
-  const [set, setSet] = useState<EvidenceSet | null>(null);
+  const [outcome, setOutcome] = useState<RetrievalOutcome | null>(null);
   const [form, setForm] = useState({ query: "", mode: "current", asOf: "", productId: "", documentType: "", topK: "8" });
 
   function search() {
@@ -55,11 +57,7 @@ export function RetrievalTool({ products }: { products: readonly { id: string; n
         documentTypes: form.documentType ? [form.documentType] : undefined,
         topK: Number(form.topK),
       });
-      if (!result.ok) {
-        setSet(null);
-        return setErrors([result.error]);
-      }
-      setSet(result.set);
+      setOutcome(result);
     });
   }
 
@@ -118,9 +116,37 @@ export function RetrievalTool({ products }: { products: readonly { id: string; n
         </form>
       </Card>
 
-      {set ? <Result set={set} /> : null}
+      {outcome ? <Outcome outcome={outcome} onRetry={search} /> : null}
     </div>
   );
+}
+
+/**
+ * docs/04 §16: a system failure and "no documentation" must never look alike. The mapping is
+ * presentRetrieval() — an unavailable retrieval can only become ErrorState.
+ */
+function Outcome({ outcome, onRetry }: { outcome: RetrievalOutcome; onRetry: () => void }) {
+  switch (presentRetrieval(outcome)) {
+    case "error":
+      return (
+        <ErrorState
+          title={UNAVAILABLE_TITLE}
+          actions={
+            <Button variant="secondary" size="sm" onClick={onRetry}>
+              Prøv igen
+            </Button>
+          }
+        >
+          {outcome.kind === "unavailable" ? outcome.message : null} Det er en systemfejl — ikke et svar om vidensgrundlaget.
+        </ErrorState>
+      );
+    case "invalid":
+    case "denied":
+      return <FormError errors={[outcome.kind === "evidence" ? "" : outcome.message]} />;
+    case "insufficient":
+    case "evidence":
+      return outcome.kind === "evidence" ? <Result set={outcome.set} /> : null;
+  }
 }
 
 function Result({ set }: { set: EvidenceSet }) {
@@ -156,7 +182,9 @@ function Result({ set }: { set: EvidenceSet }) {
         </p>
       </Card>
       {set.items.length === 0 ? (
-        <EmptyState title="Ingen evidens">Søgningen fandt ingen passager, du har adgang til, gældende på datoen.</EmptyState>
+        <InsufficientEvidence title={INSUFFICIENT_TITLE}>
+          <p>Retrieval kørte, men fandt ingen passager, du har adgang til, gældende på datoen.</p>
+        </InsufficientEvidence>
       ) : null}
       <ol className="space-y-4">
         {set.items.map((item) => (

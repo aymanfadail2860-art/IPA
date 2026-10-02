@@ -4,6 +4,7 @@ import { AccessDenied } from "@/components/common/access-denied";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
 import { Section } from "@/components/common/section";
+import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Card } from "@/components/ui/card";
 import { ADMIN_REQUIREMENT } from "@/config/navigation";
@@ -13,6 +14,7 @@ import { meetsRequirement } from "@/lib/auth/permissions";
 import { authorize } from "@/lib/auth/server-session";
 import { embeddingSettings } from "@/lib/knowledge/admin-data";
 import { SETTINGS_MANAGE } from "@/lib/knowledge/admin-requirements";
+import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
 import { formatDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Systemindstillinger · Admin" };
@@ -25,7 +27,7 @@ export default async function AdminSettingsPage() {
   const session = await authorize(ADMIN_REQUIREMENT);
   if (!session) return <AccessDenied />;
   const showEmbedding = !isDemoMode() && meetsRequirement(session.grants, SETTINGS_MANAGE);
-  const embedding = showEmbedding ? await embeddingSettings() : null;
+  const [embedding, availability] = showEmbedding ? await Promise.all([embeddingSettings(), getRetrievalAvailability()]) : [null, null];
 
   return (
     <PageContainer>
@@ -59,8 +61,9 @@ export default async function AdminSettingsPage() {
           </Card>
         </Section>
         {embedding ? (
-          <Section title="Embedding" description="Kun visning. Udbyder og model er konfiguration og er endnu ikke valgt til produktion.">
-            <Card className="p-0">
+          <Section title="Embedding og retrieval" description="Kun visning. Udbyder og model er konfiguration og er endnu ikke valgt til produktion.">
+            {availability ? <RetrievalStatus availability={availability} /> : null}
+            <Card className="mt-4 p-0">
               <ul className="divide-y divide-border-subtle">
                 {embedding.models.length === 0 ? <li className="px-6 py-3 text-body text-fg-secondary">Ingen modeller registreret.</li> : null}
                 {embedding.models.map((model) => (

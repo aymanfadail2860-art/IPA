@@ -3,11 +3,12 @@ import type { Metadata } from "next";
 import { AccessDenied } from "@/components/common/access-denied";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
-import { EmptyState } from "@/components/states/empty-state";
+import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
 import { ADMIN_REQUIREMENT } from "@/config/navigation";
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { authorize } from "@/lib/auth/server-session";
 import { listProducts } from "@/lib/knowledge/admin-data";
+import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
 
 import { RetrievalTool } from "./retrieval-tool";
 
@@ -17,7 +18,10 @@ export const metadata: Metadata = { title: "Afprøv retrieval · Admin" };
 export default async function RetrievalTestPage() {
   if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return <AccessDenied />;
   const demo = isDemoMode();
-  const products = demo ? [] : (await listProducts()).filter((product) => product.status === "active");
+  const [products, availability] = await Promise.all([
+    demo ? Promise.resolve([]) : listProducts().then((rows) => rows.filter((product) => product.status === "active")),
+    getRetrievalAvailability(),
+  ]);
   return (
     <PageContainer>
       <PageHeader
@@ -25,7 +29,8 @@ export default async function RetrievalTestPage() {
         title="Afprøv retrieval"
         description="Viser resultatet af retrieval for dig — med dine adgange — og intet andet. Værktøjet ændrer ingen data, og forespørgslen gemmes ikke."
       />
-      {demo ? <EmptyState title="Ikke tilgængelig i demoen">Retrieval kræver en database.</EmptyState> : <RetrievalTool products={products} />}
+      <RetrievalStatus availability={availability} />
+      {demo ? null : <RetrievalTool products={products} />}
     </PageContainer>
   );
 }

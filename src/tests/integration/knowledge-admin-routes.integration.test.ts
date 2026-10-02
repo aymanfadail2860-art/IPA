@@ -125,6 +125,22 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
     expect(tool.body).toContain("Gemmes ikke og logges ikke.");
   });
 
+  it("shows the administrator retrieval's state — in Admin, not only in the server log", async () => {
+    for (const path of ["/admin", "/admin/knowledge-base", "/admin/knowledge-base/retrieval", "/admin/settings"]) {
+      const page = await get(path, "admin");
+      expect(page.body, path).toContain("Retrieval er tilgængelig.");
+      expect(page.body, path).toContain("Udviklingsgrad — ikke produktionsevidens");
+      expect(page.body, path).not.toContain("Retrieval er utilgængelig");
+    }
+  });
+
+  it("shows the real (empty) state of knowledge gaps on the overview — no mock numbers next to real ones", async () => {
+    const page = await get("/admin", "admin");
+    expect(page.body).toContain("Registreres, når Copilot tages i brug");
+    for (const mock of ["Dækning ved brug af droner", "Solceller på erhvervsbygninger", "Ransomware-betaling"]) expect(page.body, mock).not.toContain(mock);
+    expect(page.body).not.toMatch(/\d+ forespørgsler/);
+  });
+
   it("shows the embedding settings read-only to system.settings.manage", async () => {
     const page = await get("/admin/settings", "admin");
     expect(page.body).toContain("Embedding");
@@ -140,6 +156,26 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
       const response = await get(path, "admin");
       expect(response.body, path).toContain(NOT_FOUND);
       expect(response.body, path).not.toContain(title);
+    }
+  });
+});
+
+/**
+ * The same app with IPA_RUNTIME_ENV=production (IPA_APP_URL_RETRIEVAL_OFF): the registry refuses
+ * the development-grade reranker, so retrieval is unavailable. Admin must show a system error —
+ * never "Der findes ikke tilstrækkelig dokumentation" (docs/04 §16, docs/07 §20.2).
+ */
+const offUrl = process.env.IPA_APP_URL_RETRIEVAL_OFF ?? "";
+
+describe.skipIf(!integrationConfigured || !offUrl)("retrieval unavailable in the running app", () => {
+  it("shows the administrator a system error in Admin, not missing knowledge", async () => {
+    for (const path of ["/admin", "/admin/knowledge-base", "/admin/knowledge-base/retrieval", "/admin/settings"]) {
+      const response = await fetch(`${offUrl}${path}`, { headers: { cookie: await sessionCookie("admin") }, redirect: "manual" });
+      const body = await response.text();
+      expect(body, path).toContain("Retrieval er utilgængelig");
+      expect(body, path).toContain("udviklingsimplementering");
+      expect(body, path).not.toContain("Retrieval er tilgængelig.");
+      expect(body, path).not.toContain("Der findes ikke tilstrækkelig dokumentation");
     }
   });
 });

@@ -7,6 +7,7 @@ import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
 import { Section } from "@/components/common/section";
 import { ConflictCard } from "@/components/knowledge-admin/conflict-card";
+import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
 import { EmptyState } from "@/components/states/empty-state";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { isDemoMode } from "@/dev/demo/demo-mode";
 import { meetsRequirement } from "@/lib/auth/permissions";
 import { authorize } from "@/lib/auth/server-session";
 import { coverage, listConflicts, listGaps, listVersions } from "@/lib/knowledge/admin-data";
+import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
 import { KNOWLEDGE_MANAGER, KNOWLEDGE_PUBLISH } from "@/lib/knowledge/admin-requirements";
 import { GAP_KIND_LABEL } from "@/lib/knowledge/admin-types";
 import { DOCUMENT_TYPES } from "@/lib/knowledge/document-types";
@@ -37,6 +39,7 @@ export default async function AdminKnowledgeBasePage() {
   const [conflicts, gaps, rows, versions] = demo
     ? [demoKnowledgeConflicts(), [], demoKnowledgeCoverage(), []]
     : await Promise.all([listConflicts(), listGaps(), coverage(), listVersions()]);
+  const availability = await getRetrievalAvailability();
   const open = conflicts.filter((conflict) => conflict.status === "open");
   const closed = conflicts.filter((conflict) => conflict.status !== "open").slice(0, 10);
   const published = versions
@@ -59,6 +62,10 @@ export default async function AdminKnowledgeBasePage() {
           )
         }
       />
+
+      <Section title="Retrieval">
+        <RetrievalStatus availability={availability} />
+      </Section>
 
       <Section title={`Konfliktkø (${open.length})`} description="Begge kilder bevares uændret. Systemet vælger aldrig, hvilken kilde der har ret.">
         <div className="space-y-4">

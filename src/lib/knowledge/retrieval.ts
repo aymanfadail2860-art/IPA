@@ -2,13 +2,16 @@ import "server-only";
 
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { authorize } from "@/lib/auth/server-session";
+import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import type { Embedder, EmbeddingModelSpec } from "./core/embedding";
 import type { EvidenceSet } from "./core/evidence";
 import { createEmbedder, createReranker } from "./core/registry";
 import type { Reranker } from "./core/reranker";
+import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
 import { DEFAULT_RETRIEVAL_CONFIG, RetrievalError, runRetrieval, type RetrievalRequest } from "./retrieval-core";
+import type { RetrievalOutcome } from "./result-presentation";
 
 /**
  * retrieveEvidence (docs/07 §8.2) — server-only, no HTTP route. Later modules call it
@@ -42,32 +45,51 @@ function embedderFor(model: EmbeddingModelSpec): Embedder {
   return embedder;
 }
 
-export { RetrievalError, type RetrievalRequest };
+export { RetrievalError, type RetrievalAvailability, type RetrievalRequest };
+
+async function activeModel(knowledge: KnowledgeClient): Promise<EmbeddingModelSpec | null | undefined> {
+  const { data, error } = await knowledge.rpc("active_embedding_model");
+  if (error) return undefined;
+  return ((data ?? []) as EmbeddingModelSpec[])[0] ?? null;
+}
+
+type KnowledgeClient = ReturnType<Awaited<ReturnType<typeof createSupabaseServerClient>>["schema"]>;
+
+/**
+ * Whether retrieval can run right now (docs/07 §20.2): readable by everything that shows
+ * results and by Admin — not only a line in the server log.
+ */
+export async function getRetrievalAvailability(): Promise<RetrievalAvailability> {
+  if (isDemoMode() || !getSupabaseConfig()) return assessRetrieval({ demo: isDemoMode(), databaseConfigured: false, activeModel: null });
+  const knowledge = (await createSupabaseServerClient()).schema("knowledge");
+  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: await activeModel(knowledge) });
+}
 
 export async function retrieveEvidence(request: RetrievalRequest): Promise<EvidenceSet> {
-  if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval er ikke tilgængelig i demoen uden database.");
+  if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   if (!(await authorize(READ))) throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
 
-  let reranker: Reranker;
-  try {
-    reranker = retrievalReranker();
-  } catch (error) {
-    throw new RetrievalError("unavailable", `Retrieval er slået fra: ${(error as Error).message}`);
-  }
-
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
-  const { data: models, error } = await knowledge.rpc("active_embedding_model");
-  if (error) throw new RetrievalError("unavailable", "Søgningen kunne ikke gennemføres. Prøv igen.");
-  const model = ((models ?? []) as EmbeddingModelSpec[])[0] ?? null;
+  const model = await activeModel(knowledge);
+  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: model });
+  // Unavailable is a system failure, never an empty (= "insufficient") result.
+  if (availability.state === "unavailable") throw new RetrievalError("unavailable", availability.reason);
 
-  let embedding: { embedder: Embedder; modelId: string } | null = null;
-  if (model) {
-    try {
-      embedding = { embedder: embedderFor(model), modelId: model.id };
-    } catch (failure) {
-      throw new RetrievalError("unavailable", `Retrieval er slået fra: ${(failure as Error).message}`);
-    }
-  }
-
+  const reranker = retrievalReranker();
+  const embedding = model ? { embedder: embedderFor(model), modelId: model.id } : null;
   return runRetrieval(request, { db: knowledge, embedding, reranker, config: DEFAULT_RETRIEVAL_CONFIG });
+}
+
+/** retrieveEvidence as an explicit outcome for the UI: a failure is never an empty result. */
+export async function retrieveEvidenceOutcome(request: RetrievalRequest): Promise<RetrievalOutcome> {
+  try {
+    return { kind: "evidence", set: await retrieveEvidence(request) };
+  } catch (error) {
+    if (error instanceof RetrievalError) {
+      if (error.code === "invalid_request") return { kind: "invalid_request", message: error.message };
+      if (error.code === "denied") return { kind: "denied", message: error.message };
+      return { kind: "unavailable", message: error.message };
+    }
+    return { kind: "unavailable", message: "Søgningen kunne ikke gennemføres." };
+  }
 }

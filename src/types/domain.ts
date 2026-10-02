@@ -265,14 +265,6 @@ export interface AdminDocument {
   detail?: string;
 }
 
-export interface KnowledgeGap {
-  id: string;
-  question: string;
-  product: string;
-  occurrences: number;
-  lastSeen: IsoDate;
-}
-
 /* ── Customer case summary (from the database, phase 6) ───────────────── */
 
 /** A case as the access-control foundation knows it: identity, status and participants. */

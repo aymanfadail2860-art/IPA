@@ -129,10 +129,10 @@ describe("2. the registry is fail-closed", () => {
       process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:54321";
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
       delete process.env.IPA_RUNTIME_ENV;
-      expect(checkRetrievalConfiguration((message) => messages.push(message))).toBe(false);
-      expect(messages.join("\n")).toMatch(/Retrieval er slået fra/);
+      expect(checkRetrievalConfiguration((message) => messages.push(message))).toMatchObject({ state: "unavailable" });
+      expect(messages.join("\n")).toMatch(/Retrieval er utilgængelig/);
       process.env.IPA_RUNTIME_ENV = "local";
-      expect(checkRetrievalConfiguration((message) => messages.push(message))).toBe(true);
+      expect(checkRetrievalConfiguration((message) => messages.push(message))).toMatchObject({ state: "available" });
     } finally {
       for (const [key, value] of [["NEXT_PUBLIC_SUPABASE_URL", saved.url], ["NEXT_PUBLIC_SUPABASE_ANON_KEY", saved.key], ["IPA_RUNTIME_ENV", saved.env]] as const) {
         if (value === undefined) delete process.env[key];

@@ -2,7 +2,7 @@
  * ⚠ MOCK DATA — DEVELOPMENT ONLY. Fictional documents, pipeline states, users and settings.
  * Must never be used as or mixed with production data.
  */
-import type { AdminDocument, KnowledgeGap } from "@/types/domain";
+import type { AdminDocument } from "@/types/domain";
 
 export const mockAdminDocuments: readonly AdminDocument[] = [
   { id: "d1", title: "Betingelser for Erhvervsansvar", product: "Erhvervsansvar", type: "Forsikringsbetingelser", version: "4", stage: "readyForReview", validFrom: "2026-10-01", updatedAt: "2026-09-27" },
@@ -14,13 +14,6 @@ export const mockAdminDocuments: readonly AdminDocument[] = [
   { id: "d7", title: "Produktvejledning Erhvervsansvar", product: "Erhvervsansvar", type: "Produktvejledning", version: "4", stage: "active", validFrom: "2025-07-01", updatedAt: "2025-06-20" },
   { id: "d8", title: "Betingelser for Bygningsforsikring, erhverv", product: "Bygningsforsikring, erhverv", type: "Forsikringsbetingelser", version: "5", stage: "active", validFrom: "2026-01-01", updatedAt: "2025-12-10" },
   { id: "d9", title: "Betingelser for Arbejdsskade", product: "Arbejdsskade", type: "Forsikringsbetingelser", version: "2", stage: "uploaded", updatedAt: "2026-09-28" },
-];
-
-export const mockKnowledgeGaps: readonly KnowledgeGap[] = [
-  { id: "g1", question: "Dækning ved brug af droner", product: "Erhvervsansvar", occurrences: 7, lastSeen: "2026-09-26" },
-  { id: "g2", question: "Solceller på erhvervsbygninger", product: "Bygningsforsikring, erhverv", occurrences: 5, lastSeen: "2026-09-25" },
-  { id: "g3", question: "Ransomware-betaling og dækning", product: "Cyberforsikring", occurrences: 4, lastSeen: "2026-09-23" },
-  { id: "g4", question: "Hjemmearbejdspladser og løsøre", product: "Erhvervsløsøre", occurrences: 2, lastSeen: "2026-09-19" },
 ];
 
 export const mockDocumentConflicts = [
@@ -45,11 +38,4 @@ export const mockAdminLearningContent = [
   { id: "l1", title: "Erhvervsansvar", modules: 11, lessons: 38, quizzes: 9, updatedAt: "2026-09-20", status: "Publiceret" },
   { id: "l2", title: "Produktansvar", modules: 11, lessons: 34, quizzes: 9, updatedAt: "2026-06-11", status: "Publiceret" },
   { id: "l3", title: "Cyberforsikring", modules: 11, lessons: 12, quizzes: 2, updatedAt: "2026-09-27", status: "Kladde" },
-];
-
-export const mockAdminVersions = [
-  { id: "v1", document: "Betingelser for Erhvervsansvar", version: "4", event: "Klar til review", at: "2026-09-27" },
-  { id: "v2", document: "Betingelser for Erhvervsansvar", version: "3", event: "Aktiv · erstatter v2", at: "2025-07-01" },
-  { id: "v3", document: "Betingelser for Erhvervsansvar", version: "2", event: "Erstattet af v3", at: "2025-07-01" },
-  { id: "v4", document: "Betingelser for Erhvervsansvar", version: "1", event: "Erstattet af v2", at: "2024-01-01" },
 ];
