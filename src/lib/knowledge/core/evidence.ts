@@ -39,6 +39,8 @@ export interface EvidenceRetrieval {
   reranker: { id: string; version: string; grade: Grade };
   candidateCount: number;
   generatedAt: string;
+  /** Set only by the development tool that forces "insufficient" (B-009). Never production evidence. */
+  devOverride?: "force_insufficient";
 }
 
 export type EvidenceConflict =
@@ -105,6 +107,8 @@ export interface IssueEvidenceInput {
   candidateCount: number;
   generatedAt: string;
   items: EvidenceItem[];
+  /** Development tool only (B-009): the set was forced empty; retrieval did not run. */
+  devOverride?: "force_insufficient";
 }
 
 const issued = new WeakSet<object>();
@@ -126,11 +130,12 @@ export function issueEvidenceSet(input: IssueEvidenceInput): EvidenceSet {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     query: structuredClone(input.query),
     retrieval: {
-      grade: input.embedder ? combinedGrade(input.embedder.grade, input.reranker.grade) : "development",
+      grade: input.embedder && !input.devOverride ? combinedGrade(input.embedder.grade, input.reranker.grade) : "development",
       embeddingModel: input.embedder ? { id: input.embedder.id, grade: embeddingGrade } : null,
       reranker: { id: input.reranker.id, version: input.reranker.version, grade: input.reranker.grade },
       candidateCount: input.candidateCount,
       generatedAt: input.generatedAt,
+      ...(input.devOverride ? { devOverride: input.devOverride } : {}),
     },
     items,
     signals: {
@@ -152,6 +157,7 @@ export function issueEvidenceSet(input: IssueEvidenceInput): EvidenceSet {
  */
 export function requireProductionEvidence(set: EvidenceSet): ProductionEvidenceSet {
   if (!issued.has(set)) throw new EvidenceGradeError("den er ikke udstedt af retrieval-laget.");
+  if (set.retrieval.devOverride) throw new EvidenceGradeError("den er fremtvunget af et udviklingsværktøj.");
   if (set.retrieval.grade !== "production") throw new EvidenceGradeError(`evidensgraden er "${set.retrieval.grade}".`);
   if (set.retrieval.reranker.id === NONE_RERANKER_ID) throw new EvidenceGradeError(`rerankeren "${NONE_RERANKER_ID}" er ikke en produktionsreranker.`);
   return set as ProductionEvidenceSet;

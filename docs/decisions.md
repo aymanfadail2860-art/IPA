@@ -5,6 +5,53 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-010 — Konfliktkandidater vises i bekræftelsesdialogen
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §3.2, §11.2 og §20.2; `docs/04` §14.2
+
+**Beslutning:** Skaber en godkendelse en konflikt med en allerede autoritativ kilde, står det i
+dialogen "Godkend som autoritativ" som en konsekvens af godkendelsen. Fremstillingen er den
+samme neutrale som i konfliktkøen: begge kilder nævnes, og der anbefales ingen af dem.
+Konflikten blokerer ikke godkendelsen (B-11). Den oplyses kun tydeligt.
+
+**Overvejede alternativer:**
+- *Kun at vise kandidaten i kvalitetsrapporten.* Fravalgt: dialogen skal opsummere
+  konsekvensen, og en ny konflikt er netop en konsekvens.
+- *At blokere godkendelsen.* Fravalgt: i strid med B-11. Konflikter afgøres af et menneske
+  bagefter.
+
+**Begrundelse:** Efter godkendelsen viser platformen rådgivere to forskellige svar om samme
+regel. Det skal den godkendende vide i det øjeblik, beslutningen træffes.
+
+---
+
+## B-009 — Ingen nøgleordsregel; "utilstrækkeligt grundlag" kan fremtvinges i udvikling
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §9 og §20.4
+
+**Beslutning:** `none`-rerankeren ændres ikke, og der indføres intet krav om leksikalsk træf.
+I stedet findes udviklingsværktøjet "Fremtving utilstrækkeligt grundlag" i "Afprøv
+retrieval". Det udsteder et tomt, markeret EvidenceSet uden at køre retrieval og uden at røre
+scoringen. Det kan kun bruges, når `IPA_RUNTIME_ENV` udtrykkeligt er `local` eller `test`. Det
+er et valg pr. kald og ikke en indstilling, og resultatet kan aldrig blive production-evidens.
+I udvikling kan tilstanden kun fremtvinges og ikke opstå af sig selv, før en rigtig reranker
+er på plads.
+
+**Overvejede alternativer:**
+- *At sende RRF-scorerne urørt videre.* Fravalgt: RRF er rangbaseret, og den bedste kandidat
+  får altid samme score. Tærsklen ville stadig ikke kunne tømme resultatet.
+- *Et krav om mindst ét leksikalsk træf.* Fravalgt: det ændrer retrieval-semantikken
+  permanent for at løse et udviklerproblem og risikerer på dansk, med sammensatte ord og
+  bøjninger, at afvise spørgsmål, der kan besvares. Relevans er rerankerens opgave.
+
+**Begrundelse:** Brugerfladen for "Der findes ikke tilstrækkelig dokumentation" skal kunne
+ses og bygges, før der findes en rigtig reranker, uden at udviklingsmiljøet opfører sig
+anderledes end produktion på scoringen.
+
+---
+
 ## B-008 — Retrieval-tallene skal valideres, før production-evidens må bruges
 
 **Dato:** 2. oktober 2026

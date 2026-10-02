@@ -1,3 +1,5 @@
+import { forceInsufficientAllowed } from "@/dev/knowledge/force-insufficient";
+
 import { isDocumentTypeKey } from "./document-types";
 import type { Embedder } from "./core/embedding";
 import {
@@ -5,6 +7,7 @@ import {
   RESTRICTED_CONFLICT_MESSAGE,
   sourceReferenceLabel,
   type EvidenceConflict,
+  type EvidenceQuery,
   type EvidenceItem,
   type EvidenceSet,
   type RetrievalMode,
@@ -88,6 +91,11 @@ export interface RetrievalDeps {
   reranker: Reranker;
   config?: RetrievalConfig;
   now?: () => Date;
+  /**
+   * DEVELOPMENT TOOL (B-009): skip retrieval and issue an empty, marked set, so the
+   * "insufficient" state can be seen. Refused unless IPA_RUNTIME_ENV is local/test.
+   */
+  devForceInsufficient?: boolean;
 }
 
 /** One row of knowledge.search_chunks. */
@@ -182,6 +190,19 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
   const now = (deps.now ?? (() => new Date()))();
   const normalized = normalizeRequest(request, config);
 
+  if (deps.devForceInsufficient) {
+    if (!forceInsufficientAllowed()) throw new RetrievalError("invalid_request", "Udviklingsværktøjet kan kun bruges lokalt og i test.");
+    return issueEvidenceSet({
+      query: queryBlock(normalized, now),
+      embedder: deps.embedding?.embedder ?? null,
+      reranker: deps.reranker,
+      candidateCount: 0,
+      generatedAt: now.toISOString(),
+      items: [],
+      devOverride: "force_insufficient",
+    });
+  }
+
   const queryEmbedding = deps.embedding ? (await deps.embedding.embedder.embed([normalized.query]))[0] : null;
   if (deps.embedding && (!queryEmbedding || queryEmbedding.length !== deps.embedding.embedder.dimensions)) {
     throw new RetrievalError("unavailable", "Forespørgslen kunne ikke embeddes.");
@@ -260,23 +281,27 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
   const items = drafts.map((draft, i) => toItem(draft, i, drafts));
 
   return issueEvidenceSet({
-    query: {
-      text: normalized.query,
-      mode: normalized.mode,
-      asOf: date,
-      language: normalized.language,
-      filters: {
-        ...(normalized.productIds ? { productIds: normalized.productIds } : {}),
-        ...(normalized.documentIds ? { documentIds: normalized.documentIds } : {}),
-        ...(normalized.documentTypes ? { documentTypes: normalized.documentTypes } : {}),
-      },
-    },
+    query: queryBlock(normalized, now),
     embedder: deps.embedding?.embedder ?? null,
     reranker: deps.reranker,
     candidateCount: rows.length,
     generatedAt: now.toISOString(),
     items,
   });
+}
+
+function queryBlock(normalized: NormalizedRequest, now: Date): EvidenceQuery {
+  return {
+    text: normalized.query,
+    mode: normalized.mode,
+    asOf: normalized.asOf ?? danishDate(now),
+    language: normalized.language,
+    filters: {
+      ...(normalized.productIds ? { productIds: normalized.productIds } : {}),
+      ...(normalized.documentIds ? { documentIds: normalized.documentIds } : {}),
+      ...(normalized.documentTypes ? { documentTypes: normalized.documentTypes } : {}),
+    },
+  };
 }
 
 async function rpcRows<T>(db: KnowledgeRpcClient, fn: string, args: Record<string, unknown>): Promise<T[]> {

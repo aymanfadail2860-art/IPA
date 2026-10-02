@@ -171,7 +171,7 @@ export async function closeConflict(id: string, outcome: "resolved" | "dismissed
  * logged. Requires knowledge.document.read and Admin access. The outcome is explicit: an
  * unavailable retrieval is a system error, never an empty result (docs/04 §16).
  */
-export async function testRetrieval(request: RetrievalRequest): Promise<RetrievalOutcome> {
+export async function testRetrieval(request: RetrievalRequest, dev: { devForceInsufficient?: boolean } = {}): Promise<RetrievalOutcome> {
   if (isDemoMode()) return { kind: "unavailable", message: DEMO };
   if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return { kind: "denied", message: DENIED };
   const outcome = await retrieveEvidenceOutcome({
@@ -183,6 +183,6 @@ export async function testRetrieval(request: RetrievalRequest): Promise<Retrieva
     documentIds: request.documentIds,
     documentTypes: request.documentTypes,
     topK: request.topK,
-  });
+  }, { devForceInsufficient: dev.devForceInsufficient === true });
   return outcome.kind === "evidence" ? { kind: "evidence", set: structuredClone(outcome.set) } : outcome;
 }

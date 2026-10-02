@@ -3,8 +3,8 @@
 AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instruktioner står i
 `CLAUDE.md`, specifikationen i `docs/` og faseoversigten i `docs/roadmap.md`.
 
-**Status:** Fase 7 — Knowledge Engine er implementeret og afventer godkendelse
-(`docs/07-knowledge-engine.md` §20). Moduler fra senere faser viser stadig fiktive
+**Status:** Fase 7 — Knowledge Engine er gennemført og låst (`docs/07-knowledge-engine.md`).
+Fase 8 er foreslået (`docs/roadmap.md`). Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

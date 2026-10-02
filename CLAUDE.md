@@ -8,14 +8,16 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–6 er gennemført og låst. Fase 7 — Knowledge Engine: specifikation godkendt og låst — implementeret, afventer godkendelse** (`docs/07-knowledge-engine.md` §20).
+**Fase 1–7 er gennemført og låst.** Fase 7 — Knowledge Engine blev godkendt 2026-10-02
+(`docs/07-knowledge-engine.md`). **Fase 8 — Produktionsgrundlag for Knowledge Engine er
+foreslået — afventer godkendelse** (`docs/roadmap.md`). Der implementeres intet i fase 8, før
+den er godkendt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
 B-003).
 
-Låst betyder, at dokumenterne fra fase 1–6 og den godkendte specifikation for fase 7 er
-projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
+Låst betyder, at dokumenterne fra fase 1–7 er projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
 ved en eksplicit beslutning om at genåbne dem.
 
 Se `docs/roadmap.md` for den aktuelle status. Produktdefinitionen ligger i
@@ -73,8 +75,9 @@ fase, der ophæver dem, er nået.
 | 4 | UI/UX-design | **Gennemført og låst** |
 | 5 | Grundplatform | **Gennemført og låst** |
 | 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
-| 7 | Knowledge Engine | **Implementeret — afventer godkendelse** (specifikation godkendt og låst) |
-| 8+ | *Ikke fastlagt* | Ikke påbegyndt |
+| 7 | Knowledge Engine | **Gennemført og låst** |
+| 8 | Produktionsgrundlag for Knowledge Engine | **Foreslået — afventer godkendelse** |
+| 9+ | *Ikke fastlagt* | Ikke påbegyndt |
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
 fasen, og der arbejdes ikke forud på senere faser.
@@ -95,7 +98,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/04-ui-ux-design.md` | 4 | Oprettet |
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
-| `docs/07-knowledge-engine.md` | 7 | Oprettet — specifikation godkendt og låst, implementeret, afventer godkendelse |
+| `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
 | `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { testRetrieval } from "@/lib/knowledge/admin-actions";
 import type { EvidenceItem, EvidenceSet } from "@/lib/knowledge/admin-types";
 import { INSUFFICIENT_TITLE, presentRetrieval, UNAVAILABLE_TITLE, type RetrievalOutcome } from "@/lib/knowledge/result-presentation";
+import { FORCE_INSUFFICIENT_LABEL } from "@/dev/knowledge/force-insufficient";
 import { DOCUMENT_TYPES } from "@/lib/knowledge/document-types";
 import type { SourceReference } from "@/types/domain";
 
@@ -40,11 +41,12 @@ function toSource(item: EvidenceItem, items: readonly EvidenceItem[]): SourceRef
  * retrieveEvidence as later modules; it cannot choose a reranker or change weights. The query
  * is not stored.
  */
-export function RetrievalTool({ products }: { products: readonly { id: string; name: string }[] }) {
+export function RetrievalTool({ products, devTools }: { products: readonly { id: string; name: string }[]; devTools: boolean }) {
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<string[]>([]);
   const [outcome, setOutcome] = useState<RetrievalOutcome | null>(null);
   const [form, setForm] = useState({ query: "", mode: "current", asOf: "", productId: "", documentType: "", topK: "8" });
+  const [forceInsufficient, setForceInsufficient] = useState(false);
 
   function search() {
     setErrors([]);
@@ -56,7 +58,7 @@ export function RetrievalTool({ products }: { products: readonly { id: string; n
         productIds: form.productId ? [form.productId] : undefined,
         documentTypes: form.documentType ? [form.documentType] : undefined,
         topK: Number(form.topK),
-      });
+      }, { devForceInsufficient: devTools && forceInsufficient });
       setOutcome(result);
     });
   }
@@ -108,6 +110,12 @@ export function RetrievalTool({ products }: { products: readonly { id: string; n
               <TextInput type="number" min={1} max={20} value={form.topK} onChange={(event) => setForm({ ...form, topK: event.target.value })} />
             </Field>
           </div>
+          {devTools ? (
+            <label className="flex w-fit items-center gap-2 rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 text-body">
+              <input type="checkbox" checked={forceInsufficient} onChange={(event) => setForceInsufficient(event.target.checked)} />
+              {FORCE_INSUFFICIENT_LABEL} — kun lokalt og i test
+            </label>
+          ) : null}
           <FormError errors={errors} />
           <Button type="submit" variant="secondary" loading={pending}>
             <FlaskConical aria-hidden />
@@ -153,6 +161,12 @@ function Result({ set }: { set: EvidenceSet }) {
   const { retrieval } = set;
   return (
     <section aria-label="Resultat" className="space-y-4">
+      {retrieval.devOverride ? (
+        <div role="status" className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning-subtle px-4 py-3 text-body font-medium">
+          <ShieldAlert className="size-4 shrink-0" aria-hidden />
+          Udviklingsværktøj: utilstrækkeligt grundlag er fremtvunget — retrieval er ikke kørt
+        </div>
+      ) : null}
       {retrieval.grade === "development" ? (
         <div role="status" className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning-subtle px-4 py-3 text-body font-medium">
           <ShieldAlert className="size-4 shrink-0" aria-hidden />
@@ -183,7 +197,11 @@ function Result({ set }: { set: EvidenceSet }) {
       </Card>
       {set.items.length === 0 ? (
         <InsufficientEvidence title={INSUFFICIENT_TITLE}>
-          <p>Retrieval kørte, men fandt ingen passager, du har adgang til, gældende på datoen.</p>
+          <p>
+            {retrieval.devOverride
+              ? "Fremtvunget af udviklingsværktøjet, så tilstanden kan ses. Retrieval er ikke kørt."
+              : "Retrieval kørte, men fandt ingen passager, du har adgang til, gældende på datoen."}
+          </p>
         </InsufficientEvidence>
       ) : null}
       <ol className="space-y-4">

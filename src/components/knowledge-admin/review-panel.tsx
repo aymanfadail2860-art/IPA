@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, CircleCheck, ExternalLink, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, ExternalLink, GitCompare, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -181,7 +181,13 @@ export function ReviewPanel({
         {version.status === "under_review" && canPublish ? (
           <>
             {state?.canApprove ? (
-              <ApproveDialog warnings={warnings} version={version} pending={pending} onApprove={(codes) => run(() => approveVersion(version.id, codes))} />
+              <ApproveDialog
+                warnings={warnings}
+                conflicts={detail.conflictCandidates}
+                version={version}
+                pending={pending}
+                onApprove={(codes) => run(() => approveVersion(version.id, codes))}
+              />
             ) : (
               <DisabledReason reason={blockers.map((blocker) => blocker.message).join(" ") || "Versionen kan ikke godkendes endnu."}>
                 <Button variant="primary" disabled>
@@ -274,14 +280,18 @@ function MetadataForm({
 function ApproveDialog({
   version,
   warnings,
+  conflicts,
   pending,
   onApprove,
 }: {
   version: AdminVersionRow;
   warnings: readonly { code: string; message: string }[];
+  /** Structural conflict candidates (docs/07 §11.2): a consequence of approving — shown neutrally, never blocking (B-11). */
+  conflicts: VersionDetail["conflictCandidates"];
   pending: boolean;
   onApprove: (codes: string[]) => void;
 }) {
+  const self = `${version.documentTitle}${version.versionLabel ? `, version ${version.versionLabel}` : ""}`;
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -297,6 +307,26 @@ function ApproveDialog({
             samme dato.
           </DialogDescription>
         </DialogHeader>
+        {conflicts.length > 0 ? (
+          <section aria-label="Konflikt mellem kilder" className="space-y-2 rounded-md border-l-4 border-l-knowledge-conflict bg-knowledge-conflict-subtle px-4 py-3 text-body">
+            <p className="flex items-center gap-2 font-medium text-knowledge-conflict">
+              <GitCompare className="size-4 shrink-0" aria-hidden />
+              Godkendelsen skaber {conflicts.length === 1 ? "en konflikt" : `${conflicts.length} konflikter`} mellem kilder
+            </p>
+            <ul className="space-y-1">
+              {conflicts.map((candidate) => (
+                <li key={`${candidate.rule}-${candidate.documentTitle}-${candidate.versionLabel}`}>
+                  {self} og {candidate.documentTitle}
+                  {candidate.versionLabel ? `, version ${candidate.versionLabel}` : ""} — {CONFLICT_RULE_LABEL[candidate.rule].toLowerCase()}.
+                </li>
+              ))}
+            </ul>
+            <p className="text-fg-secondary">
+              Begge kilder bevares, og rådgivere med adgang får begge vist. Systemet afgør ikke, hvilken kilde der gælder; konflikten lægges i
+              konfliktkøen til faglig afgørelse.
+            </p>
+          </section>
+        ) : null}
         {warnings.length > 0 ? (
           <ul className="space-y-1.5 text-body text-warning">
             {warnings.map((warning) => (

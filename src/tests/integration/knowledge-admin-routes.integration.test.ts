@@ -122,6 +122,8 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
     }
     const tool = await get("/admin/knowledge-base/retrieval", "admin");
     expect(tool.body).toContain("Afprøv retrieval");
+    // The development tool (B-009) is offered because this app runs with IPA_RUNTIME_ENV=test.
+    expect(tool.body).toContain("Fremtving utilstrækkeligt grundlag (udviklingsværktøj)");
     expect(tool.body).toContain("Gemmes ikke og logges ikke.");
   });
 
@@ -176,6 +178,8 @@ describe.skipIf(!integrationConfigured || !offUrl)("retrieval unavailable in the
       expect(body, path).toContain("udviklingsimplementering");
       expect(body, path).not.toContain("Retrieval er tilgængelig.");
       expect(body, path).not.toContain("Der findes ikke tilstrækkelig dokumentation");
+      // The development tool to force "insufficient" is never offered outside local/test (B-009).
+      expect(body, path).not.toContain("Fremtving utilstrækkeligt grundlag");
     }
   });
 });

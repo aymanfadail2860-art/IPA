@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
 import { ADMIN_REQUIREMENT } from "@/config/navigation";
 import { isDemoMode } from "@/dev/demo/demo-mode";
+import { forceInsufficientAllowed } from "@/dev/knowledge/force-insufficient";
 import { authorize } from "@/lib/auth/server-session";
 import { listProducts } from "@/lib/knowledge/admin-data";
 import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
@@ -30,7 +31,7 @@ export default async function RetrievalTestPage() {
         description="Viser resultatet af retrieval for dig — med dine adgange — og intet andet. Værktøjet ændrer ingen data, og forespørgslen gemmes ikke."
       />
       <RetrievalStatus availability={availability} />
-      {demo ? null : <RetrievalTool products={products} />}
+      {demo ? null : <RetrievalTool products={products} devTools={forceInsufficientAllowed()} />}
     </PageContainer>
   );
 }

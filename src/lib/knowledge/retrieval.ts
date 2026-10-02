@@ -65,7 +65,12 @@ export async function getRetrievalAvailability(): Promise<RetrievalAvailability>
   return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: await activeModel(knowledge) });
 }
 
-export async function retrieveEvidence(request: RetrievalRequest): Promise<EvidenceSet> {
+/** Development tools for one call — refused outside IPA_RUNTIME_ENV=local/test (B-009). */
+export interface RetrievalDevOptions {
+  devForceInsufficient?: boolean;
+}
+
+export async function retrieveEvidence(request: RetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   if (!(await authorize(READ))) throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
 
@@ -77,13 +82,13 @@ export async function retrieveEvidence(request: RetrievalRequest): Promise<Evide
 
   const reranker = retrievalReranker();
   const embedding = model ? { embedder: embedderFor(model), modelId: model.id } : null;
-  return runRetrieval(request, { db: knowledge, embedding, reranker, config: DEFAULT_RETRIEVAL_CONFIG });
+  return runRetrieval(request, { db: knowledge, embedding, reranker, config: DEFAULT_RETRIEVAL_CONFIG, devForceInsufficient: dev.devForceInsufficient === true });
 }
 
 /** retrieveEvidence as an explicit outcome for the UI: a failure is never an empty result. */
-export async function retrieveEvidenceOutcome(request: RetrievalRequest): Promise<RetrievalOutcome> {
+export async function retrieveEvidenceOutcome(request: RetrievalRequest, dev: RetrievalDevOptions = {}): Promise<RetrievalOutcome> {
   try {
-    return { kind: "evidence", set: await retrieveEvidence(request) };
+    return { kind: "evidence", set: await retrieveEvidence(request, dev) };
   } catch (error) {
     if (error instanceof RetrievalError) {
       if (error.code === "invalid_request") return { kind: "invalid_request", message: error.message };

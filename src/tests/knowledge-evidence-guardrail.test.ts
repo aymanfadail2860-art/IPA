@@ -236,7 +236,8 @@ describe("static guardrails — the mechanisms cannot be bypassed elsewhere in t
     expect(callers).toEqual(["lib/knowledge/retrieval-core.ts", "lib/knowledge/retrieval.ts"]);
     const retrieval = sources.find(({ file }) => file === "lib/knowledge/retrieval.ts")!.text;
     expect(retrieval).toMatch(/^import "server-only";/);
-    expect(retrieval).toMatch(/export async function retrieveEvidence\(request: RetrievalRequest\)/);
+    expect(retrieval).toMatch(/export async function retrieveEvidence\(request: RetrievalRequest, dev: RetrievalDevOptions = \{\}\)/);
+    expect(retrieval).not.toMatch(/retrieveEvidence\([^)]*(reranker|embedder|grade)/);
   });
 
   it("retrieval code is never imported by client components", () => {

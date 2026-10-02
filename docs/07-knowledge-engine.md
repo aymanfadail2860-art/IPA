@@ -1,8 +1,9 @@
 # 07 — Knowledge Engine
 
 **Fase:** 7 — Knowledge Engine
-**Status:** 🔒 Godkendt og låst specifikation (2026-09-29). **Implementeret — afventer
-godkendelse** (2026-10-01). Implementeringsstatus, afklaringer og testresultater står i §20.
+**Status:** ✅ **Gennemført og låst** (godkendt 2026-10-02). Specifikationen blev godkendt og
+låst 2026-09-29. Implementeringsstatus, afklaringer, testresultater og kendte begrænsninger
+står i §20.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/06` (låst) og `docs/decisions.md`.
 
@@ -1125,12 +1126,10 @@ Konflikterne blev identificeret under specifikationen og er **lukket** ved godke
 
 ---
 
-## 20. Implementeringsstatus (2026-10-01) — afventer godkendelse
+## 20. Implementeringsstatus — gennemført og låst (2026-10-02)
 
-Alle ni trin i §18 er implementeret. Fasen er **ikke** markeret som gennemført. Det sker
-først ved en eksplicit godkendelse. Specifikationen (§0–§19) er ikke ændret under
-implementeringen, bortset fra beslutningerne B-005 og B-006 (`docs/decisions.md`), som blev
-truffet undervejs.
+Alle ni trin i §18 er implementeret, og fasen er godkendt. Specifikationen (§0–§19) er kun
+ændret ved beslutningerne B-005 til B-010 (`docs/decisions.md`), som blev truffet undervejs.
 
 ### 20.1 Hvad der er bygget
 
@@ -1149,8 +1148,8 @@ truffet undervejs.
 ### 20.2 Afklaringer under implementeringen (udledt — til bekræftelse)
 
 Punkterne nedenfor er implementeringsvalg, som specifikationen ikke afgør. De ændrer ingen
-låste krav. Punkt 4, 5, 7 og 8 er **godkendt** (2026-10-02). Punkt 1 og 10 er rettet efter
-gennemgangen (B-007). Resten afventer bekræftelse.
+låste krav. Alle punkter er godkendt med fasen (2026-10-02). Punkt 1 og 10 blev rettet efter
+gennemgangen (B-007), og punkt 13 blev tilføjet (B-010).
 
 1. **Retrieval-tilgængelighed som tilstand (§9.1 pkt. 2, rettet, B-007).** Om retrieval kan
    køre, er en tilstand, som resten af systemet kan læse (`getRetrievalAvailability()`), og
@@ -1211,13 +1210,18 @@ gennemgangen (B-007). Resten afventer bekræftelse.
     funktionen `knowledge.source_type`, som kun udleverer typen.
 12. **Demoen uden database (B-003)** viser fase 5's markerede mock-rækker i de nye visninger.
     Handlinger, review-skærmen og "Afprøv retrieval" er ikke tilgængelige i demoen.
+13. **Konflikter i bekræftelsesdialogen (B-010).** Skaber godkendelsen en konflikt med en
+    allerede autoritativ kilde, står det i dialogen "Godkend som autoritativ". Fremstillingen er
+    den samme neutrale som i konfliktkøen: begge kilder nævnes, og der anbefales ingen af dem.
+    Det oplyses, at begge kilder bevares, at rådgivere med adgang får begge vist, og at
+    konflikten lægges i konfliktkøen. Konflikten blokerer ikke godkendelsen (B-11).
 
 ### 20.3 Tests
 
 | Lag | Resultat |
 |-----|----------|
 | Lint, typecheck (app og worker), build | Består |
-| Enhedstests (Vitest) | 161 |
+| Enhedstests (Vitest) | 167 |
 | pgTAP | 238 (identity 9, foundation 40, storage 11, ingestion 23, embeddings 21, review 41, retrieval 39, conflicts 54) |
 | Integrations- og rutetests mod lokal Supabase og den kørende app (også en instans med `IPA_RUNTIME_ENV=production`, hvor retrieval er utilgængelig) | 97 |
 
@@ -1275,9 +1279,34 @@ koden blev gendannet. Bagefter bestod alle tests igen.
 `requireProductionEvidence` håndhæver allerede den tekniske del (§9.1). Valideringen er den
 faglige del, og den kan ikke håndhæves af koden alene.
 
-### 20.5 Ikke afgjort
+**I udvikling kan tilstanden kun fremtvinges (B-009).** Før en rigtig reranker er på plads,
+opstår "Der findes ikke tilstrækkelig dokumentation" i praksis ikke af sig selv. Der indføres
+bevidst ingen nøgleordsregel, der kunne få den til at opstå, fordi relevans er rerankerens
+opgave. Udviklingsværktøjet "Fremtving utilstrækkeligt grundlag" i "Afprøv retrieval" udsteder
+i stedet et tomt, markeret EvidenceSet uden at køre retrieval og uden at røre scoringen, så
+brugerfladen for tilstanden kan ses og bygges. Værktøjet:
+- kan kun bruges, når `IPA_RUNTIME_ENV` udtrykkeligt er `local` eller `test`. Ellers afvises
+  det (fail-closed), og i produktion vises det ikke,
+- er et valg pr. kald og ikke en indstilling. Ingen miljøvariabel kan slå det til,
+- markerer resultatet (`retrieval.devOverride`), så det aldrig kan blive production-evidens.
+
+### 20.5 Kendte begrænsninger i testene
+
+- **Upload er ikke dækket af en browserbaseret test.** Integrationstestene uploader fra Node.
+  Browserspecifikke fejl i upload (fx CORS, filvalg, SHA-256 i browseren) fanges derfor ikke.
+  Det viste sig under gennemgangen: en CORS-fejl i testriggens egen gateway (ikke i repoet)
+  blev først fundet, da flowet blev kørt i en browser. Det er en kendt begrænsning og ikke en
+  opgave i fase 7.
+- **Integrationstestene skriver i samme lokale database som manuel afprøvning.** Versioner
+  kan aldrig slettes (§2), så testdata hober sig op i dokumentlisten og konfliktkøen.
+  Anbefaling: kør integrationstestene mod en separat lokal Supabase-instans (eget
+  `project_id` og egne porte), eller nulstil databasen før hver testkørsel i CI. Det er ikke
+  gennemført i fase 7.
+
+### 20.6 Ikke afgjort (videreført til fase 8)
 
 - Virusscanning af uploads **[AFKLARES]** (B-26).
 - Workerens adgang er development-only (§14.1, B-16).
 - Embedding- og reranking-udbyder er ikke valgt (§17.4).
+- Validering af retrieval-tallene med et evalueringssæt (§20.4, B-008).
 

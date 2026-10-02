@@ -3,9 +3,9 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–6 er gennemført og **låst**. Fase 6 — Identity, database og
-adgangskontrol er godkendt (2026-09-29). Fase 7 — Knowledge Engine: specifikationen er
-godkendt og låst (2026-09-29) og **implementeret — afventer godkendelse** (2026-10-01).
+**Aktuel status:** Fase 1–7 er gennemført og **låst**. Fase 7 — Knowledge Engine er godkendt
+(2026-10-02). Fase 8 — Produktionsgrundlag for Knowledge Engine er **foreslået — afventer
+godkendelse**.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -24,8 +24,9 @@ godkendt og låst (2026-09-29) og **implementeret — afventer godkendelse** (20
 | 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
-| 7 | Knowledge Engine | 🟡 Implementeret — afventer godkendelse | `docs/07-knowledge-engine.md` |
-| 8+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
+| 8 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
+| 9+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
 
@@ -279,28 +280,50 @@ Practice og Advise, produktionsdata.
 
 ## Fase 7 — Knowledge Engine
 
-**Status:** 🟡 Implementeret — afventer godkendelse (2026-10-01). Alle ni trin i `docs/07`
-§18 er bygget, og lint, typecheck, build, enhedstests, pgTAP samt integrations- og rutetests
-består. Status, afklaringer til bekræftelse og mutationstests står i `docs/07` §20. Fasen
-markeres først som gennemført ved eksplicit godkendelse.
+**Status:** 🔒 Gennemført og låst (godkendt 2026-10-02). Alle ni trin i `docs/07` §18 er
+bygget, og lint, typecheck, build, enhedstests, pgTAP samt integrations- og rutetests består.
+Implementeringsstatus, afklaringer, mutationstests og kendte begrænsninger står i `docs/07`
+§20. Beslutningerne B-005 til B-010 blev truffet undervejs.
 
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
 
-**Afgjort:** Beslutningerne i `docs/07` §17.2 er godkendt. Konflikterne K-1 til K-3 er lukket
-(`docs/07` §19).
-
-**Udestående (ikke blokerende for fase 7):**
-
-- [AFKLARES]: virusscanning af uploads. Skal afklares før håndtering af rigtige dokumenter og
-  ændrer ikke fase 7-specifikationen.
-- Afklaringerne i `docs/07` §20.2 skal bekræftes.
-- Forudsætning før AI-modulerne må bruge production-evidens: tallene for reranking og
-  evidensudvælgelse skal valideres med et evalueringssæt og en rigtig embedder og reranker
-  (`docs/07` §20.4, B-008).
+**Videreført til fase 8:** udbydere, validering af retrieval-tallene (B-008), virusscanning
+(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6.
 
 ---
 
-## Fase 8 og frem
+## Fase 8 — Produktionsgrundlag for Knowledge Engine
 
-Ikke fastlagt.
+**Status:** 📝 Foreslået — afventer godkendelse. Intet er specificeret eller implementeret.
+
+**Udgangspunkt:** Fase 7 kører på en test-embedder og `none`-rerankeren. Guardrailen
+(`docs/07` §9.1) forhindrer AI-moduler i at bruge udviklingsevidens. Der kan derfor ikke
+bygges AI-moduler (Copilot, Learn AI, Practice AI, Advise AI), før rigtige udbydere er valgt
+og retrieval-kvaliteten kan måles (`docs/07` §20.4, B-008). Fase 8 skaffer det grundlag. Den
+bygger ingen AI-funktionalitet.
+
+**Foreslået indhold:**
+
+1. **Embedding-udbyder og -model.** Valg ud fra dansk sprogkvalitet, databehandling i EU og
+   pris. Modellen indføres gennem den eksisterende model- og re-embedding-mekanisme
+   (`docs/07` §7) med sit eget indeks.
+2. **Reranking-udbyder.** En rigtig reranker bag `Reranker`-interfacet (`docs/07` §9) med
+   grad `production`.
+3. **Evalueringssæt.** Rigtige spørgsmål med kendte svar og kilder, også spørgsmål uden
+   dokumentation. Måling af træfsikkerhed og af tærsklen for "utilstrækkeligt grundlag".
+   Tallene i `docs/07` §20.4 valideres eller erstattes. Først derefter må production-evidens
+   udstedes.
+4. **Virusscanning af uploads** (`docs/07` B-26, i dag [AFKLARES]).
+5. **Workerens placering og adgang i produktion.** Hvor workeren kører, og en dedikeret
+   adgang med mindst mulige rettigheder i stedet for service-role-nøglen (`docs/07` §14.1,
+   B-16).
+6. **Eventuelt testisolation:** integrationstests mod en separat database og en
+   browserbaseret upload-test (`docs/07` §20.5).
+
+**Forudsætninger fra projektet:** se de oplysninger, der kræves for valg af udbydere, i
+gennemgangen af forslaget. De skal være afklaret, før fasen specificeres.
+
+**Udenfor:** AI Gateway, Claude API, Copilot og andre AI-moduler. Koblingen af Vercel-demoen
+på Supabase (B-003) sker til sidst, når udbydere og en produktionsløsning for workeren er på
+plads.
