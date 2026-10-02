@@ -9,9 +9,8 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 ## 1. Status
 
 **Fase 1–7 er gennemført og låst.** Fase 7 — Knowledge Engine blev godkendt 2026-10-02
-(`docs/07-knowledge-engine.md`). **Fase 8 — AI Gateway: specifikation skrevet — afventer
-godkendelse** (`docs/08-ai-gateway.md`). Der implementeres intet i fase 8, før specifikationen
-er godkendt. Fase 9 — Produktionsgrundlag for Knowledge Engine er foreslået (`docs/roadmap.md`).
+(`docs/07-knowledge-engine.md`). **Fase 8 — AI Gateway: specifikation godkendt — under
+implementering** (`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er foreslået (`docs/roadmap.md`).
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -76,7 +75,7 @@ fase, der ophæver dem, er nået.
 | 5 | Grundplatform | **Gennemført og låst** |
 | 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
 | 7 | Knowledge Engine | **Gennemført og låst** |
-| 8 | AI Gateway | **Specifikation — afventer godkendelse** |
+| 8 | AI Gateway | **Specifikation godkendt — under implementering** |
 | 9 | Produktionsgrundlag for Knowledge Engine | **Foreslået — afventer godkendelse** |
 | 10+ | *Ikke fastlagt* | Ikke påbegyndt |
 
@@ -100,7 +99,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
 | `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
-| `docs/08-ai-gateway.md` | 8 | Oprettet — specifikation, afventer godkendelse |
+| `docs/08-ai-gateway.md` | 8 | Oprettet — specifikation godkendt |
 | `docs/decisions.md` | Løbende | Oprettet |
 | `docs/open-questions.md` | Løbende | Ikke oprettet |
 

@@ -4,7 +4,7 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–7 er gennemført og **låst**. Fase 7 — Knowledge Engine er godkendt
-(2026-10-02). Fase 8 — AI Gateway: **specifikation skrevet — afventer godkendelse**
+(2026-10-02). Fase 8 — AI Gateway: **specifikation godkendt — under implementering**
 (`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
 afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 
@@ -26,7 +26,7 @@ afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
-| 8 | AI Gateway | 📝 Specifikation — afventer godkendelse | `docs/08-ai-gateway.md` |
+| 8 | AI Gateway | 🔨 Specifikation godkendt — under implementering | `docs/08-ai-gateway.md` |
 | 9 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
 | 10+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
@@ -291,16 +291,14 @@ Implementeringsstatus, afklaringer, mutationstests og kendte begrænsninger stå
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
 
 **Videreført til fase 9:** udbydere, validering af retrieval-tallene (B-008), virusscanning
-(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6. Overskriften dér siger
-"fase 8", fordi den blev skrevet før omnummereringen (B-011). `docs/07` er låst og er ikke
-rettet.
+(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6 (rettet til fase 9 ved B-012).
 
 ---
 
 ## Fase 8 — AI Gateway
 
-**Status:** 📝 Specifikation skrevet — afventer godkendelse. Intet er implementeret
-(`docs/08-ai-gateway.md`). Besluttet 2026-10-02 (B-011).
+**Status:** 🔨 Specifikationen er godkendt 2026-10-02 (B-012 til B-017). Implementeringen er i gang
+(`docs/08-ai-gateway.md`). Fasen blev besluttet 2026-10-02 (B-011).
 
 **Formål:** Politiklaget mellem applikationen og AI-modeller (`docs/03` §9). Det skal bygges
 uanset udbyder og kan testes uden en. Det afgør, hvilke kundedata der forlader platformen,
@@ -321,9 +319,8 @@ og specifikationen skal derfor godkendes før implementering.
 **Ingen rigtig AI-model:** en stub-model efter mønstret fra test-embedderen (udviklingsgrad,
 fail-closed, kun `local`/`test`). Copilot-brugerfladen viser mock-svar med kildekomponenter.
 
-**Modstrid, der kræver beslutning:** K-1 (`docs/07` §9.1 og udviklingsevidens), K-2
-(gating-tilstanden findes ikke endnu) og K-3 (adgang til loggen). Se `docs/08` §15. Åbne
-spørgsmål står i `docs/08` §16.
+**Afgjort modstrid:** K-1 (B-012), K-2 (B-013) og K-3 (B-014). Desuden Q-1 (B-015), Q-4 (B-016)
+og Q-9 (B-017). Se `docs/08` §15 og §16.
 
 **Uden for omfang:** ekstern AI-udbyder, Claude API-adapter, valg af embedding- og
 reranking-udbyder (fase 9), samtalelagring, Learn/Practice/Advise/Assessment som moduler.

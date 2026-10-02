@@ -5,6 +5,141 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-017 — Matricen i databasen, profilerne i repoet
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §4, §5.2
+
+**Beslutning:** Datakategori-matricen ligger i databasen, og workflow-profilerne ligger i
+repoet. Enhver ændring i matricen auditeres med hvem, hvad og hvornår. Matricen er fail-closed:
+hvad der ikke står, er forbudt.
+
+**Overvejede alternativer:**
+- *Begge i repoet.* Fravalgt: en politikændring ville kræve en udrulning og kunne ikke
+  revideres som en handling i systemet.
+- *Begge i databasen.* Fravalgt: prompts og output-kontrakter hører sammen med koden, der
+  validerer dem, og skal gennemgås som kode.
+
+**Begrundelse:** Matricen styrer, hvilke data der forlader platformen. Den er politik og skal
+kunne ændres og revideres. Profilerne er kode.
+
+---
+
+## B-016 — Et svar, der ikke kan kontrolleres mod kilderne, vises aldrig
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §4.3, §4.4
+
+**Beslutning:** Bryder modellens svar output-kontrakten, vises det ikke, heller ikke med en
+advarsel. Brugeren får at vide, at systemet ikke kunne give et svar, der kan dokumenteres, og
+ser de kilder, der blev fundet. Det er en fjerde tilstand med egen formulering og eget
+udseende, adskilt fra "utilstrækkelig dokumentation" og fra systemfejl. Den logges, fordi
+gentagelser betyder, at noget er galt med prompten eller modellen.
+
+**Overvejede alternativer:**
+- *At vise svaret med en advarsel.* Fravalgt: folk læser svaret og overser advarslen.
+- *At vise det som "utilstrækkelig dokumentation".* Fravalgt: dokumentationen fandtes. Modellen
+  brugte den ikke rigtigt.
+- *At vise det som systemfejl.* Fravalgt: systemet virkede, og kilderne kan bruges.
+
+**Begrundelse:** Et fagligt svar, der ikke kan dokumenteres, må ikke nå en bruger, der handler
+på det. Kilderne er stadig nyttige.
+
+---
+
+## B-015 — Under et AI-rollespil låses AI, ikke moduler
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §9.1
+
+**Beslutning:** Under et aktivt AI-rollespil låses al brugerrettet AI undtagen rollespillet
+selv. Det omfatter Copilot, AI i Learn (forklaringer og eksempelgenerering), Advise-AI og
+Practice-feedback. Learn og Advise forbliver tilgængelige som moduler.
+
+**Overvejede alternativer:**
+- *Kun Copilot låses* (ordlyden i `docs/02` §5). Fravalgt: AI i Learn svarer også for brugeren.
+- *Learn og Advise låses som moduler.* Fravalgt: at læse op i Learn er læring, ikke snyd, og man
+  kan alligevel ikke forhindre nogen i at slå op i en bog. Advise er en anden arbejdsopgave.
+
+**Begrundelse:** Copilot er en genvej, fordi den svarer for brugeren. Det gælder al AI, der
+svarer, ikke at læse.
+
+---
+
+## B-014 — AI-loggen deler indhold fra metadata
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §11; `docs/03` §11 og §13
+
+**Beslutning:** Modstriden mellem `docs/03` §11 ("AI-samtaledata: Egen") og §13 (kvalitetsanalyse)
+afgøres ved at skelne:
+- **Indhold** (spørgsmål og svar i fri tekst): kun brugeren selv. En samtale ført inde i en
+  kundecase følger kundecasens adgangsregler, ikke AI-domænets.
+- **Metadata** (dokumenter, chunks, evidensgrad, svartid, fejl, utilstrækkeligt grundlag): kan
+  læses af administratorer til kvalitetsarbejde.
+- **Videnshuller:** spørgsmålsteksten må nå administratorer, men aldrig fra en samtale bundet
+  til en kundecase. Derfra kommer kun det nøgne faktum, at grundlaget manglede.
+
+Skemaet bygges med opdelingen nu. Administratorers læseadgang er slået fra i fase 8 og kan slås
+til før produktion uden en migration. Enhver administrators læsning af AI-data logges i audit,
+ligesom individniveau i Analytics. Til læsningen indføres permissionen `ai.quality.read`
+(udledt: adgang styres af permissions, ikke rollenavne. `docs/03` §17 pkt. 6).
+
+**Overvejede alternativer:**
+- *Kun brugeren selv for alt.* Fravalgt: ingen kan da arbejde med kvaliteten eller med
+  videnshuller.
+- *Administratorer læser alt.* Fravalgt: indholdet kan indeholde kundedata, og
+  administratorrettigheder giver ingen adgang til kundecases (`docs/03` §10).
+
+**Begrundelse:** Dataminimering anvendt på loggen selv. Kvalitetsarbejde kræver maskineriet,
+ikke indholdet. Fejlen var i `docs/03`, som er låst. Afgørelsen står her og i `docs/08`.
+
+---
+
+## B-013 — Minimale tilstandstabeller til gating oprettes i fase 8
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §9.2; `docs/03` §4
+
+**Beslutning:** `assessment.assessment_attempts` og `practice.roleplay_sessions` oprettes i fase
+8 med kun de felter, gatingen har brug for: id, bruger, status, start, slut og tidsgrænse.
+Ingen spørgsmål, besvarelser eller bedømmelse. De dokumenteres som et bevidst minimum, så den
+senere fase udvider tabellerne frem for at bygge dem om.
+
+**Overvejede alternativer:**
+- *En låsetabel i `ai`.* Fravalgt: en anden sandhed om, hvorvidt et forsøg er i gang.
+- *Gating uden datakilde, testet med stubbet tilstand.* Fravalgt: håndhævelsen ville ikke være
+  verificeret mod databasen.
+
+**Begrundelse:** Gating er en del af fase 8 og kan ikke virke uden at kunne læse, om et forsøg
+eller et rollespil er i gang. Det er at bygge det, fase 8 kræver, ikke at bygge forud.
+
+---
+
+## B-012 — En production-model må kun tage imod production-evidens
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/07-knowledge-engine.md` §9.1 pkt. 4 og §20.6; `docs/08-ai-gateway.md` §3.3
+
+**Beslutning:** `docs/07` §9.1 er genåbnet for én sætning. "Senere AI-moduler og AI Gateway må
+kun tage imod `ProductionEvidenceSet`" er præciseret til "En production-model må kun tage imod
+`ProductionEvidenceSet`". En udviklingsmodel (kun `local`/`test`) må tage imod
+udviklingsevidens. Kravet: ændringen må ikke kun stå i dokumentationen. Det skal være umuligt i
+koden for en production-model at modtage udviklingsevidens. Registret er fail-closed, så et
+ukendt miljø tælles som produktion. Det dækkes af både en test og en mutationstest, samme
+standard som den eksisterende guardrail. Samtidig er henvisningen i `docs/07` §20.6 rettet fra
+fase 8 til fase 9. Resten af `docs/07` er urørt.
+
+**Overvejede alternativer:**
+- *Reglen ordret.* Fravalgt: gatewayen kunne ikke køre en eneste forespørgsel med evidens, før
+  der findes production-evidens (fase 9).
+
+**Begrundelse:** Formålet med reglen er at forhindre, at svagt kildegrundlag når frem til en
+bruger, der handler på det. Det er parringen production-model og udviklingsevidens, der er
+farlig. Udviklingsmodel og udviklingsevidens ser ingen bruger.
+
+---
+
 ## B-011 — Fase 8 bliver AI Gateway; udbydervalget udskydes til fase 9
 
 **Dato:** 2. oktober 2026
@@ -24,8 +159,7 @@ implementering.
 **Begrundelse:** Gatewayen afgør, hvilke kundedata der forlader platformen. Politikken skal
 ligge fast og være testet, før en ekstern model kobles på.
 
-**Bemærkning:** `docs/07` §20.6 henviser til "fase 8" for udbyderne. `docs/07` er låst og er
-ikke rettet. Henvisningen gælder nu fase 9.
+**Bemærkning:** Henvisningen til "fase 8" i `docs/07` §20.6 er rettet til fase 9 ved B-012.
 
 ---
 

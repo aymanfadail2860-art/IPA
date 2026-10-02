@@ -694,7 +694,7 @@ kommentar eller en regel i CLAUDE.md, men af fire mekanismer i koden:
 4. **Typesystem og en kontrolfunktion.** `requireProductionEvidence(set)` er den eneste måde at
    få typen `ProductionEvidenceSet` på (branded type). Funktionen kaster en fejl, hvis
    `grade !== "production"` eller `reranker.id === "none"`. Fase 7 definerer funktionen og
-   typen. Senere AI-moduler og AI Gateway må kun tage imod `ProductionEvidenceSet`, og en
+   typen. En production-model må kun tage imod `ProductionEvidenceSet` (B-012), og en
    guardrail-test i fase 7 fastslår, at typen ikke kan konstrueres på anden vis.
 
 Fase 7 bygger selv ingen AI-forbruger. Mekanismen og dens tests ligger klar, så den første
@@ -1303,7 +1303,7 @@ brugerfladen for tilstanden kan ses og bygges. Værktøjet:
   `project_id` og egne porte), eller nulstil databasen før hver testkørsel i CI. Det er ikke
   gennemført i fase 7.
 
-### 20.6 Ikke afgjort (videreført til fase 8)
+### 20.6 Ikke afgjort (videreført til fase 9)
 
 - Virusscanning af uploads **[AFKLARES]** (B-26).
 - Workerens adgang er development-only (§14.1, B-16).
