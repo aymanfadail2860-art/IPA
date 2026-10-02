@@ -5,6 +5,30 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-011 — Fase 8 bliver AI Gateway; udbydervalget udskydes til fase 9
+
+**Dato:** 2. oktober 2026
+**Område:** `docs/roadmap.md`, `docs/08-ai-gateway.md`
+
+**Beslutning:** Fase 8 er AI Gateway uden ekstern AI-udbyder. Det tidligere forslag til fase 8
+(embedding- og reranking-udbyder, evalueringssæt, virusscanning, worker i produktion) flyttes
+uændret til fase 9. Analysen af udbydere og brugerens svar om EU-krav, omfang og volumen
+gemmes i fase 9's beskrivelse i roadmap. I fase 8 kaldes ingen rigtig model. Der bruges en
+stub-model efter mønstret fra test-embedderen. Specifikationen skal godkendes før
+implementering.
+
+**Overvejede alternativer:**
+- *At vælge udbydere først (det oprindelige forslag til fase 8).* Udskudt: gatewayen skal
+  bygges uanset udbyder og kan testes uden en.
+
+**Begrundelse:** Gatewayen afgør, hvilke kundedata der forlader platformen. Politikken skal
+ligge fast og være testet, før en ekstern model kobles på.
+
+**Bemærkning:** `docs/07` §20.6 henviser til "fase 8" for udbyderne. `docs/07` er låst og er
+ikke rettet. Henvisningen gælder nu fase 9.
+
+---
+
 ## B-010 — Konfliktkandidater vises i bekræftelsesdialogen
 
 **Dato:** 2. oktober 2026

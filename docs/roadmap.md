@@ -4,8 +4,9 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–7 er gennemført og **låst**. Fase 7 — Knowledge Engine er godkendt
-(2026-10-02). Fase 8 — Produktionsgrundlag for Knowledge Engine er **foreslået — afventer
-godkendelse**.
+(2026-10-02). Fase 8 — AI Gateway: **specifikation skrevet — afventer godkendelse**
+(`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
+afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -25,8 +26,9 @@ godkendelse**.
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
-| 8 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
-| 9+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 8 | AI Gateway | 📝 Specifikation — afventer godkendelse | `docs/08-ai-gateway.md` |
+| 9 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
+| 10+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
 
@@ -288,19 +290,55 @@ Implementeringsstatus, afklaringer, mutationstests og kendte begrænsninger stå
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
 
-**Videreført til fase 8:** udbydere, validering af retrieval-tallene (B-008), virusscanning
-(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6.
+**Videreført til fase 9:** udbydere, validering af retrieval-tallene (B-008), virusscanning
+(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6. Overskriften dér siger
+"fase 8", fordi den blev skrevet før omnummereringen (B-011). `docs/07` er låst og er ikke
+rettet.
 
 ---
 
-## Fase 8 — Produktionsgrundlag for Knowledge Engine
+## Fase 8 — AI Gateway
+
+**Status:** 📝 Specifikation skrevet — afventer godkendelse. Intet er implementeret
+(`docs/08-ai-gateway.md`). Besluttet 2026-10-02 (B-011).
+
+**Formål:** Politiklaget mellem applikationen og AI-modeller (`docs/03` §9). Det skal bygges
+uanset udbyder og kan testes uden en. Det afgør, hvilke kundedata der forlader platformen,
+og specifikationen skal derfor godkendes før implementering.
+
+**Omfang:**
+
+- Dataminimering: kun det nødvendige sendes med
+- Redaction og anonymisering af identificerbare oplysninger
+- Permission-tjek i gatewayen, ikke kun i applikationslaget
+- Datakategori-matricen som konfiguration. Kundedata er ikke tilladt som standard
+- Logning: hvad blev sendt, hvad kom retur, hvilke kilder, hvor lang tid, fejl
+- Gating håndhævet på serveren: Copilot er utilgængelig under aktiv Assessment og under
+  AI-rollespil
+- Workflow-profiler for Learn, Copilot, Practice, Advise og Assessment med prompt, tilladte
+  handlinger og output-kontrakt
+
+**Ingen rigtig AI-model:** en stub-model efter mønstret fra test-embedderen (udviklingsgrad,
+fail-closed, kun `local`/`test`). Copilot-brugerfladen viser mock-svar med kildekomponenter.
+
+**Modstrid, der kræver beslutning:** K-1 (`docs/07` §9.1 og udviklingsevidens), K-2
+(gating-tilstanden findes ikke endnu) og K-3 (adgang til loggen). Se `docs/08` §15. Åbne
+spørgsmål står i `docs/08` §16.
+
+**Uden for omfang:** ekstern AI-udbyder, Claude API-adapter, valg af embedding- og
+reranking-udbyder (fase 9), samtalelagring, Learn/Practice/Advise/Assessment som moduler.
+
+---
+
+## Fase 9 — Produktionsgrundlag for Knowledge Engine
 
 **Status:** 📝 Foreslået — afventer godkendelse. Intet er specificeret eller implementeret.
+Forslaget blev oprindelig stillet som fase 8 og er flyttet uændret til fase 9 (B-011).
 
 **Udgangspunkt:** Fase 7 kører på en test-embedder og `none`-rerankeren. Guardrailen
 (`docs/07` §9.1) forhindrer AI-moduler i at bruge udviklingsevidens. Der kan derfor ikke
 bygges AI-moduler (Copilot, Learn AI, Practice AI, Advise AI), før rigtige udbydere er valgt
-og retrieval-kvaliteten kan måles (`docs/07` §20.4, B-008). Fase 8 skaffer det grundlag. Den
+og retrieval-kvaliteten kan måles (`docs/07` §20.4, B-008). Fase 9 skaffer det grundlag. Den
 bygger ingen AI-funktionalitet.
 
 **Foreslået indhold:**
@@ -321,9 +359,67 @@ bygger ingen AI-funktionalitet.
 6. **Eventuelt testisolation:** integrationstests mod en separat database og en
    browserbaseret upload-test (`docs/07` §20.5).
 
-**Forudsætninger fra projektet:** se de oplysninger, der kræves for valg af udbydere, i
-gennemgangen af forslaget. De skal være afklaret, før fasen specificeres.
-
-**Udenfor:** AI Gateway, Claude API, Copilot og andre AI-moduler. Koblingen af Vercel-demoen
+**Udenfor:** Claude API, Copilot og andre AI-moduler. AI Gateway er fase 8. Koblingen af Vercel-demoen
 på Supabase (B-003) sker til sidst, når udbydere og en produktionsløsning for workeren er på
 plads.
+
+### Grundlag for udbydervalget (indsamlet 2026-10-02)
+
+Analysen er lavet før fase 8 blev omlagt. Den gemmes her, så den kan bruges, når fase 9
+specificeres. Oplysningerne er fra 2026-10-02 og skal efterprøves, før der vælges. Flere af
+dem kunne kun bekræftes gennem søgeresultater, fordi udbydernes egen dokumentation ikke kunne
+hentes.
+
+**Brugerens svar (oplyst):**
+
+- **EU er et krav, ikke en præference:** EU-region, hvor det er muligt, og en
+  databehandleraftale med udbyderen.
+- **Omfang i første omgang:** kun offentlige forsikringsbetingelser og -vilkår. Der gælder
+  ingen fortrolighedsbegrænsning for dem. Acceptregler, forretningsgange og interne dokumenter
+  kommer senere efter en særskilt beslutning. Udbydervalget må ikke gøre den beslutning
+  sværere, men skal heller ikke træffe den nu. Afgrænsningen skrives ind i fasens
+  specifikation.
+- **Ingen eksisterende leverandøraftaler**, hverken nogen der skal bruges eller undgås. Frit
+  valg inden for EU-kravet.
+- **Volumen:** 30–40 produkter à 40–50 sider, i alt ca. 1.200–2.000 sider. Behandles én gang.
+  Nye versioner kommer sjældent, måske med års mellemrum. 30 rådgivere à 20–30 spørgsmål om
+  dagen giver 600–900 forespørgsler om dagen ved fuld brug.
+- **Evalueringssæt:** brugeren skaffer offentlige betingelser og formulerer 30–50 spørgsmål,
+  også nogle uden svar.
+
+**Pris er ikke afgørende i den skala.** Embedding af hele grundlaget koster under 1 kr.
+Reranking koster for alle tre kandidater mindre end ca. $50 om måneden ved 13.000–19.000
+forespørgsler. Valget afgøres derfor af **træfsikkerhed på dansk**: sammensatte ord,
+bøjninger, paragrafhenvisninger og juridisk præcision. Det kan ikke vurderes uden at prøve.
+Der findes intet offentligt dansk juridisk benchmark. Fremgangsmåden er derfor at vælge én,
+prøve den mod evalueringssættet og skifte, hvis den ikke rammer.
+
+**Anbefaling: AWS Bedrock i Frankfurt (eu-central-1) med Cohere embed-multilingual-v3 og
+Cohere Rerank 3.5.** Begrundelse: alt er dokumenteret in-region i Frankfurt. AWS'
+databehandleraftale (GDPR DPA) indgår i vilkårene, og embedding og reranking købes hos samme
+udbyder. Rerank 3.5 koster $2,00 pr. 1.000 forespørgsler. Den nyere Embed v4 findes i Frankfurt
+kun via EU-profilen på tværs af AWS' EU-regioner, ikke in-region. Rerank 4 findes endnu ikke på
+Bedrock.
+
+**Dokumenteret alternativ: Microsoft Azure** med Azure OpenAI `text-embedding-3-large` og
+Cohere Rerank 4 i Microsoft Foundry (fx Sweden Central). `text-embedding-3-large` har det
+bedste offentlige resultat på skandinavisk (Scandinavian Embedding Benchmark, 2024), og Rerank
+4 er nyere end 3.5. To punkter skal afklares først:
+
+1. Kan `text-embedding-3-large` køre som regional deployment i en EU-region og ikke kun
+   globalt?
+2. Er Cohere-modellen i Foundry dækket af Microsofts databehandleraftale eller af separate
+   Marketplace-vilkår?
+
+**Mulighed, hvis ingen af dem rammer: Voyage AI via MongoDB Atlas** (voyage-4 og rerank-3).
+EU-dataopbevaring i EØS har været tilgængelig siden 1. september 2026. Det er usikkert, om
+dansk er blandt de 31 sprog i Voyages egen sammenligning. Det skal bekræftes, at MongoDBs
+databehandleraftale dækker API'et.
+
+**Fravalgt: Google Vertex AI.** Ranking-API'et understøtter 25 sprog, og dansk er ikke
+bekræftet. Kontekstvinduet er kun 1.024 tokens pr. tekstudsnit.
+
+**Lock-in er lav for alle tre.** Et skift af embedding-model kræver ny embedding af 1–1,5
+mio. tokens gennem den eksisterende mekanisme (`docs/07` §7) og eventuelt et nyt indeks.
+Rerankeren gemmer ingen tilstand og ligger bag `Reranker`-interfacet. Den reelle binding ligger
+i kontrakt, databehandleraftale og regionsopsætning.
