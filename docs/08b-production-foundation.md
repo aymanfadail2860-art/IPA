@@ -1,9 +1,11 @@
 # 08B — Produktionsgrundlag
 
 **Fase:** 8B — Produktionsgrundlag (underfase af masterfase 8 — AI Copilot, B-019)
-**Status:** 📝 **Specifikation — principielt godkendt 2026-10-03, afventer endelig godkendelse.**
-Intet er implementeret. Retningen og D-1–D-5, D-7–D-9, D-11–D-14, D-16 og D-17 er principielt
-godkendt. D-6, D-10, D-15 og de nye D-18–D-20 samt K-9 afventer (§19).
+**Status:** 🔒 **GODKENDT OG LÅST — specifikation (2026-10-03, B-020).** Alle beslutninger D-1–D-20
+og tekstændringerne K-1, K-2, K-4, K-6 og K-9 er godkendt (§19). **Intet er implementeret.**
+Implementeringen af 8B er det næste arbejde og kræver en særskilt, eksplicit godkendelse.
+Specifikationen ændres kun ved en eksplicit beslutning om at genåbne den. De åbne spørgsmål
+Å-1–Å-6 forbliver åbne og blokerer ikke specifikationen.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/08` (låst: fase 1–7 og 8A) og `docs/decisions.md` (til og med
 B-019). Udbyderanalysen fra 2026-10-02 står i `docs/roadmap.md` under 8B.
@@ -123,7 +125,7 @@ mod. Danske sammensatte ord giver desuden flere tokens pr. tegn end engelsk.
 ### 2.3 Anbefaling
 
 **Cohere Embed v4 på AWS Bedrock med den EU-geografiske inferensprofil og dimension 1024**
-(D-1, principielt godkendt). Embed-multilingual-v3 i Frankfurt og andre modeller kan evalueres
+(D-1, godkendt). Embed-multilingual-v3 i Frankfurt og andre modeller kan evalueres
 mod samme sæt (§4.5).
 
 - Begrundelse: hele chunket kan embeddes uden at ændre chunkingen. Data forlader ikke EU, og
@@ -315,8 +317,20 @@ kompensere for et sikkerhedsbrud.** Fejler én hård gate, er kørslen dumpet, u
 
 #### Kvalitetsgates — statistiske tærskler
 
-Tallene er foreløbige. De bekræftes efter baseline-kørslen og kan kun ændres ved en ny,
-registreret beslutning.
+Q1–Q7 er de **initiale** tærskler (D-6). De er ikke uforanderlige domæneregler og er ikke
+hårdkodet i koden:
+
+- Tærsklerne ligger i et versionsstyret **gate-sæt** (`evals/retrieval/gates/gates-v1.json`, §5.1).
+  Hver evalueringskørsel og hver godkendt konfiguration henviser til gate-sættets version og
+  checksum. `record_evaluation_run` genberegner gates mod netop det gate-sæt.
+- Et gate-sæt kan kun tages i brug, når det er registreret i produktion af `evaluation_publisher`
+  og godkendt eksplicit af et menneske med `system.settings.manage` (samme mønster som
+  konfigurationerne, §10). Administratoren kan ikke rette et registreret gate-sæt.
+- **Rekalibrering** sker kun gennem en ny version af gate-sættet, en ny versionsstyret
+  evalueringsbaseline og en eksplicit godkendt beslutning i `docs/decisions.md`. En konfiguration,
+  der er godkendt mod et ældre gate-sæt, beholder sin godkendelse, indtil den evalueres igen.
+- **H1–H7 er ikke en del af gate-sættet.** Nul tolerance er en invariant i koden og i
+  `record_evaluation_run`. Den kan ikke rekalibreres.
 
 | # | Metric | Tærskel | Hvorfor | Ved fejl ved godkendelse | Ved fejl i regression |
 |---|--------|---------|---------|--------------------------|-----------------------|
@@ -401,6 +415,7 @@ evals/retrieval/
                                   kilde-URL, checksum, licens/tilladelse), evalueringsbrugere
                                   og tildelinger
   cases/terms-v1.jsonl            ét spørgsmål pr. linje
+  gates/gates-v1.json             versionsstyret gate-sæt med tærsklerne for Q1–Q7 (§4.4)
   fixtures/                       kun materiale, vi må have i repoet: fiktive tillæg og versioner
                                   til konflikt-, historik- og adgangsspørgsmål
 ```
@@ -539,9 +554,9 @@ produktionsløsningen (`docs/07` §14.1, B-16).
 | A | Service-rolle i workeren (fase 7) | Nej | Hele databasen og al Storage | Kun ved projektrotation | **Udelukket** af kravet |
 | B | JWT med egen rolle via PostgREST og Storage | Rollen selv, ja | **Den, der kan signere, kan også udstede `service_role`.** Signerer workeren eller en KMS-nøgle, den har adgang til, er blast radius hele projektet | Nøglerotation påvirker alle | **Fravalgt.** Supabase har desuden åbne fejlrapporter om egne roller med egne nøgler (#38611, #38911) |
 | C | Hele workeren bag en Edge Function, der bruger service-rollen | Kun de operationer, funktionen udstiller | Begrænset til funktionens operationer | Funktionens nøgle kan roteres | Mulig, men store payloads (chunks og vektorer) gennem en funktion med tids- og størrelsesgrænser. Mere kode i et miljø med færre tests |
-| **D** | **Direkte Postgres-forbindelse med en LOGIN-rolle via Supavisor + en lille Edge Function kun til filer** | **Databasen håndhæver det: kun `EXECUTE` på `worker_*`** | Kun ingestion-operationer på jobs, der kan tages. Ingen tabeladgang, ingen publicering, ingen filer uden billet | Password i Secrets Manager. Rotation med `alter role … password`. Øjeblikkelig spærring med `alter role … nologin` | **Anbefales** |
+| **D** | **Direkte Postgres-forbindelse med en LOGIN-rolle via Supavisor + en lille Edge Function kun til filer** | **Databasen håndhæver det: kun `EXECUTE` på `worker_*`** | Kun ingestion-operationer på jobs, der kan tages. Ingen tabeladgang, ingen publicering, ingen filer uden billet | Password i Secrets Manager. Blue/green-rotation mellem to login-roller. Øjeblikkelig spærring med medlemskab, `nologin` og afbrudte sessioner | **Godkendt (D-10)** |
 
-**Anbefaling: D.**
+**Beslutning: D (godkendt, D-10).**
 
 1. **Roller:**
    - `ingestion_worker` (NOLOGIN, gruppe) ejer ingen objekter og har kun `EXECUTE` på
@@ -549,7 +564,10 @@ produktionsløsningen (`docs/07` §14.1, B-16).
    - Ingen tabelrettigheder. Ingen medlemskab i `authenticated`, `service_role` eller
      `postgres`.
    - `ingestion_worker_login` (LOGIN, medlem af `ingestion_worker`)
-     har password, `connection limit` 5 og `statement_timeout`.
+     har password, `connection limit` 5 og `statement_timeout`. Af hensyn til rotationen
+     (pkt. 4) findes den som to roller, `ingestion_worker_login_blue` og
+     `ingestion_worker_login_green`. Kun den ene er aktiv ad gangen. Den anden er `NOLOGIN` og
+     ikke medlem af `ingestion_worker`.
    - `worker_*`-funktionerne (security definer) kontrollerer selv lease og versionsstatus og kan
      aldrig publicere (fase 7). 8B tilføjer, at de kun kan kaldes af medlemmer af
      `ingestion_worker` (`pg_has_role`), så service-rollens kald fra fase 7 kun virker lokalt.
@@ -566,11 +584,35 @@ produktionsløsningen (`docs/07` §14.1, B-16).
    - Service-rollen forlader aldrig Supabase.
    - En kompromitteret worker kan kun hente originaler til versioner, der står i kø eller er
      under behandling.
-4. **Hemmeligheder:** DB-passwordet ligger i AWS Secrets Manager og læses af taskrollen. Det
-   roteres hver 90. dag efter en runbook: nyt password sættes i Supabase og i Secrets Manager,
-   og tasken genstartes. Automatisk rotation kan komme senere, men det kræver en
-   administrativ databaseidentitet i AWS og fravælges derfor nu. Ingen hemmeligheder i image,
-   repo eller miljøvariabler i task-definitionen.
+4. **Hemmeligheder og rotation (D-20):** brugernavn og password ligger i AWS Secrets Manager og
+   læses af taskrollen. Ingen hemmeligheder i image, repo eller miljøvariabler i
+   task-definitionen. Rotationen følger en runbook:
+   - **Cyklus:** planlagt rotation mindst hver 90. dag i V1, og straks ved mistanke om læk.
+     Automatisk rotation fravælges for nu, fordi den kræver en administrativ databaseidentitet i
+     AWS.
+   - **Blue/green frem for at skifte password på den aktive rolle.** Supavisor kan midlertidigt
+     cache credentials og holde forbindelser åbne efter et passwordskift. Et skift på den aktive
+     rolle kan derfor både lade det gamle password virke lidt endnu og afvise det nye. Rotationen
+     skifter i stedet mellem de to roller, som Supavisor ser som to forskellige brugere:
+     1. *Klargør:* den inaktive rolle (fx green) får et nyt, tilfældigt password, `LOGIN` og
+        medlemskab af `ingestion_worker`.
+     2. *Gem:* den nye credential (brugernavn og password) lægges i Secrets Manager som en ny
+        version.
+     3. *Flyt kontrolleret:* ECS-servicen rulles, så nye tasks bruger den nye version.
+        Igangværende jobs fortsætter på den gamle rolle, indtil tasken stopper. Et afbrudt job
+        genoptages via lease (§6.3).
+     4. *Verificér:* de nye tasks forbinder som green (`pg_stat_activity`), et kontroljob
+        behandles, og der er ingen forbindelsesfejl i loggene.
+     5. *Deaktivér:* den gamle rolle (blue) mister medlemskab af `ingestion_worker`, sættes til
+        `NOLOGIN`, dens tilbageværende sessioner afbrydes (`pg_terminate_backend`), og dens
+        password erstattes med en tilfældig værdi, som ingen gemmer. Den gamle version i Secrets
+        Manager udfases.
+     6. *Bekræft:* ingen sessioner for blue i `pg_stat_activity`. Rotationen auditeres.
+   - **Nødspærring:** kan udføres straks og i denne rækkefølge: `revoke ingestion_worker from
+     <rolle>` (virker ved næste funktionskald, også på en forbindelse, som pooleren allerede har
+     åbnet, fordi `worker_*` kontrollerer `pg_has_role` ved hvert kald), `alter role … nologin`,
+     og afbrydelse af rollens sessioner. Spærringen afhænger derfor ikke af, at pooleren glemmer
+     en cachet credential. Derefter klargøres den anden rolle som i trin 1–4.
 5. **Ny dependency (D-19):** en Postgres-klient til workeren. Anbefaling: **`postgres`**
    (postgres.js).
    - Ingen transitive dependencies.
@@ -775,6 +817,12 @@ virksomhedsnavne). Ingen NER-model og ingen ny redaction i 8B.
 ---
 
 ## 9. ProductionEvidenceSet — endelig logik
+
+**Godkendt (B-020):** P1–P9 er source of truth for, hvornår et EvidenceSet får
+`grade = production`. Graden beregnes ud fra den aktive, godkendte retrieval-konfiguration, dens
+fingeraftryk og dens evalueringsstatus. Runtime skal matche den evaluerede konfiguration. En
+betingelse, der ikke kan afgøres, giver `development`. En hård gate, der fejler i regression,
+suspenderer den relevante konfiguration (§10.2).
 
 **`grade = production` er aldrig et manuelt flag.** Graden afledes ved hvert retrieval-kald i
 `issueEvidenceSet`. Den kan ikke sættes i requesten, i brugerfladen, i databasen eller af en
@@ -985,7 +1033,7 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 | **Uautoriseret retrieval** | Brugeren ser dokumenter uden tildeling | Søgning som brugeren (`security invoker`, RLS, adgangsfilter før søgning). Hård gate H1. Integrationstests fra fase 7 |
 | **Lækage af metadata** | Titler, ids eller konflikter afslører dokumenter | Neutral konfliktindikator (B-20); "findes ikke" frem for "ingen adgang"; gate H1 omfatter metadata; evalueringsrapporter indeholder ingen produktionsdata |
 | **Privilegieeskalering** | Workeren publicerer eller læser mere end nødvendigt | Rollen `ingestion_worker` må kun køre `worker_*`-funktioner og kun som medlem af rollen (`pg_has_role`). Funktionerne kan ikke publicere (fase 7). Ingen service-rolle i workeren. Service-rollen bruges kun inde i Edge Function `worker-storage` og kun til én operation pr. billet |
-| **Kompromitteret worker-credential** | En angriber kan skrive behandlingsresultater | Rollen har kun `EXECUTE` på `worker_*` og ingen tabeladgang. Den kan ikke publicere: alt kræver en menneskelig godkendelse (`docs/03` §1 pkt. 4). Filer kun via billet for jobs, workeren har lease på. Netværksbegrænsning til fast IP. Øjeblikkelig spærring (`nologin`). Rotation hver 90. dag. IAM-rolle til Bedrock (ingen nøgle at stjæle) |
+| **Kompromitteret worker-credential** | En angriber kan skrive behandlingsresultater | Rollen har kun `EXECUTE` på `worker_*` og ingen tabeladgang. Den kan ikke publicere: alt kræver en menneskelig godkendelse (`docs/03` §1 pkt. 4). Filer kun via billet for jobs, workeren har lease på. Netværksbegrænsning til fast IP. Øjeblikkelig spærring (medlemskab, `nologin`, afbrudte sessioner). Blue/green-rotation mindst hver 90. dag. IAM-rolle til Bedrock (ingen nøgle at stjæle) |
 | **Forgiftet videnskilde** | Forkert eller manipuleret indhold bliver "autoritativt" | Kun mennesker med `knowledge.version.publish` aktiverer viden (fase 7); kvalitetsrapport og review; konfliktdetektion; audit af upload og godkendelse; checksum på originalen |
 | **Replay og dobbeltbehandling** | Dubletter eller to workers på samme version | Lease, unikt aktivt job pr. (version, type), idempotente trin, (chunk, model) som nøgle, checksum |
 | **Utilsigtet brug af udviklingsevidens** | Svag evidens når en bruger, der handler på den | Fail-closed register, `ProductionEvidenceSet` og parringsreglen (B-012); P3/P6 (godkendt konfiguration); gates H6; mutationstests |
@@ -1052,6 +1100,11 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 Ingen af punkterne ændrer arkitektur eller trufne beslutninger. Alle er udbygninger eller
 stramninger, der kræver din godkendelse, fordi de rører tekst i låste dokumenter:
 
+**Status (B-020):** K-1, K-2, K-4, K-6 og K-9 er godkendt som tekstændringer (D-17). K-5, K-7 og K-8
+følger af de godkendte D-10, D-2/D-9 og D-11. K-3 gælder kun, hvis Embed v3 vælges efter
+baseline (§20 trin 5), og kræver i så fald en ny beslutning. Teksten i `docs/07` og `docs/08`
+rettes samtidig med den implementering, punktet hører til, ikke før.
+
 | # | Låst dokument | Hvad | Type |
 |---|---------------|------|------|
 | K-1 | `docs/07` §9.1 pkt. 3 | Graden er i dag "production kun hvis både embedder og reranker er production". 8B tilføjer flere nødvendige betingelser (P3, P6). "Kun hvis" gælder fortsat. Teksten bør nævne, at betingelserne er udvidet (B-008) | Stramning, ikke modstrid |
@@ -1068,38 +1121,40 @@ stramninger, der kræver din godkendelse, fordi de rører tekst i låste dokumen
 
 ## 19. Beslutninger
 
-**Status:** "Principielt godkendt 2026-10-03" betyder godkendt af dig og indarbejdet. Fasen låses
-først ved din endelige godkendelse.
+**Status:** Alle beslutninger er godkendt 2026-10-03, og specifikationen er låst (B-020).
+Godkendelsen dækker specifikationen. Implementeringen kræver en særskilt godkendelse.
 
 | # | Beslutning | Status |
 |---|------------|--------|
-| **D-1** | Cohere Embed v4 via Bedrocks **EU-geografiske** inferensprofil, 1024 dimensioner som udgangspunkt. Behandlingen er EU-geografisk og ikke kun Frankfurt (§2.3). Alternative modeller kan evalueres mod samme sæt (§4.5) | Principielt godkendt |
-| **D-2** | AWS Bedrock som udbyder af production-embeddings og -reranking | Principielt godkendt |
-| **D-3** | Cohere Rerank 3.5 in-region i eu-central-1 (Frankfurt) | Principielt godkendt |
-| **D-4** | Ingen fallback til `none` i produktion. En reranker-fejl er fail-closed, og production-retrieval er utilgængelig | Principielt godkendt |
-| **D-5** | Metric-familien i §4.2 og §4.3 | Principielt godkendt |
-| **D-6** | Gates: hårde H1–H7 med nul tolerance, kvalitetsgates Q1–Q7 med tærsklerne i §4.4, og reglerne for pilot-evaluering | **Afventer din godkendelse** (konkretiseret i §4.4) |
-| **D-7** | Separat evalueringsmiljø og en versions- og checksumbaseret godkendelsesrapport | Principielt godkendt (udmøntet med D-18) |
-| **D-8** | En fejlet hård gate i regression fjerner automatisk production-grad (suspendering). En kvalitetsregression giver alarm og kræver faglig/teknisk vurdering | Principielt godkendt |
-| **D-9** | AWS ECS Fargate som production worker og ClamAV som ét lag i upload-sikkerheden | Principielt godkendt |
-| **D-10** | Workerens identitet: direkte Postgres-forbindelse via Supavisor med LOGIN-rollen `ingestion_worker_login` (kun `EXECUTE` på `worker_*`), password i AWS Secrets Manager, netværksbegrænsning til fast IP, og filer via en engangsbillet og Edge Function `worker-storage`, så service-rollen bliver i Supabase (§6.1.1) | **Afventer din godkendelse** |
-| **D-11** | OIDC-federering mellem Vercel og AWS frem for statiske AWS-nøgler | Principielt godkendt |
-| **D-12** | PDF'er med aktivt indhold afvises | Principielt godkendt |
-| **D-13** | Kundedata og fri tekst fra kundesager er teknisk spærret for eksterne modeller, med de fem lag i §8.2 | Principielt godkendt. **Lag L1–L3 strammer 8A-kode (K-9) og afventer din bekræftelse** |
-| **D-14** | Evidensmodellens schemaVersion 2 med `retrieval.configuration` | Principielt godkendt |
-| **D-15** | Alarmer via en abstrakt `AlertSink`. Den første kanal vælges ved implementeringen og låses ikke i domænemodellen (§14) | **Afventer din godkendelse** af princippet |
-| **D-16** | Evalueringssættet versionsstyret i `evals/retrieval/` (§5.1), uden fortrolige kundedata og med CI-kontrol | Principielt godkendt (struktur konkretiseret) |
-| **D-17** | Tilladelse til tekstændringerne i K-1, K-2, K-4 og K-6 | Principielt godkendt |
-| **D-18** | Særskilt identitet `evaluation_publisher`, så en administrator ikke kan registrere eller rette en evalueringskørsel (§4.5) | **Ny — afventer din godkendelse** |
-| **D-19** | Ny dependency `postgres` (postgres.js) kun i `workers/` (§6.1.1) | **Ny — afventer din godkendelse** |
-| **D-20** | Rotation af workerens password: manuel runbook hver 90. dag. Automatisk rotation fravælges for nu, fordi den kræver en administrativ databaseidentitet i AWS | **Ny — afventer din godkendelse** |
+| **D-1** | Cohere Embed v4 via Bedrocks **EU-geografiske** inferensprofil, 1024 dimensioner som udgangspunkt. Behandlingen er EU-geografisk og ikke kun Frankfurt (§2.3). Alternative modeller kan evalueres mod samme sæt (§4.5) | Godkendt |
+| **D-2** | AWS Bedrock som udbyder af production-embeddings og -reranking | Godkendt |
+| **D-3** | Cohere Rerank 3.5 in-region i eu-central-1 (Frankfurt) | Godkendt |
+| **D-4** | Ingen fallback til `none` i produktion. En reranker-fejl er fail-closed, og production-retrieval er utilgængelig | Godkendt |
+| **D-5** | Metric-familien i §4.2 og §4.3 | Godkendt |
+| **D-6** | Gates: hårde H1–H7 med nul tolerance, kvalitetsgates Q1–Q7 med tærsklerne i §4.4 som initiale tærskler, og reglerne for pilot-evaluering. Q1–Q7 ligger i et versionsstyret gate-sæt og kan kun rekalibreres gennem en ny godkendt baseline. Under 100 spørgsmål er godkendelsen `tier: pilot` | Godkendt |
+| **D-7** | Separat evalueringsmiljø og en versions- og checksumbaseret godkendelsesrapport | Godkendt (udmøntet med D-18) |
+| **D-8** | En fejlet hård gate i regression fjerner automatisk production-grad (suspendering). En kvalitetsregression giver alarm og kræver faglig/teknisk vurdering | Godkendt |
+| **D-9** | AWS ECS Fargate som production worker og ClamAV som ét lag i upload-sikkerheden | Godkendt |
+| **D-10** | Workerens identitet: AWS ECS Fargate, direkte Postgres-forbindelse via Supavisor med en dedikeret LOGIN-rolle (`ingestion_worker_login`, blue/green), ingen tabelrettigheder, kun `EXECUTE` på godkendte `knowledge.worker_*`, ingen godkendelse eller publicering, netværksbegrænsning til NAT'ens faste IP, credentials i AWS Secrets Manager, filer via engangsbillet og Edge Function `worker-storage`, og ingen production-service-rolle i workeren (§6.1.1) | Godkendt |
+| **D-11** | OIDC-federering mellem Vercel og AWS frem for statiske AWS-nøgler | Godkendt |
+| **D-12** | PDF'er med aktivt indhold afvises | Godkendt |
+| **D-13** | Kundedata og fri tekst fra kundesager er teknisk spærret for eksterne modeller, med de fem lag i §8.2 | Godkendt, inkl. K-9 (L1–L5 som tilladt sikkerhedsstramning af 8A) |
+| **D-14** | Evidensmodellens schemaVersion 2 med `retrieval.configuration` | Godkendt |
+| **D-15** | Alarmer via en abstrakt `AlertSink`. Den første kanal vælges ved implementeringen og låses ikke i domænemodellen (§14) | Godkendt |
+| **D-16** | Evalueringssættet versionsstyret i `evals/retrieval/` (§5.1), uden fortrolige kundedata og med CI-kontrol | Godkendt |
+| **D-17** | Tilladelse til tekstændringerne i K-1, K-2, K-4, K-6 og K-9 (§18) | Godkendt |
+| **D-18** | Særskilt identitet `evaluation_publisher`, så en administrator ikke kan registrere eller rette en evalueringskørsel (§4.5) | Godkendt |
+| **D-19** | Ny dependency `postgres` (postgres.js) kun i `workers/` (§6.1.1) | Godkendt |
+| **D-20** | Rotation af workerens credential: planlagt cyklus på højst 90 dage, blue/green mellem to login-roller, så Supavisors cache ikke afgør skiftet, og nødspærring straks via medlemskab, `NOLOGIN` og afbrudte sessioner (§6.1.1 pkt. 4). Automatisk rotation fravælges for nu | Godkendt |
 
-**Åbne spørgsmål — ikke [AFKLARES], og de blokerer ikke implementeringen:**
+**Åbne spørgsmål — ikke [AFKLARES]. De forbliver åbne efter låsningen og blokerer ikke
+specifikationen. Å-2 er fortsat exit-kriterium 11 og skal være opfyldt før reel
+produktionsbrug:**
 
 | # | Spørgsmål | Hvornår |
 |---|-----------|---------|
 | Å-1 | Bedrocks kvoter for modellerne i eu-central-1 og EU-profilen | Trin 1 i implementeringen. Kvoteforhøjelse er en driftshandling |
-| Å-2 | Databehandleraftalerne bekræftes af dig eller juridisk ansvarlig | Før rigtige dokumenter indlæses. Exit-kriterium 11 |
+| Å-2 | Databehandleraftalerne bekræftes af dig eller juridisk ansvarlig | Før rigtige dokumenter indlæses og før reel produktionsbrug. Exit-kriterium 11 |
 | Å-3 | Hvem vedligeholder evalueringssættet, og hvor ofte tilføjes spørgsmål | Før baseline |
 | Å-4 | Retningslinjer for fiktive dokumenter i sættet | Skrives i `evals/retrieval/README.md` før baseline |
 | Å-5 | Første alarmkanal (e-mail, webhook eller andet) og modtager | Ved implementeringen af §14 |
@@ -1107,7 +1162,7 @@ først ved din endelige godkendelse.
 
 ---
 
-## 20. Implementeringsrækkefølge (når specifikationen er godkendt)
+## 20. Implementeringsrækkefølge (når implementeringen er godkendt)
 
 1. Udbyderadgang: AWS-konto og -region, databehandleraftale, kvoter og OIDC-federering.
    Kontrakttest mod Bedrock.

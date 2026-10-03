@@ -10,15 +10,15 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 **Fase 1–7 og underfase 8A er gennemført og låst.** 8A — AI Gateway blev godkendt 2026-10-03
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot er opdelt i 8A, 8B — Produktionsgrundlag og
-8C — Copilot klar til brug (B-019). Specifikationen for 8B er skrevet og afventer godkendelse
-(`docs/08b-production-foundation.md`). Der implementeres intet i 8B, før den er godkendt. 8C er
-ikke specificeret.
+8C — Copilot klar til brug (B-019). Specifikationen for 8B er godkendt og låst 2026-10-03
+(`docs/08b-production-foundation.md`, B-020). Implementeringen af 8B er det næste arbejde, men
+påbegyndes først efter en særskilt, eksplicit godkendelse. 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
 B-003).
 
-Låst betyder, at dokumenterne fra fase 1–7 og 8A er projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
+Låst betyder, at dokumenterne fra fase 1–7, 8A og 8B-specifikationen er projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
 ved en eksplicit beslutning om at genåbne dem.
 
 Se `docs/roadmap.md` for den aktuelle status. Den er source of truth for master-roadmappen med
@@ -85,8 +85,8 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | Specifikation — afventer godkendelse |
-| 8C | Copilot klar til brug | Ikke specificeret/godkendt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — implementering er næste skridt |
+| 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |
 | 11 | Advise | Ikke påbegyndt |
@@ -124,7 +124,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
 | `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
 | `docs/08-ai-gateway.md` | 8A | Oprettet — gennemført og låst |
-| `docs/08b-production-foundation.md` | 8B | Oprettet — specifikation, afventer godkendelse |
+| `docs/08b-production-foundation.md` | 8B | Oprettet — specifikation godkendt og låst |
 | `docs/decisions.md` | Løbende | Oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i

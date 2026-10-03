@@ -10,6 +10,68 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-020 — 8B-specifikationen er godkendt og låst
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08b-production-foundation.md` (hele dokumentet), `docs/roadmap.md`, `CLAUDE.md`,
+`README.md`
+
+**Beslutning:** Specifikationen for 8B — Produktionsgrundlag er godkendt og låst. Det gælder
+specifikationen, ikke implementeringen, som kræver en særskilt godkendelse. Alle beslutninger
+D-1–D-20 i specifikationens §19 er godkendt. De sidste, der blev godkendt, er:
+
+- **D-6 — gates:** H1–H7 er hårde sikkerhedsgates med nul tolerance. Q1–Q7 er de initiale
+  kvalitetstærskler. De ligger i et versionsstyret gate-sæt og kan kun rekalibreres gennem en ny,
+  versionsstyret og eksplicit godkendt evalueringsbaseline. De hårdkodes ikke som uforanderlige
+  domæneregler. Under 100 evalueringsspørgsmål er en godkendelse `tier: pilot`.
+- **D-10 — workerens identitet:**
+  - AWS ECS Fargate med direkte Postgres-forbindelse via Supavisor.
+  - Dedikeret LOGIN-rolle `ingestion_worker_login`, uden tabelrettigheder og med kun `EXECUTE` på
+    godkendte `knowledge.worker_*`.
+  - Workeren kan ikke godkende eller publicere.
+  - Netværksbegrænsning til NAT'ens faste IP og credentials i AWS Secrets Manager.
+  - Ingen production-service-rolle i workeren.
+- **D-15 — alarmer:** en abstrakt `AlertSink`. Domænemodellen bindes ikke til en konkret kanal.
+- **D-18 — `evaluation_publisher`:** administratorer kan ikke fremstille eller rette en
+  evalueringskørsel.
+- **D-19 — dependency:** `postgres` (postgres.js) er den specificerede dependency i workeren ved
+  implementeringen. Den er ikke installeret endnu.
+- **D-20 — rotation:**
+  - En planlagt rotationscyklus på højst 90 dage i V1.
+  - Rotationen sker blue/green mellem to dedikerede login-roller: klargør, flyt kontrolleret,
+    verificér og deaktivér den gamle. Skiftet afhænger derfor ikke af, at Supavisor holder op
+    med at cache den gamle credential.
+  - Nødspærring sker straks med fjernet medlemskab, `NOLOGIN` og afbrudte sessioner.
+- **K-9 — kundedata:** de fem lag L1–L5 er godkendt som en tilladt sikkerhedsstramning af 8A.
+  - Fri tekst fra kundesager når ikke en ekstern model.
+  - Et fejlende eller manglende redaction-trin fører aldrig til et modelkald.
+  - Almindelig administratorkonfiguration kan ikke slå guardrailen fra.
+
+**P1–P9** (§9) er source of truth for, hvornår et EvidenceSet får `grade = production`:
+- `production` er aldrig et manuelt flag.
+- Graden beregnes ud fra den aktive, godkendte retrieval-konfiguration og dens fingeraftryk og
+  evalueringsstatus.
+- Runtime skal matche den evaluerede konfiguration.
+- En betingelse, der ikke kan afgøres, giver `development`.
+- En hård gate, der fejler i regression, suspenderer konfigurationen.
+
+De åbne spørgsmål Å-1–Å-6 forbliver åbne og blokerer ikke specifikationen. Å-2
+(databehandleraftaler) er fortsat et exit-kriterium før reel produktionsbrug.
+
+**Overvejede alternativer:**
+- *Service-rollen i workeren, eller egne roller via JWT.* Fravalgt, fordi blast radius bliver hele
+  projektet, og den, der kan signere, også kan udstede `service_role` (§6.1.1).
+- *Kvalitetstærskler som faste konstanter.* Fravalgt, fordi de skal kunne kalibreres mod en
+  voksende baseline uden at gå på kompromis med sporbarheden.
+- *Rotation ved at skifte password på den aktive rolle.* Fravalgt, fordi poolerens cache gør
+  skiftet uforudsigeligt.
+
+**Begrundelse:** Hver beslutning kan efterprøves med tests og exit-kriterier (§16–§17).
+Ingen vej til `grade = production` går uden om en bestået, registreret evaluering og en
+menneskelig godkendelse.
+
+---
+
 ## B-019 — Master-roadmappen med 21 faser er låst; fase 8 opdeles i 8A, 8B og 8C
 
 **Dato:** 3. oktober 2026

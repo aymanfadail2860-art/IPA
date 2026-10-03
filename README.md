@@ -4,8 +4,9 @@ AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instr
 `CLAUDE.md`, specifikationen i `docs/` og faseoversigten i `docs/roadmap.md`.
 
 **Status:** Fase 1–7 og underfase 8A — AI Gateway er gennemført og låst
-(`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B, hvis specifikation afventer
-godkendelse (`docs/08b-production-foundation.md`), og derefter 8C. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+(`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B. Specifikationen er godkendt og
+låst (`docs/08b-production-foundation.md`), og implementeringen er det næste arbejde. 8C er ikke
+påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
