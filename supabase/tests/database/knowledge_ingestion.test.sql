@@ -15,11 +15,12 @@ values ('44000000-0000-4000-a000-000000000001', '43000000-0000-4000-a000-0000000
        ('44000000-0000-4000-a000-000000000002', '43000000-0000-4000-a000-000000000001', '2027-01-01', 'w/2.pdf', repeat('2', 64));
 -- Kun disse to jobs er klar i testen.
 update knowledge.ingestion_jobs set next_attempt_at = now() + interval '1 day' where status = 'queued';
+update knowledge.ingestion_jobs set locked_until = now() + interval '1 day' where status = 'running';
 insert into knowledge.ingestion_jobs (id, document_version_id, kind)
 values ('45000000-0000-4000-a000-000000000001', '44000000-0000-4000-a000-000000000001', 'process'),
        ('45000000-0000-4000-a000-000000000002', '44000000-0000-4000-a000-000000000002', 'process');
 
--- Workerfunktionerne er kun for service_role.
+-- Workerfunktionerne er kun for workerens rolle (8B-I3: ingestion_worker, ikke service_role).
 select ok(not has_function_privilege('authenticated', 'knowledge.worker_claim_job(text, int)', 'execute'),
   'brugere kan ikke tage behandlingsjobs');
 select ok(not has_function_privilege('authenticated', 'knowledge.worker_complete_job(uuid, text, jsonb)', 'execute'),
@@ -32,27 +33,39 @@ select ok(not exists (
     and p.prosrc ~* $re$(set\s+status\s*=\s*'published'|published_at\s*=|approved_at\s*=)$re$
 ), 'ingen workerfunktion sætter en version til publiceret eller godkendt');
 
-set local role service_role;
+-- Workeren kører som sin login-rolle (blue), aktiveret som i runbooken. Leases gemmes i
+-- transaktionslokale indstillinger. Kun i testens transaktion: USAGE på extensions, så pgTAP
+-- kan kaldes, mens rollen er aktiv (workerens rettigheder testes i ingestion_worker_identity).
+select ops.ingestion_worker_prepare('ingestion_worker_login_blue');
+grant ingestion_worker_login_blue to postgres with inherit false, set true;
+grant usage on schema extensions to ingestion_worker_login_blue;
+set local role ingestion_worker_login_blue;
 
-select is((select version_id from knowledge.worker_claim_job('w1')), '44000000-0000-4000-a000-000000000001'::uuid,
+do $$ begin perform set_config('t.w1', (select to_jsonb(c)::text from knowledge.worker_claim_job('w1') c), true); end $$;
+select is((current_setting('t.w1')::jsonb ->> 'version_id')::uuid, '44000000-0000-4000-a000-000000000001'::uuid,
   'worker 1 tager det ældste job');
+reset role;
 select is((select status from knowledge.document_versions where id = '44000000-0000-4000-a000-000000000001'), 'processing',
   'versionen går fra uploadet til behandles, når jobbet tages');
-select is((select version_id from knowledge.worker_claim_job('w2')), '44000000-0000-4000-a000-000000000002'::uuid,
+set local role ingestion_worker_login_blue;
+do $$ begin perform set_config('t.w2', (select to_jsonb(c)::text from knowledge.worker_claim_job('w2') c), true); end $$;
+select is((current_setting('t.w2')::jsonb ->> 'version_id')::uuid, '44000000-0000-4000-a000-000000000002'::uuid,
   'worker 2 springer det låste job over (SKIP LOCKED / lease)');
 select throws_ok(
-  $$ select knowledge.worker_checkpoint('45000000-0000-4000-a000-000000000001', 'w2', 'validation', '{}') $$,
+  $$ select knowledge.worker_checkpoint('45000000-0000-4000-a000-000000000001', current_setting('t.w2')::jsonb ->> 'lease_token', 'validation', '{}') $$,
   '55P03', null, 'en worker kan ikke skrive til et job, en anden worker holder'
 );
 
 -- Sider og chunks erstattes samlet (idempotent).
-select knowledge.worker_store_pages('45000000-0000-4000-a000-000000000001', 'w1',
+select knowledge.worker_store_pages('45000000-0000-4000-a000-000000000001', current_setting('t.w1')::jsonb ->> 'lease_token',
   '[{"page_number":1,"text":"§ 1 Test. Fiktiv tekst.","has_text_layer":true,"char_start":0,"char_end":23}]', 1, 100, 'application/pdf', 'test/1');
-select knowledge.worker_store_pages('45000000-0000-4000-a000-000000000001', 'w1',
+select knowledge.worker_store_pages('45000000-0000-4000-a000-000000000001', current_setting('t.w1')::jsonb ->> 'lease_token',
   '[{"page_number":1,"text":"§ 1 Test. Fiktiv tekst.","has_text_layer":true,"char_start":0,"char_end":23}]', 1, 100, 'application/pdf', 'test/1');
+reset role;
 select is((select count(*)::int from knowledge.document_pages where document_version_id = '44000000-0000-4000-a000-000000000001'), 1,
   'at gemme siderne to gange giver ingen dubletter');
-select is(knowledge.worker_store_chunks('45000000-0000-4000-a000-000000000001', 'w1',
+set local role ingestion_worker_login_blue;
+select is(knowledge.worker_store_chunks('45000000-0000-4000-a000-000000000001', current_setting('t.w1')::jsonb ->> 'lease_token',
   '[{"chunk_index":0,"kind":"prose","text":"Fiktiv tekst.","heading":"§ 1 Test","heading_path":["§ 1 Test"],"section_number":"1",
      "page_start":1,"page_end":1,"char_start":10,"char_end":23,"overlap_chars":0,
      "content_hash":"0000000000000000000000000000000000000000000000000000000000000000","char_count":13,"token_estimate":4},
@@ -60,43 +73,50 @@ select is(knowledge.worker_store_chunks('45000000-0000-4000-a000-000000000001', 
      "page_start":1,"page_end":1,"char_start":20,"char_end":23,"overlap_chars":0,
      "content_hash":"1111111111111111111111111111111111111111111111111111111111111111","char_count":3,"token_estimate":1}]', 'test/1'),
   2, 'chunks gemmes med lead-in');
+reset role;
 select ok((select fts_da @@ to_tsquery('danish', 'dækker') from knowledge.document_chunks
            where document_version_id = '44000000-0000-4000-a000-000000000001' and chunk_index = 1),
   'den gentagne indledning indgår i den leksikalske søgning');
+set local role ingestion_worker_login_blue;
 
 -- Midlertidig fejl: genforsøg med backoff.
-select is(knowledge.worker_fail_job('45000000-0000-4000-a000-000000000001', 'w1', 'processing_error', 'midlertidig', true), 'retry',
+select is(knowledge.worker_fail_job('45000000-0000-4000-a000-000000000001', current_setting('t.w1')::jsonb ->> 'lease_token', 'processing_error', 'midlertidig', true), 'retry',
   'en midlertidig fejl giver genforsøg');
+reset role;
 select ok((select status = 'queued' and next_attempt_at > now() and locked_by is null
            from knowledge.ingestion_jobs where id = '45000000-0000-4000-a000-000000000001'),
   'jobbet står i kø igen med backoff');
 select is((select status from knowledge.document_versions where id = '44000000-0000-4000-a000-000000000001'), 'processing',
   'versionen er fortsat under behandling under genforsøg');
+set local role ingestion_worker_login_blue;
 select is((select count(*)::int from knowledge.worker_claim_job('w3')), 0, 'et job i backoff tages ikke før tid');
 
 reset role;
 update knowledge.ingestion_jobs set next_attempt_at = now() where id = '45000000-0000-4000-a000-000000000001';
-set local role service_role;
-select is((select attempts from knowledge.worker_claim_job('w1')), 2, 'genforsøget tæller forsøg');
-select is(knowledge.worker_fail_job('45000000-0000-4000-a000-000000000001', 'w1', 'not_pdf', 'Filen er ikke en PDF.', false), 'failed',
+set local role ingestion_worker_login_blue;
+do $$ begin perform set_config('t.w1', (select to_jsonb(c)::text from knowledge.worker_claim_job('w1') c), true); end $$;
+select is((current_setting('t.w1')::jsonb ->> 'attempts')::int, 2, 'genforsøget tæller forsøg');
+select is(knowledge.worker_fail_job('45000000-0000-4000-a000-000000000001', current_setting('t.w1')::jsonb ->> 'lease_token', 'not_pdf', 'Filen er ikke en PDF.', false), 'failed',
   'en fejl i selve filen genforsøges ikke');
+reset role;
 select is((select status from knowledge.document_versions where id = '44000000-0000-4000-a000-000000000001'), 'processing_failed',
   'versionen bliver "kunne ikke behandles" med årsag');
+set local role ingestion_worker_login_blue;
 
 -- Worker 2 gør sit job færdigt: status processed og kvalitetsrapport med fakta fra databasen.
-select knowledge.worker_complete_job('45000000-0000-4000-a000-000000000002', 'w2', '{"pages":{"all_read":true}}');
+select knowledge.worker_complete_job('45000000-0000-4000-a000-000000000002', current_setting('t.w2')::jsonb ->> 'lease_token', '{"pages":{"all_read":true}}');
+reset role;
 select is((select status from knowledge.document_versions where id = '44000000-0000-4000-a000-000000000002'), 'processed',
   'et færdigt job gør versionen klar til review — aldrig publiceret');
 select ok((select quality_report -> 'metadata' -> 'missing' ? 'version_label' and (quality_report -> 'access' ->> 'no_grants')::boolean
            from knowledge.ingestion_jobs where id = '45000000-0000-4000-a000-000000000002'),
   'kvalitetsrapporten får manglende metadata og manglende tildelinger fra databasen');
 
-reset role;
 
 -- Et job for en kasseret version annulleres, når det tages.
 update knowledge.document_versions set status = 'discarded' where id = '44000000-0000-4000-a000-000000000001';
 insert into knowledge.ingestion_jobs (id, document_version_id) values ('45000000-0000-4000-a000-000000000003', '44000000-0000-4000-a000-000000000001');
-set local role service_role;
+set local role ingestion_worker_login_blue;
 select is((select count(*)::int from knowledge.worker_claim_job('w1')), 0, 'en kasseret version behandles ikke');
 reset role;
 select is((select status from knowledge.ingestion_jobs where id = '45000000-0000-4000-a000-000000000003'), 'cancelled',

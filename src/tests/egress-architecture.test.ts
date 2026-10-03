@@ -161,6 +161,11 @@ describe("classification constructors are used only where their provenance is tr
     expect(read(path.join(REPO, "src/lib/knowledge/admin-actions.ts"))).toMatch(/userText\([^)]*\{ caseBound: false, redacted: false \}\)/);
   });
 
+  it("the Admin retrieval tool never redacts the query to make it fit for external processing (B-023)", () => {
+    const code = read(path.join(REPO, "src/lib/knowledge/admin-actions.ts")).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/createRedactor|ai\/core\/redaction|redacted:\s*true/);
+  });
+
   it("the gateway marks case-bound text from the case reference, not from a parameter", () => {
     const gateway = read(path.join(REPO, "src/lib/ai/core/gateway-core.ts"));
     expect(gateway).toMatch(/userText\(question, \{ caseBound: caseId !== null, redacted: true \}\)/);

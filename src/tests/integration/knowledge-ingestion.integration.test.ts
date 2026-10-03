@@ -96,11 +96,11 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("ingestion worker e
     expect(integrity).toMatchObject({ chunks: ids.length, embeddings: ids.length, wrong_dimensions: 0 });
   });
 
-  it("refuses to start with the test embedder outside local/test (fail-closed, docs/07 §9.1)", async () => {
+  it("refuses to start with the service-role key outside local/test (8B-I3; fail-closed before any database call)", async () => {
     for (const value of ["production", ""]) {
       const result = await runWorkerWith({ IPA_RUNTIME_ENV: value });
       expect(result.code, `IPA_RUNTIME_ENV=${value}`).not.toBe(0);
-      expect(result.stderr).toContain("udviklingsimplementering");
+      expect(result.stderr).toContain("service-rollen må kun bruges lokalt og i test");
     }
   });
 

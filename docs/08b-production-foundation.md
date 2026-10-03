@@ -1211,8 +1211,9 @@ implementeret.**
 |---------|---------|--------|
 | **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Gennemført og godkendt 2026-10-03 (rettet i 8B-I2: påkrævede passager som sæt, B-021) |
 | **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Ikke koblet på applikationen |
-| **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
-| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, worker, kundedataspærre, observability, aktivering | Ikke påbegyndt |
+| **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
+| **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
+| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, workerens kørselsmiljø (Fargate, Secrets Manager, NAT, Edge Function `worker-storage`, ClamAV, karantæne), kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -1456,9 +1457,16 @@ anvendelse/domæne (gateway, retrieval, worker, eval)
    for en ekstern model og giver autorisationen videre til `generate`.
 6. **Worker:** chunks af en Knowledge Engine-dokumentversion klassificeres som `knowledge`.
 7. **Eval:** fixtures og spørgsmål er `evaluation_synthetic`.
-8. **Admin-værktøjet "Afprøv retrieval"** klassificerer administratorens tekst som ikke redigeret.
-   Det virker in-process, men grænsen afviser teksten, hvis en ekstern udbyder kobles på. Før det
-   sker, skal det afgøres, om værktøjet skal redigere teksten.
+8. **Admin-værktøjet "Afprøv retrieval"** klassificerer administratorens tekst som ikke redigeret
+   og bevarer den uændret. Det virker in-process. Beslutningen er låst for 8B (B-023):
+   - Værktøjet redigerer ikke forespørgslen for at gøre den egnet til ekstern behandling.
+   - Bruger retrieval en ekstern embedding- eller reranking-udbyder, gælder egress-politikken, og
+     forespørgslen afvises (fail-closed).
+   - Der er ingen "send alligevel", "markér som sikker" eller anden tilsidesættelse.
+   - Production-providere evalueres med kontrolleret evalueringsmateriale, ikke med vilkårlige
+     forespørgsler fra Admin.
+   - En arkitekturtest sikrer, at værktøjet hverken bruger redaction-modulet eller markerer teksten
+     som redigeret.
 
 **Lag:**
 
@@ -1482,3 +1490,193 @@ anvendelse/domæne (gateway, retrieval, worker, eval)
 **Ikke implementeret:** Fargate, workerens DB-identitet, ClamAV, karantæne, registret og P1–P9,
 aktivering af providerne, 8C, godkendelse af redaction til kundedata og en rigtig Copilot-model.
 Bedrock-providerne er fortsat ikke koblet ind i applikationens register.
+
+### 21.4 8B-I3 — Workerens databaseidentitet og databasefunktioner
+
+Realiserer databasesiden af D-10 og D-20 (§6.1.1, B-024). Migration
+`20261003000200_ingestion_worker_identity.sql`. Workerens kørselsmiljø er ikke en del af deltrinnet.
+
+**Roller:**
+
+| Rolle | Type | Rettigheder |
+|-------|------|-------------|
+| `ingestion_worker` | Gruppe, NOLOGIN, ejer intet | `USAGE` på skemaet `knowledge` og `EXECUTE` på præcis de 12 funktioner i `ops.ingestion_worker_api()`. Ingen tabel-, kolonne- eller sekvensrettigheder |
+| `ingestion_worker_login_blue` / `_green` | Login-roller (D-20) | Kun medlemskab af gruppen (`INHERIT TRUE, SET FALSE`). Ingen superuser, `CREATEROLE`, `CREATEDB`, replikering eller `BYPASSRLS`. `connection limit 5`, `statement_timeout 60s`, `lock_timeout 10s`, `idle_in_transaction_session_timeout 30s` og tom `search_path` |
+
+- Migrationen opretter login-rollerne **NOLOGIN, uden password og uden medlemskab**. Først
+  runbooken aktiverer en rolle. Under en kontrolleret rotation er begge aktive med de samme
+  snævre rettigheder (via gruppen).
+- Rollerne er ikke medlem af `authenticated`, `service_role`, `postgres` eller nogen anden rolle.
+  PostgREST (`authenticator`) kan ikke skifte til dem.
+- Rollerne er klyngebrede. Migrationen er idempotent og stopper, hvis en eksisterende rolle har
+  for brede attributter.
+
+**Worker-API'et** (security definer, `search_path = ''`, identitetskontrol først i hver funktion):
+
+| Funktion | Formål |
+|----------|--------|
+| `worker_claim_job(p_worker, p_lease_seconds)` | Tag næste job. Returnerer metadata, `lease_token` og `lease_expires_at` |
+| `worker_heartbeat(job, token, sekunder)` | Forlæng en gyldig lease. Returnerer ny udløbstid |
+| `worker_checkpoint(job, token, trin, tilstand)` | Gem et gennemført trin |
+| `worker_store_pages(job, token, sider, …)` | Sider og filens tekniske data (kun behandlingsjob) |
+| `worker_store_chunks(job, token, chunks, version)` | Chunks samlet og idempotent (kun behandlingsjob) |
+| `worker_embedding_models()` | Aktiv model og kandidater |
+| `worker_chunks_to_embed(job, token, model)` | Chunks, der mangler en embedding |
+| `worker_store_embeddings(job, token, model, rækker)` | Embeddings for jobbets egne chunks. Idempotent |
+| `worker_verify_index(job, token)` | Integritetskontrol af embeddings |
+| `worker_complete_job(job, token, rapport)` | Afslut: `processed` (behandlingsjob) |
+| `worker_fail_job(job, token, kode, besked, genforsøg)` | Fejl med eller uden genforsøg. Frigiver også et job |
+| `worker_issue_storage_ticket(job, token, formål)` | Engangsbillet til originalen |
+
+- Ingen funktion kan godkende, publicere, deaktivere, ændre adgang, ændre autoritativ status,
+  aktivere en model eller konfiguration eller publicere evalueringsresultater. Ingen funktion
+  udfører dynamisk SQL.
+- Der er ingen release-funktion: `worker_fail_job` med genforsøg frigiver et job, og en lease, der
+  ikke fornyes, udløber og overtages af næste claim.
+- Inputtet valideres i databasen: lease-varighed 30–900 sekunder, worker-etiket, trinnavn,
+  fejlkode, JSON-typer og -størrelser, filtype (PDF), antal sider, chunks og embeddings. Statusovergange
+  håndhæves af den eksisterende statusmaskine (trigger) for alle roller.
+- Fejlkoder: `42501` identitet, `55P03` ingen gyldig lease, `22023` ugyldigt input, `23514` forkert
+  tilstand eller version, `P0002` ukendt eller udfaset model, `54000` billetgrænse.
+
+**Identitet:** hver funktion bestemmer den faktiske rolle bag kaldet: den aktive `SET ROLE`
+(indstillingen `role`, som et security definer-skift ikke ændrer, og som kun kan sættes til en
+rolle, man er medlem af), ellers `session_user`. Rollen skal være blue, green eller — kun lokalt —
+`service_role`, **og** have medlemskab af `ingestion_worker` lige nu. Ejeren (`postgres`), en
+bruger, et fejlagtigt medlem af gruppen og en rolle med direkte `EXECUTE` uden medlemskab afvises.
+
+**Lease-capability:**
+
+- `worker_claim_job` udsteder et uforudsigeligt token: 64 hex-tegn fra to v4-UUID'er
+  (`pg_strong_random`, 244 tilfældige bit, ingen ny extension).
+- Kun `sha256(job_id || ':' || token)` gemmes i `ingestion_jobs.lease_token_hash`. Hashen er
+  bundet til jobbet, og tokenet gemmes aldrig.
+- Hvert kald på et job kræver: job i gang, hash-match og `locked_until > now()`. Job-id alene er
+  aldrig nok, og etiketten `p_worker` er kun til drift.
+- En udløbet lease kan ikke genoplives. Næste claim overtager jobbet med et nyt token, og det
+  gamle virker ikke længere.
+- Når jobbet forlader `running`, fjerner en trigger hashen. En constraint kræver hash, præcis når
+  jobbet kører, så en gentagen afslutning, en fejl efter afslutning og en genafspilning afvises
+  deterministisk (`55P03`).
+- Jobs i gang fra før deltrinnet sættes i kø igen ved migrationen. Forsøgstallet bevares.
+- Workerklienten (`workers/ingestion/db.ts`) holder tokenet i processen pr. job. Pipelinen ser
+  det aldrig.
+
+**Billetkontrakten** (D-10 pkt. 3; kun databasen, ingen Edge Function og ingen download):
+
+- Tabellen `knowledge.worker_storage_tickets` har RLS og ingen rettigheder for nogen rolle.
+- En billet er bundet til job, version, bucket (`knowledge-originals`), sti, formål, workerens
+  lease (lease-hashen) og udløb (højst 60 sekunder). Billetten gemmes som SHA-256-hash.
+- Formål: kun `download_original`, og kun for et behandlingsjob, hvis version er under
+  behandling. Karantæne kommer med sit eget deltrin.
+- Højst 3 ubrugte, gyldige billetter pr. job.
+- `knowledge.redeem_worker_storage_ticket(billet)` kan kun køres af `service_role` (den kommende
+  Edge Function) og kontrollerer den faktiske rolle. Billetten indløses én gang, inden udløb og kun,
+  mens leasen, den blev udstedt under, stadig gælder. Den returnerer bucket, sti, formål og
+  checksum. Andre fejl giver `28000`.
+
+**Drift — skemaet `ops`** (ingen rettigheder for app-roller; funktionerne kører som kalderen, så
+kun migrationsrollen `postgres`, der har ADMIN på rollerne, kan bruge dem; alle handlinger
+auditeres i `audit.audit_log`):
+
+| Funktion | Virkning |
+|----------|----------|
+| `ops.ingestion_worker_prepare(rolle)` | `LOGIN` og medlemskab af gruppen |
+| `ops.ingestion_worker_retire(rolle)` | Rotationens deaktivering (se nedenfor) |
+| `ops.ingestion_worker_emergency_revoke(rolle)` | Nødspærring: medlemskab væk, `NOLOGIN`, `password null`, sessioner afbrudt. Ændrer ingen domænedata |
+| `ops.ingestion_worker_set_api(false/true)` | Global nødbremse: gruppens `EXECUTE` på hele API'et fjernes, eller den gives tilbage præcist |
+| `ops.ingestion_worker_status()` | Roller, sessioner, API-rettigheder og overtrædelser (skal være en tom liste i produktion) |
+
+Der passerer aldrig et password gennem funktionerne.
+
+**Rotation (D-20), runbook:**
+
+1. *Klargør* den inaktive rolle (fx green): generér et password (`openssl rand -base64 48`), og
+   sæt det med `\password ingestion_worker_login_green` i psql som `postgres`. psql beregner
+   SCRAM-verifieren klientside, så klarteksten hverken sendes til serveren eller logges. Kør
+   `select ops.ingestion_worker_prepare('ingestion_worker_login_green');`.
+2. *Gem* brugernavn (`ingestion_worker_login_green.<projekt-ref>`) og password som en ny version
+   af workerens secret i AWS Secrets Manager (`aws secretsmanager put-secret-value`) fra en
+   driftsmaskine. Passwordet skrives aldrig i repoet, i `.env`, i task-definitionen eller i en
+   migration.
+3. *Flyt* ECS-servicen kontrolleret til den nye version. Først når kørselsmiljøet findes (senere
+   deltrin).
+4. *Verificér:* `select ops.ingestion_worker_status();` viser sessioner for green og ingen
+   overtrædelser, og et kontroljob behandles.
+5. *Deaktivér* den gamle rolle: `select ops.ingestion_worker_retire('ingestion_worker_login_blue');`.
+6. *Bekræft:* status viser blue med `login: false`, `member: false` og 0 sessioner. Den gamle
+   secret-version udfases.
+
+**Nødspærring:**
+
+- `select ops.ingestion_worker_emergency_revoke('<rolle>');` virker ved næste funktionskald,
+  også på en forbindelse, som pooleren holder åben, fordi identiteten kontrolleres ved hvert kald.
+- Kør status bagefter. Viser den stadig sessioner, køres funktionen igen.
+- `select ops.ingestion_worker_set_api(false);` stopper begge roller på én gang.
+- Domænedata ændres ikke. Rollens leases udløber og overtages, når en anden rolle er klargjort.
+
+**Supavisor:**
+
+- Forbindelsen går til Supavisor i **transaktionstilstand** (port 6543) med brugeren
+  `ingestion_worker_login_<farve>.<projekt-ref>`. Pooleren har serverforbindelser pr. bruger, så
+  rollens indstillinger gælder.
+- TLS er påkrævet (`sslmode=verify-full` med Supabases CA). Netværksbegrænsningen tillader kun
+  NAT-gatewayens faste IP (D-10 pkt. 2, senere deltrin).
+- API'et kræver ingen sessionstilstand. Hvert kald er en selvstændig transaktion, og tokenet følger
+  med i kaldet. Der bruges ingen `SET`, temp-tabeller, advisory locks, `LISTEN` eller prepared
+  statements (postgres.js `prepare: false`, D-19). Sessionstilstand er derfor ikke nødvendig.
+- `connection limit 5` gælder pr. rolle. Workerens pulje skal være mindre, og under en rotation har
+  hver rolle sin egen grænse.
+
+**Lokalt og i test:**
+
+- `supabase/seed.sql` (development-only) giver `service_role` medlemskab af gruppen. Det er den
+  eneste vej for den lokale worker, som stadig bruger service-rollen (§6.1.1 pkt. 6).
+- `workers/ingestion/main.ts` nægter at starte med service-rolle-nøglen uden
+  `IPA_RUNTIME_ENV=local/test`.
+- `ops.ingestion_worker_status()` melder `service_role_is_worker` som en overtrædelse. Det er
+  forventet lokalt og forbudt i produktion.
+- Lokale værktøjer sætter ikke passwords på login-rollerne. Til en manuel test sættes et password
+  med `\password` og fjernes igen med `retire`.
+
+**Tests:**
+
+- pgTAP:
+  - `ingestion_worker_identity.test.sql` (82): roller, mindste rettigheder for blue og green,
+    rigtige forsøg, identitet, service_role, nødspærring og værn mod PUBLIC.
+  - `ingestion_worker_lease.test.sql` (98): hele API'et som blue og som green, angreb på leasen,
+    inputvalidering og billetter.
+  - `knowledge_ingestion.test.sql` kører nu som blue.
+- Integration: `ingestion-worker-lease.integration.test.ts` med parallelle claims og parallelle
+  afslutninger gennem PostgREST. Den rigtige worker kører ende til ende med lease-tokens.
+- Enhedstests: `worker-identity-guardrail.test.ts` (ingen credentials i migrationer eller seed,
+  ingen worker-adgang for service_role uden for seedet, identitetskontrol i hver funktion og
+  workerens startspærre) samt arkitekturtesten for B-023.
+- Mutationer i SQL: 38/40 fanget. De to tilbageværende er ækvivalente:
+  - `status = 'running'` i lease-kontrollen håndhæves også af trigger og constraint.
+  - Formatkontrollen af tokenet: et forkert format giver aldrig et hash-match.
+- Frisk database: alle migrationer og seedet er kørt mod en ny container fra samme image (efter
+  Storage-API'ets egne migrationer). Rolleblokken kan køres igen.
+
+**Kendte grænser i PostgreSQL** (ikke en adgang til data):
+
+- Via PUBLIC kan en login-rolle oprette temp-tabeller og large objects og læse systemkataloget
+  (metadata, også funktionernes kildetekst).
+- En rolle kan ændre sine egne sessionsstandarder og sit eget password (`ALTER ROLE` på sig
+  selv). `statement_timeout` m.fl. er derfor forsvar i dybden og ikke en sikkerhedsgrænse.
+- Rotationens deaktivering fjerner password, login og medlemskab, så et ændret password ikke
+  overlever den.
+
+**Afvigelser og realiseringsvalg** (B-024):
+
+- Deaktivering sætter `password null` i stedet for et tilfældigt password, som ingen gemmer.
+- Der er ingen release-funktion.
+- Billetformålet er kun `download_original`, fordi karantæne hører til et senere deltrin.
+- Lease-tokenet er en skærpelse af "kontrollerer selv lease" (§6.1.1 pkt. 1). Fase 7's
+  `p_worker` er erstattet af `p_lease_token` i alle funktioner undtagen claim.
+- Driftsfunktionerne ligger i et nyt skema, `ops`.
+
+**Ikke implementeret:** Fargate-container og -runtime, AWS Secrets Manager-integration,
+NAT-gateway, deployment af workeren, Edge Function `worker-storage` og download, postgres.js
+(D-19), Bedrock-aktivering i appen, ClamAV, karantæne, registret og P1–P9, aktivering af
+production-retrieval og 8C. Workeren bruger lokalt fortsat service-rollen gennem PostgREST.

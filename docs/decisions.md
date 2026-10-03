@@ -10,6 +10,74 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-024 — Workerens databaseidentitet realiseres med lease-token og driftsfunktioner (8B-I3)
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §6.1.1 og §21.4, migration
+`20261003000200_ingestion_worker_identity.sql`, `supabase/seed.sql`, `workers/ingestion/`
+
+**Beslutning:** D-10 og D-20 realiseres på databasesiden sådan:
+- Rollerne er gruppen `ingestion_worker` og login-rollerne `ingestion_worker_login_blue` og
+  `ingestion_worker_login_green` (navnene fra §6.1.1). Migrationen opretter dem NOLOGIN, uden
+  password og uden medlemskab. Kun runbookens driftsfunktioner (`ops.ingestion_worker_*`)
+  aktiverer og deaktiverer dem.
+- Hver `worker_*`-funktion kontrollerer den faktiske databaseidentitet (session_user eller den
+  aktive SET ROLE) og medlemskab af `ingestion_worker` ved hvert kald.
+- Workerens kald på et job kræver en lease-token fra `worker_claim_job`. Kun en hash, bundet til
+  jobbet, gemmes. Parameteren `p_worker` er kun en etiket.
+- service_role har ikke længere EXECUTE på worker-API'et. Lokalt får den medlemskab af
+  `ingestion_worker` fra `supabase/seed.sql` (development-only), og workeren nægter at starte med
+  service-rolle-nøglen uden for local/test.
+- En deaktiveret rolles password fjernes (`password null`) i stedet for at blive erstattet af en
+  tilfældig værdi.
+- Der er ingen særskilt release-funktion. `worker_fail_job` med genforsøg frigiver et job, og en
+  lease, der ikke fornyes, udløber og overtages.
+
+**Overvejede alternativer:**
+- *Job-id og worker-etiket som bevis (fase 7).* Fravalgt: etiketten er en parameter, som enhver
+  kalder kan angive.
+- *Et særskilt udviklingsflag i en tabel for service_role.* Fravalgt: medlemskab af gruppen er
+  den samme kontrol som i produktion og kan ses i `ops.ingestion_worker_status()`.
+- *Standardrettigheder uden PUBLIC EXECUTE for migrationsrollen.* Fravalgt: det kan kun gøres
+  globalt og ville ændre adfærden for alle senere migrationer og eksisterende pgTAP-hjælpere.
+  pgTAP kontrollerer i stedet, at workeren kan køre præcis det godkendte API, og at ingen
+  funktion i `knowledge`, `public` eller `ops` er eksekverbar for PUBLIC.
+- *Et tilfældigt password ved deaktivering.* Fravalgt: `password null` gør login umuligt uden en
+  værdi, nogen kunne gemme, og ingen password passerer gennem SQL.
+
+**Begrundelse:** Databasen håndhæver selv, hvem der er workeren, og hvilket job der må røres.
+Nødspærring virker ved næste kald, også på en forbindelse, som pooleren har holdt åben. Ingen
+production-credentials ligger i repoet.
+
+---
+
+## B-023 — Admin-værktøjet "Afprøv retrieval" redigerer ikke forespørgslen (låst for 8B)
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.3 pkt. 8, `src/lib/knowledge/admin-actions.ts`
+
+**Beslutning:** Dette er den låste beslutning for fase 8B:
+- Værktøjet redigerer ikke administratorens forespørgsel automatisk for at gøre den egnet til
+  ekstern behandling. Den oprindelige forespørgsel bevares uændret.
+- Værktøjet virker fortsat med in-process-, lokal- og test-retrieval.
+- Bruger retrieval en ekstern embedding- eller reranking-udbyder, gælder den normale
+  egress-politik. En forespørgsel uden tilladt proveniens eller datakategori afvises
+  (fail-closed).
+- Der er ingen "send alligevel", "markér som sikker" eller tilsvarende tilsidesættelse.
+- Automatisk redaction må ikke blive en skjult vej til ekstern AI-behandling.
+- Evaluering af production-providere sker først med kontrolleret evalueringsmateriale, ikke med
+  vilkårlige forespørgsler fra Admin.
+
+**Overvejede alternativer:**
+- *Automatisk redaction af forespørgslen.* Fravalgt: den ville gøre vilkårlig fri tekst egnet til
+  ekstern behandling uden en godkendt politik for det.
+- *En tilsidesættelse for administratorer.* Fravalgt: den ville omgå egress-politikken.
+
+**Begrundelse:** Grænsen fra B-022 skal gælde uden undtagelser. Kvaliteten af production-providere
+måles med det kontrollerede evalueringsmateriale (§4, §5).
+
+---
+
 ## B-022 — Kundedata-spærren gælder alle eksterne AI-kald (ekstern AI-datagrænse)
 
 **Dato:** 3. oktober 2026

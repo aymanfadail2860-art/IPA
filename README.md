@@ -7,8 +7,9 @@ AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instr
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B. Specifikationen er godkendt og
 låst (`docs/08b-production-foundation.md`). Deltrin 8B-I1 (evalueringsframework og gates) er
 gennemført, og det samme er 8B-I2 (production embedding og reranking på AWS Bedrock, ikke koblet
-ind i appen). 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
-AI-udbyder) er implementeret og afventer godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+ind i appen) og 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
+AI-udbyder). 8B-I3 (workerens databaseidentitet: blue/green-roller, worker-API med lease-token og
+billetkontrakt) er implementeret og afventer godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
@@ -28,7 +29,11 @@ npm run worker:ingestion    # i en anden terminal: behandler uploadede PDF'er
 
 I `.env.local` skal `IPA_RUNTIME_ENV=local` være sat. Ellers afviser registret
 test-embedderen og `none`-rerankeren, og retrieval vises som utilgængelig (`docs/07` §9.1).
-`SUPABASE_SERVICE_ROLE_KEY` bruges kun af seedet og den lokale worker.
+`SUPABASE_SERVICE_ROLE_KEY` bruges kun af seedet og den lokale worker. Workeren starter kun med
+den, når `IPA_RUNTIME_ENV` er `local` eller `test`. Den lokale worker kan kalde workerens
+databasefunktioner, fordi `supabase/seed.sql` (development-only, køres af `supabase start` og
+`supabase db reset`) giver service-rollen medlemskab af rollen `ingestion_worker`. I produktion
+bruger workeren sin egen login-rolle (`docs/08b` §21.4).
 
 ### Knowledge Engine i browseren (lokalt)
 

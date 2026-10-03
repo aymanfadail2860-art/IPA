@@ -2,13 +2,15 @@ import { hostname } from "node:os";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { runtimeEnv } from "../../src/lib/knowledge/core/grade.ts";
 import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
 
 import { supabaseOriginals, supabaseWorkerDb } from "./db.ts";
 import { processJob } from "./pipeline.ts";
 
 /**
- * ⚠ Ingestion worker — development-only access in phase 7 (docs/07 §14.1, B-16).
+ * ⚠ Ingestion worker — development-only access in phase 7 (docs/07 §14.1, B-16). The
+ * service-role key is refused outside IPA_RUNTIME_ENV=local/test (8B-I3).
  *
  * A standalone Node process outside the Next.js app; it never shares runtime with user
  * requests (docs/03 §8, §14). Where it is hosted is not locked. Locally:
@@ -26,6 +28,12 @@ import { processJob } from "./pipeline.ts";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// The service role is never the production worker's credential (docs/08b §6.1.1 pkt. 6,
+// 8B-I3): outside local/test the worker refuses to start with it.
+if (key && runtimeEnv() === "production") {
+  console.error("worker: service-rollen må kun bruges lokalt og i test (IPA_RUNTIME_ENV=local/test). Workeren starter ikke.");
+  process.exit(1);
+}
 if (!url || !key) {
   console.error("worker: NEXT_PUBLIC_SUPABASE_URL og SUPABASE_SERVICE_ROLE_KEY skal være sat.");
   process.exit(1);

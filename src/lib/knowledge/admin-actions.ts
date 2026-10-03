@@ -176,8 +176,9 @@ export async function testRetrieval(request: RetrievalRequest, dev: { devForceIn
   if (isDemoMode()) return { kind: "unavailable", message: DEMO };
   if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return { kind: "denied", message: DENIED };
   const outcome = await retrieveEvidenceOutcome({
-    // An administrator's test query: user text, not redacted and never case-bound (8B-I2.5).
-    // It works with the in-process providers; the external-AI boundary refuses unredacted text.
+    // An administrator's test query: user text, unchanged, not redacted and never case-bound
+    // (8B-I2.5, B-023). It works with in-process providers; the external-AI boundary refuses it
+    // (fail-closed). The tool never redacts it to make it fit and has no override (B-023).
     query: userText(typeof request.query === "string" ? request.query : "", { caseBound: false, redacted: false }),
     mode: request.mode,
     asOf: request.asOf,
