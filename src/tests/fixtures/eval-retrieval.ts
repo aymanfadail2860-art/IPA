@@ -37,8 +37,15 @@ export function fixtureRetrieval(inputs: LoadedInputs = loadExample()): Retrieva
 }
 
 export const PRODUCTION_DOUBLE_CONFIGURATION: ConfigurationInput = {
-  embeddingModel: { provider: "test-double", model: "embed-double", version: "1", dimensions: 256 },
-  reranker: { id: "rerank-double", version: "1" },
+  embedding: {
+    provider: "test-double",
+    model: "embed-double",
+    modelVersion: "1",
+    dimensions: 256,
+    processing: { kind: "geographic", geography: "EU", sourceRegion: "eu-central-1", inferenceProfile: "eu.embed-double" },
+    settings: { embeddingType: "float" },
+  },
+  reranker: { provider: "test-double", model: "rerank-double", modelVersion: "1", id: "rerank-double", version: "1", processing: { kind: "in_region", region: "eu-central-1" }, settings: {} },
   algorithmVersion: "hybrid-rrf-1",
   params: { candidateK: 50, rerankN: 30, topK: 8, maxPerVersion: 3, minScore: 0.1, rrfK: 60 },
   chunkerVersions: ["fixture-sections/1"],
@@ -59,7 +66,7 @@ export interface DoubleOptions {
 
 export function productionDouble(inner: RetrievalUnderTest, options: DoubleOptions = {}): RetrievalUnderTest {
   const configuration = options.configuration ?? PRODUCTION_DOUBLE_CONFIGURATION;
-  const model = configuration.embeddingModel!;
+  const model = configuration.embedding!;
   return {
     name: "production-double",
     environment: options.environment ?? "evaluation",
@@ -82,7 +89,7 @@ export function productionDouble(inner: RetrievalUnderTest, options: DoubleOptio
         retrieval: {
           ...structuredClone(run.set.retrieval),
           grade: "production",
-          embeddingModel: { id: `${model.provider}:${model.model}@${model.version}`, grade: "production" },
+          embeddingModel: { id: `${model.provider}:${model.model}@${model.modelVersion}`, grade: "production" },
           reranker: { id: configuration.reranker.id, version: configuration.reranker.version, grade: "production" },
         },
         items,

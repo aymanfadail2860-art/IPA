@@ -6,7 +6,8 @@ status. En fase markeres først som gennemført efter eksplicit besked.
 **Aktuel status:** Fase 1–7 og underfase 8A er gennemført og **låst**. 8A — AI Gateway blev
 godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikationen er godkendt og låst** 2026-10-03 (B-020,
 `docs/08b-production-foundation.md`). **Deltrin 8B-I1 (evalueringsframework og gates) er
-implementeret.** Resten af 8B implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
+gennemført og godkendt, og 8B-I2 (production embedding og reranking) er implementeret og afventer
+godkendelse.** Resten af 8B implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
@@ -41,7 +42,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). Deltrin 8B-I1 implementeret, resten afventer godkendelse | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1 gennemført, 8B-I2 implementeret (afventer godkendelse), resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -376,9 +377,15 @@ reranking-udbyder (8B), samtalelagring (8C), Learn/Practice/Advise/Assessment so
 `docs/08b-production-foundation.md`). Implementeringen sker i deltrin, og hvert deltrin kræver
 godkendelse.
 
-- **8B-I1 — evalueringsframework og gates: ✅ implementeret 2026-10-03.** Indholdet er
+- **8B-I1 — evalueringsframework og gates: ✅ gennemført og godkendt 2026-10-03.** Indholdet er
   `evals/engine/` og `evals/retrieval/`, og status, udledninger og udskudte dele står i
-  `docs/08b` §21.1.
+  `docs/08b` §21.1. Passage Recall blev rettet i I2 (B-021).
+- **8B-I2 — production embedding og reranking: ✅ implementeret 2026-10-03, afventer
+  godkendelse.** Provider-kontrakten og Bedrock-adapterne (Cohere Embed v4 EU, 1024 dimensioner,
+  og Rerank 3.5 i eu-central-1) står i `docs/08b` §21.2. De er ikke koblet ind i applikationens
+  register.
+  - **Åbent punkt før de kobles på:** kundedataspærren skal også dække retrieval-vejen
+    (forespørgsels-embedding og reranking), `docs/08b` §21.2.
 - En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
   evidens kan ikke blive production.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af

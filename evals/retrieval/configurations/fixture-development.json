@@ -1,12 +1,45 @@
 {
-  "schema": 1,
+  "schema": 2,
   "label": "fixture-development",
   "description": "Udviklingskonfigurationen fra fase 7: test-embedderen, rerankeren \"none\" og standardparametrene i src/lib/knowledge/retrieval-core.ts, over det fiktive fixture-korpus. Den kan aldrig bestå (H6, H7) og kan aldrig blive production.",
   "configuration": {
-    "embeddingModel": { "provider": "test", "model": "test-hash-embedder", "version": "1", "dimensions": 256 },
-    "reranker": { "id": "none", "version": "1" },
+    "embedding": {
+      "provider": "test",
+      "model": "test-hash-embedder",
+      "modelVersion": "1",
+      "dimensions": 256,
+      "processing": {
+        "kind": "in_process"
+      },
+      "settings": {
+        "features": "word-unigrams+bigrams",
+        "hash": "fnv1a-32"
+      }
+    },
+    "reranker": {
+      "provider": "ipa",
+      "model": "none",
+      "modelVersion": "1",
+      "id": "none",
+      "version": "1",
+      "processing": {
+        "kind": "in_process"
+      },
+      "settings": {
+        "order": "fused"
+      }
+    },
     "algorithmVersion": "hybrid-rrf-1",
-    "params": { "candidateK": 50, "rerankN": 30, "topK": 8, "maxPerVersion": 3, "minScore": 0.1, "rrfK": 60 },
-    "chunkerVersions": ["fixture-sections/1"]
+    "params": {
+      "candidateK": 50,
+      "rerankN": 30,
+      "topK": 8,
+      "maxPerVersion": 3,
+      "minScore": 0.1,
+      "rrfK": 60
+    },
+    "chunkerVersions": [
+      "fixture-sections/1"
+    ]
   }
 }

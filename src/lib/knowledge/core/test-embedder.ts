@@ -1,4 +1,5 @@
-import type { Embedder } from "./embedding.ts";
+import type { EmbeddingProvider } from "./embedding.ts";
+import type { EmbeddingProviderDescriptor } from "./provider.ts";
 
 /**
  * ⚠ TEST EMBEDDER — DEVELOPMENT ONLY (docs/07 §7, §9.1). Grade "development".
@@ -48,12 +49,27 @@ export function hashEmbedding(text: string, dimensions: number): number[] {
   return vector.map((value) => Math.round((value / norm) * 1e6) / 1e6);
 }
 
+export const TEST_EMBEDDER_DESCRIPTOR: EmbeddingProviderDescriptor = Object.freeze({
+  kind: "embedding" as const,
+  provider: TEST_EMBEDDER.provider,
+  model: TEST_EMBEDDER.model_name,
+  modelVersion: TEST_EMBEDDER.model_version,
+  grade: "development" as const,
+  dimensions: TEST_EMBEDDER.dimensions,
+  processing: Object.freeze({ kind: "in_process" as const }),
+  // Feature hashing is the same for documents and queries: the input type is ignored.
+  inputTypes: "symmetric" as const,
+  settings: Object.freeze({ features: "word-unigrams+bigrams", hash: "fnv1a-32" }),
+  limits: Object.freeze({ maxTextsPerRequest: 10_000, maxCharsPerText: 1_000_000, maxCharsPerRequest: 100_000_000 }),
+});
+
 /** Only the registry constructs it (registry.ts); frozen, so its grade cannot be changed. */
-export function createTestEmbedder(): Embedder {
+export function createTestEmbedder(): EmbeddingProvider {
   return Object.freeze({
     id: `${TEST_EMBEDDER.provider}:${TEST_EMBEDDER.model_name}@${TEST_EMBEDDER.model_version}`,
     grade: "development" as const,
     dimensions: TEST_EMBEDDER.dimensions,
+    descriptor: TEST_EMBEDDER_DESCRIPTOR,
     async embed(texts: string[]) {
       return texts.map((text) => hashEmbedding(text, TEST_EMBEDDER.dimensions));
     },

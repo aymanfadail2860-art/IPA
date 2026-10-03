@@ -1,4 +1,5 @@
 import type { EvidenceSet } from "../../src/lib/knowledge/core/evidence.ts";
+import type { RetrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
 
 /**
  * Retrieval evaluation (docs/08b §4–§5, 8B-I1). Types shared by the engine.
@@ -145,13 +146,13 @@ export interface GateSet {
 // Configuration under evaluation (docs/08b §10.1). Provider and model are data.
 // ---------------------------------------------------------------------------------------------
 
-export interface ConfigurationInput {
-  embeddingModel: { provider: string; model: string; version: string; dimensions: number } | null;
-  reranker: { id: string; version: string };
-  algorithmVersion: string;
-  params: { candidateK: number; rerankN: number; topK: number; maxPerVersion: number; minScore: number; rrfK: number };
-  chunkerVersions: string[];
-}
+/**
+ * The fingerprint material of a retrieval configuration, as the provider contract defines it
+ * (src/lib/knowledge/core/provider.ts, 8B-I2): embedding and reranker with provider, model,
+ * our version label, dimensions, processing profile and settings; algorithm version;
+ * parameters; chunker versions.
+ */
+export type ConfigurationInput = RetrievalFingerprintMaterial;
 
 // ---------------------------------------------------------------------------------------------
 // The retrieval under test
@@ -211,13 +212,15 @@ export interface CaseObservation {
   empty: boolean;
   /** 1-based rank of the first item from an expected document version, or null. */
   sourceRank: number | null;
-  /** 1-based rank of the first item covering the primary grade-3 passage, or null. */
-  primaryPassageRank: number | null;
   /** 1-based rank of the first item covering any grade-3 passage, or null. */
   firstGrade3Rank: number | null;
-  /** Expected passages covered within K, and their grades by rank (for nDCG). */
+  /**
+   * The required passages (grade 3) covered within K, as a set: the order of passages in the
+   * facit never matters. Passage Recall needs all of them (docs/08b §4.2, 8B-I2 correction).
+   */
   requiredCovered: number;
   requiredTotal: number;
+  /** Grades by rank (for nDCG). */
   gainsByRank: number[];
   idealGains: number[];
   /** Items within K, and how many come from a distractor document. */

@@ -224,7 +224,7 @@ describe("gate set validation (docs/08b §4.4, D-6)", () => {
 describe("declared configuration", () => {
   it("accepts the fixture configuration — provider and model are data", () => {
     const declared = validateDeclaredConfiguration(readJson("configurations/fixture-development.json"));
-    expect(declared.configuration.embeddingModel?.provider).toBe("test");
+    expect(declared.configuration.embedding?.provider).toBe("test");
   });
 
   it("rejects a malformed configuration", () => {

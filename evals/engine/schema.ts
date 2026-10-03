@@ -500,31 +500,62 @@ export function validateGateSet(value: unknown): GateSet {
 // ---------------------------------------------------------------------------------------------
 
 export interface DeclaredConfiguration {
-  schema: 1;
+  schema: 2;
   label: string;
   description: string;
   configuration: ConfigurationInput;
 }
 
+const SETTING_KEY = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+
+function checkProcessing(value: unknown, path: string, c: Checker): void {
+  if (!isObject(value)) {
+    c.error(path, "skal være et objekt");
+    return;
+  }
+  if (value.kind === "in_process") c.object(value, path, ["kind"], []);
+  else if (value.kind === "in_region") {
+    if (c.object(value, path, ["kind", "region"], [])) c.string(value.region, `${path}.region`);
+  } else if (value.kind === "geographic") {
+    if (c.object(value, path, ["kind", "geography", "sourceRegion", "inferenceProfile"], [])) {
+      c.oneOf(value.geography, `${path}.geography`, ["EU"]);
+      c.string(value.sourceRegion, `${path}.sourceRegion`);
+      c.string(value.inferenceProfile, `${path}.inferenceProfile`);
+    }
+  } else c.error(`${path}.kind`, 'skal være "in_process", "in_region" eller "geographic"');
+}
+
+function checkSettings(value: unknown, path: string, c: Checker): void {
+  if (!isObject(value)) {
+    c.error(path, "skal være et objekt");
+    return;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!SETTING_KEY.test(key)) c.error(`${path}.${key}`, "ugyldigt navn");
+    if (!["string", "number", "boolean"].includes(typeof entry) || (typeof entry === "number" && !Number.isFinite(entry))) c.error(`${path}.${key}`, "skal være tekst, tal eller sand/falsk");
+  }
+}
+
 export function validateDeclaredConfiguration(value: unknown): DeclaredConfiguration {
   const c = new Checker();
   if (c.object(value, "configuration", ["schema", "label", "description", "configuration"], [])) {
-    if (value.schema !== 1) c.error("configuration.schema", "skal være 1");
+    if (value.schema !== 2) c.error("configuration.schema", "skal være 2 (fingerprint-materialet fra provider-kontrakten, 8B-I2)");
     c.string(value.label, "configuration.label", { pattern: KEY });
     c.string(value.description, "configuration.description");
     const input = value.configuration;
     const path = "configuration.configuration";
-    if (c.object(input, path, ["embeddingModel", "reranker", "algorithmVersion", "params", "chunkerVersions"], [])) {
-      if (input.embeddingModel !== null && c.object(input.embeddingModel, `${path}.embeddingModel`, ["provider", "model", "version", "dimensions"], [])) {
-        c.string(input.embeddingModel.provider, `${path}.embeddingModel.provider`);
-        c.string(input.embeddingModel.model, `${path}.embeddingModel.model`);
-        c.string(input.embeddingModel.version, `${path}.embeddingModel.version`);
-        const dimensions = input.embeddingModel.dimensions;
-        if (!Number.isInteger(dimensions) || (dimensions as number) < 1 || (dimensions as number) > 2000) c.error(`${path}.embeddingModel.dimensions`, "skal være et heltal mellem 1 og 2000");
+    if (c.object(input, path, ["embedding", "reranker", "algorithmVersion", "params", "chunkerVersions"], [])) {
+      if (input.embedding !== null && c.object(input.embedding, `${path}.embedding`, ["provider", "model", "modelVersion", "dimensions", "processing", "settings"], [])) {
+        for (const key of ["provider", "model", "modelVersion"] as const) c.string(input.embedding[key], `${path}.embedding.${key}`);
+        const dimensions = input.embedding.dimensions;
+        if (!Number.isInteger(dimensions) || (dimensions as number) < 1 || (dimensions as number) > 2000) c.error(`${path}.embedding.dimensions`, "skal være et heltal mellem 1 og 2000");
+        checkProcessing(input.embedding.processing, `${path}.embedding.processing`, c);
+        checkSettings(input.embedding.settings, `${path}.embedding.settings`, c);
       }
-      if (c.object(input.reranker, `${path}.reranker`, ["id", "version"], [])) {
-        c.string(input.reranker.id, `${path}.reranker.id`);
-        c.string(input.reranker.version, `${path}.reranker.version`);
+      if (c.object(input.reranker, `${path}.reranker`, ["provider", "model", "modelVersion", "id", "version", "processing", "settings"], [])) {
+        for (const key of ["provider", "model", "modelVersion", "id", "version"] as const) c.string(input.reranker[key], `${path}.reranker.${key}`);
+        checkProcessing(input.reranker.processing, `${path}.reranker.processing`, c);
+        checkSettings(input.reranker.settings, `${path}.reranker.settings`, c);
       }
       c.string(input.algorithmVersion, `${path}.algorithmVersion`);
       if (c.object(input.params, `${path}.params`, ["candidateK", "rerankN", "topK", "maxPerVersion", "minScore", "rrfK"], [])) {

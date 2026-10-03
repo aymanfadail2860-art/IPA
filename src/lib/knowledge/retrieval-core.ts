@@ -32,6 +32,13 @@ import { isUuid } from "./upload-validation";
 
 export const MAX_QUERY_CHARS = 1000;
 
+/**
+ * The version of this retrieval algorithm (hybrid search, RRF, reranking, selection,
+ * conflicts). Fingerprint material for a retrieval configuration (docs/08b §10.1): raise it
+ * whenever code in the retrieval chain changes results.
+ */
+export const RETRIEVAL_ALGORITHM_VERSION = "hybrid-rrf-1";
+
 export interface RetrievalRequest {
   query: string;
   mode?: RetrievalMode;
@@ -203,7 +210,7 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
     });
   }
 
-  const queryEmbedding = deps.embedding ? (await deps.embedding.embedder.embed([normalized.query]))[0] : null;
+  const queryEmbedding = deps.embedding ? (await deps.embedding.embedder.embed([normalized.query], { inputType: "query" }))[0] : null;
   if (deps.embedding && (!queryEmbedding || queryEmbedding.length !== deps.embedding.embedder.dimensions)) {
     throw new RetrievalError("unavailable", "Forespørgslen kunne ikke embeddes.");
   }

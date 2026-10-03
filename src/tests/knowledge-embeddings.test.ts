@@ -58,7 +58,7 @@ describe("embedder registry (docs/07 §7, §17.4)", () => {
 describe("test embedder (development only)", () => {
   it("is deterministic, has the model's dimension and unit length", async () => {
     const embedder = createTestEmbedder();
-    const [a, b] = await embedder.embed(["Forsikringen dækker ikke forurening.", "Forsikringen dækker ikke forurening."]);
+    const [a, b] = await embedder.embed(["Forsikringen dækker ikke forurening.", "Forsikringen dækker ikke forurening."], { inputType: "document" });
     expect(a).toEqual(b);
     expect(a).toHaveLength(256);
     expect(Math.abs(Math.sqrt(cosine(a!, a!)) - 1)).toBeLessThan(1e-3);

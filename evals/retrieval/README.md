@@ -41,7 +41,12 @@ IPA_RUNTIME_ENV=test npm run eval:retrieval
 IPA_RUNTIME_ENV=test npm run eval:retrieval -- --set example-v1 --gates gates-v1 --configuration fixture-development
 ```
 
-Fixture-retrieval bruger test-embedderen og rerankeren "none" fra registret. Registret afviser
+Med `--providers bedrock` evalueres production-adapterne fra 8B-I2 (Cohere Embed v4 via EU-profilen,
+1024 dimensioner, og Rerank 3.5 i eu-central-1) mod kandidatkonfigurationen
+`bedrock-embed-v4-eu-1024-rerank-3-5`. Det kræver AWS-credentials fra standardkæden (OIDC eller rolle).
+Uden dem fejler kørslen lukket.
+
+Som standard bruger fixture-retrieval test-embedderen og rerankeren "none" fra registret. Registret afviser
 dem, medmindre `IPA_RUNTIME_ENV` udtrykkeligt er `local` eller `test`. Kørslen skriver
 `reports/<kørsels-id>.json` (maskinlæsbar) og `.md` (til mennesker).
 
@@ -111,7 +116,7 @@ K er 8 (konfigurationens `topK`). "Besvarbare" er spørgsmål med `outcome: evid
 | Metrik | Definition |
 |--------|------------|
 | Source Recall@K | Andel besvarbare, hvor en forventet dokumentversion er blandt de K første elementer |
-| Passage Recall@K | Andel besvarbare, hvor den **primære** passage (første passage med grad 3) er dækket blandt de K første |
+| Passage Recall@K | Andel besvarbare, hvor **alle** påkrævede passager (grad 3) er dækket blandt de K første. De påkrævede passager er et sæt: rækkefølgen i facit betyder intet (B-021) |
 | MRR@K | Gennemsnit af 1/rang for det første element, der dækker en passage med grad 3 (0, hvis ingen) |
 | Korrekt afvisning | Andel `insufficient`-spørgsmål (`unanswerable` og `permission`), der giver et tomt resultat |
 | Falsk afvisning | Andel besvarbare, der giver et tomt resultat |

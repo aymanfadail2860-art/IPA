@@ -10,6 +10,28 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-021 — Passage Recall bruger de påkrævede passager som et sæt
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §4.2 og §21.1, `evals/engine/`, `evals/retrieval/README.md`
+
+**Beslutning:** Passage Recall@K tæller et spørgsmål, når alle påkrævede passager (grad 3) er dækket
+inden for K. Rækkefølgen af passager i facit har ingen betydning. Det præciserer "den primære
+forventede passage (grad 3)" i §4.2 og afløser I1's fortolkning "den første passage med grad 3".
+Der er intet nyt felt i spørgsmålsformatet, så eksisterende fixtures er uændrede, og rapportskemaet
+er hævet til 2.
+
+**Overvejede alternativer:**
+- *Et eksplicit felt `primary: true` på én passage.* Fravalgt: endnu et felt, som forfatteren kan
+  glemme. Et spørgsmål med flere lige vigtige passager kan ikke udtrykkes. Graden udtrykker allerede,
+  hvad der er påkrævet.
+
+**Begrundelse:** Resultatet afhænger ikke af en tilfældig rækkefølge i facit, og en test viser, at
+omvendt rækkefølge giver identiske tal. For spørgsmål med én passage med grad 3 er tallet det samme
+som før.
+
+---
+
 ## B-020 — 8B-specifikationen er godkendt og låst
 
 **Dato:** 3. oktober 2026

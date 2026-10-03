@@ -37,9 +37,13 @@ describe("checksums", () => {
   it("the configuration fingerprint changes with every defining field, but not with chunker order", () => {
     const base = PRODUCTION_DOUBLE_CONFIGURATION;
     const variants = [
-      { ...base, embeddingModel: { ...base.embeddingModel!, dimensions: 512 } },
-      { ...base, embeddingModel: { ...base.embeddingModel!, provider: "other" } },
+      { ...base, embedding: { ...base.embedding!, dimensions: 512 } },
+      { ...base, embedding: { ...base.embedding!, provider: "other" } },
+      { ...base, embedding: { ...base.embedding!, settings: { ...base.embedding!.settings, truncate: "END" } } },
+      { ...base, embedding: { ...base.embedding!, processing: { kind: "in_region" as const, region: "eu-central-1" } } },
       { ...base, reranker: { ...base.reranker, version: "2" } },
+      { ...base, reranker: { ...base.reranker, model: "other-rerank" } },
+      { ...base, reranker: { ...base.reranker, settings: { topN: 10 } } },
       { ...base, algorithmVersion: "hybrid-rrf-2" },
       { ...base, params: { ...base.params, minScore: 0.11 } },
       { ...base, chunkerVersions: ["structure/1"] },
@@ -55,6 +59,27 @@ describe("the evaluation run", () => {
     const second = await run({ retrieval: fixtureRetrieval(loadExample()), declared: { label: "fixture", configuration: fixture.configuration() }, runId: "00000000-0000-4000-8000-000000000002" });
     expect(second.checksums.results).toBe(first.checksums.results);
     expect(second.checksums.report).not.toBe(first.checksums.report); // Another run id.
+  });
+
+  it("the order of passages in the facit carries no meaning (required passages are a set)", async () => {
+    const reordered = structuredClone(inputs.set);
+    for (const evalCase of reordered.cases) evalCase.expected.passages.reverse();
+    const declared = { label: "fixture", configuration: fixture.configuration() };
+    const original = await run({ retrieval: fixture, declared });
+    const shuffled = await run({ set: reordered, retrieval: fixture, declared });
+    expect(shuffled.metrics).toEqual(original.metrics);
+    expect(shuffled.qualityGates).toEqual(original.qualityGates);
+    expect(shuffled.cases).toEqual(original.cases);
+  });
+
+  it("Passage Recall needs every required passage: a multi_chunk question with one of two covered does not count", async () => {
+    const multi = inputs.set.cases.find((evalCase) => evalCase.id === "ex-multi-001")!;
+    const tillaeg = fixture.binding().documents["ansvar-tillaeg"]!.documentId;
+    const partial = productionDouble(fixture, { transform: (set) => ({ ...set, items: set.items.filter((item) => item.documentId !== tillaeg) }) });
+    const report = await run({ set: { ...inputs.set, cases: [multi] }, retrieval: partial });
+    expect(report.cases[0]).toMatchObject({ requiredCovered: 1, requiredTotal: 2 });
+    expect(report.metrics.passage_recall_at_k).toMatchObject({ numerator: 0, denominator: 1 });
+    expect(report.failures.find((failure) => failure.gate === "Q2")?.explanation).toBe("1 af 2 påkrævede passager (grad 3) er dækket blandt de første K elementer.");
   });
 
   it("records the eval set, gate set, configuration and corpus it ran with", async () => {

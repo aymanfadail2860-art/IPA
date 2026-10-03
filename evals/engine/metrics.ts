@@ -39,6 +39,14 @@ function dcg(gains: number[]): number {
   return gains.reduce((sum, gain, i) => sum + (2 ** gain - 1) / Math.log2(i + 2), 0);
 }
 
+/**
+ * Passage Recall counts a question when EVERY required passage (grade 3) is covered within K.
+ * The required passages are a set, so reordering them in the facit never changes a number.
+ */
+export function coversAllRequired(observation: CaseObservation): boolean {
+  return observation.requiredTotal > 0 && observation.requiredCovered === observation.requiredTotal;
+}
+
 export function computeMetrics(observations: readonly CaseObservation[]): Metrics {
   const answerable = observations.filter((observation) => observation.outcome === "evidence");
   const abstaining = observations.filter((observation) => observation.outcome === "insufficient");
@@ -50,7 +58,7 @@ export function computeMetrics(observations: readonly CaseObservation[]): Metric
 
   return {
     source_recall_at_k: proportion(answerable.filter((observation) => observation.sourceRank !== null).length, answerable.length),
-    passage_recall_at_k: proportion(answerable.filter((observation) => observation.primaryPassageRank !== null).length, answerable.length),
+    passage_recall_at_k: proportion(answerable.filter(coversAllRequired).length, answerable.length),
     mrr_at_k: mean(answerable.map((observation) => (observation.firstGrade3Rank === null ? 0 : 1 / observation.firstGrade3Rank))),
     correct_abstention: proportion(abstaining.filter((observation) => observation.empty).length, abstaining.length),
     false_abstention: proportion(answerable.filter((observation) => observation.empty).length, answerable.length),

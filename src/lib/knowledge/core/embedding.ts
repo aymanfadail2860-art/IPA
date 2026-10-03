@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { Grade } from "./grade.ts";
+import type { EmbeddingInputType, EmbeddingProviderDescriptor } from "./provider.ts";
 
 /**
  * Embedder interface (docs/07 §7). The provider is NOT locked: a concrete provider is chosen
@@ -16,12 +17,25 @@ export interface EmbeddingModelSpec {
   dimensions: number;
 }
 
+export interface EmbedOptions {
+  /**
+   * Whether the texts are document passages or a user's query (docs/07 §7, K-2). Part of the
+   * contract: an asymmetric model embeds them differently; a symmetric one ignores it.
+   */
+  inputType: EmbeddingInputType;
+}
+
 export interface Embedder {
   /** provider:model@version — stored on every embedding (via the model id) and in evidence. */
   readonly id: string;
   readonly grade: Grade;
   readonly dimensions: number;
-  embed(texts: string[]): Promise<number[][]>;
+  embed(texts: string[], options: EmbedOptions): Promise<number[][]>;
+}
+
+/** An embedder that declares itself (8B-I2). Every real implementation is one. */
+export interface EmbeddingProvider extends Embedder {
+  readonly descriptor: EmbeddingProviderDescriptor;
 }
 
 export function modelLabel(model: Pick<EmbeddingModelSpec, "provider" | "model_name" | "model_version">): string {

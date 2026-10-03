@@ -1,9 +1,18 @@
 import { createHash } from "node:crypto";
 
-import { embeddingInput, type Embedder } from "../../src/lib/knowledge/core/embedding.ts";
-import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type ConflictRow, type KnowledgeRpcClient, type RetrievalConfig, type SearchRow } from "../../src/lib/knowledge/retrieval-core.ts";
-import type { Reranker } from "../../src/lib/knowledge/core/reranker.ts";
-import { tokenize, TEST_EMBEDDER } from "../../src/lib/knowledge/core/test-embedder.ts";
+import { embeddingInput, type EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
+import { retrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
+import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
+import { tokenize } from "../../src/lib/knowledge/core/test-embedder.ts";
+import {
+  DEFAULT_RETRIEVAL_CONFIG,
+  RETRIEVAL_ALGORITHM_VERSION,
+  runRetrieval,
+  type ConflictRow,
+  type KnowledgeRpcClient,
+  type RetrievalConfig,
+  type SearchRow,
+} from "../../src/lib/knowledge/retrieval-core.ts";
 
 import { checksumOf } from "./checksum.ts";
 import { danishDateOf, versionValidOn } from "./observe.ts";
@@ -27,12 +36,6 @@ import type { ConfigurationInput, CorpusBinding, EvalCase, Manifest, ManifestDoc
  */
 
 export const FIXTURE_CHUNKER_VERSION = "fixture-sections/1";
-/**
- * The version of the retrieval algorithm in src/lib/knowledge/retrieval-core.ts (hybrid search,
- * RRF, reranking, selection). Recorded in the fingerprint. The constant moves into the
- * retrieval layer with the configuration register (docs/08b §10.1, P9).
- */
-export const RETRIEVAL_ALGORITHM_VERSION = "hybrid-rrf-1";
 
 export interface FixtureDocument {
   schema: 1;
@@ -46,10 +49,11 @@ export interface FixtureRetrievalOptions {
   manifest: Manifest;
   /** Fixture files by the path the manifest names. */
   fixtures: Record<string, FixtureDocument>;
-  embedder: Embedder;
+  /** Any declared provider: the development ones, or (with credentials) the production ones (8B-I2). */
+  embedder: EmbeddingProvider;
   /** The configured reranker, and a reranker that keeps the fusion order (for Q7). */
-  reranker: Reranker;
-  baselineReranker: Reranker;
+  reranker: RerankingProvider;
+  baselineReranker: RerankingProvider;
   config?: RetrievalConfig;
   now: () => Date;
 }
@@ -133,20 +137,24 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
 
   async function embedCorpus(): Promise<Map<string, number[]>> {
     if (!embeddings) {
-      const vectors = await options.embedder.embed(chunks.map((chunk) => embeddingInput({ text: chunk.text, lead_in: null, heading_path: [chunk.heading] })));
+      const vectors = await options.embedder.embed(
+        chunks.map((chunk) => embeddingInput({ text: chunk.text, lead_in: null, heading_path: [chunk.heading] })),
+        { inputType: "document" },
+      );
       embeddings = new Map(chunks.map((chunk, i) => [chunk.id, vectors[i]!]));
     }
     return embeddings;
   }
 
-  function configuration(reranker: Reranker): ConfigurationInput {
-    return {
-      embeddingModel: { provider: TEST_EMBEDDER.provider, model: TEST_EMBEDDER.model_name, version: TEST_EMBEDDER.model_version, dimensions: options.embedder.dimensions },
-      reranker: { id: reranker.id, version: reranker.version },
+  /** The fingerprint material comes from what the implementations declare (8B-I2). */
+  function configuration(reranker: RerankingProvider): ConfigurationInput {
+    return retrievalFingerprintMaterial({
+      embedding: options.embedder.descriptor,
+      reranker: reranker.descriptor,
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...config },
       chunkerVersions: [FIXTURE_CHUNKER_VERSION],
-    };
+    });
   }
 
   /** The emulated database for one evaluation identity. */
@@ -295,7 +303,7 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
     };
   }
 
-  function adapter(reranker: Reranker, baseline: boolean): RetrievalUnderTest {
+  function adapter(reranker: RerankingProvider, baseline: boolean): RetrievalUnderTest {
     return {
       name: baseline ? "fixture (uden reranker)" : "fixture",
       environment: "fixture",

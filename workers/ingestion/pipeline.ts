@@ -96,7 +96,7 @@ async function embedAndIndex(job: ClaimedJob, deps: PipelineDeps): Promise<{ mod
     for (let i = 0; i < pending.length; i += EMBED_BATCH) {
       const batch = pending.slice(i, i + EMBED_BATCH);
       const inputs = batch.map((chunk) => embeddingInput(chunk));
-      const vectors = await embedder.embed(inputs);
+      const vectors = await embedder.embed(inputs, { inputType: "document" });
       if (vectors.length !== batch.length || vectors.some((vector) => vector.length !== model.dimensions)) {
         throw new Error("Embedderen returnerede et forkert antal vektorer eller en forkert dimension.");
       }

@@ -1,4 +1,5 @@
 import type { Grade } from "./grade.ts";
+import type { RerankingProviderDescriptor } from "./provider.ts";
 
 /**
  * Reranker interface (docs/07 §9). Reranking is a fixed step in V1 (docs/03 §7); the provider
@@ -38,7 +39,25 @@ export interface Reranker {
   rerank(input: RerankInput): Promise<RerankOutput>;
 }
 
+/** A reranker that declares itself (8B-I2). Every real implementation is one. */
+export interface RerankingProvider extends Reranker {
+  readonly descriptor: RerankingProviderDescriptor;
+}
+
 export const NONE_RERANKER_ID = "none";
+
+export const NONE_RERANKER_DESCRIPTOR: RerankingProviderDescriptor = Object.freeze({
+  kind: "reranking" as const,
+  provider: "ipa",
+  model: "none",
+  modelVersion: "1",
+  id: NONE_RERANKER_ID,
+  version: "1",
+  grade: "development" as const,
+  processing: Object.freeze({ kind: "in_process" as const }),
+  settings: Object.freeze({ order: "fused" }),
+  limits: Object.freeze({ maxDocumentsPerRequest: 1000, maxCharsPerDocument: 100_000, maxQueryChars: 1000 }),
+});
 
 /**
  * ⚠ "none" RERANKER — DEVELOPMENT ONLY (docs/07 §9, §9.1). Grade "development".
@@ -47,11 +66,12 @@ export const NONE_RERANKER_ID = "none";
  * of the same query, so the top candidate scores 1. It never judges relevance. It can only be
  * constructed through the registry, which refuses it outside IPA_RUNTIME_ENV=local/test.
  */
-export function createNoneReranker(): Reranker {
+export function createNoneReranker(): RerankingProvider {
   return Object.freeze({
     id: NONE_RERANKER_ID,
     version: "1",
     grade: "development" as const,
+    descriptor: NONE_RERANKER_DESCRIPTOR,
     async rerank(input: RerankInput): Promise<RerankOutput> {
       const ordered = [...input.candidates].sort((a, b) => b.retrieval.fusedScore - a.retrieval.fusedScore).slice(0, Math.max(0, input.topN));
       const top = ordered[0]?.retrieval.fusedScore ?? 0;

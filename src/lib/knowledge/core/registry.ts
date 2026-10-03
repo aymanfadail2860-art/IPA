@@ -1,6 +1,6 @@
-import { modelLabel, type Embedder, type EmbeddingModelSpec } from "./embedding.ts";
+import { modelLabel, type EmbeddingModelSpec, type EmbeddingProvider } from "./embedding.ts";
 import { assertGradeAllowed, runtimeEnv, type RuntimeEnv } from "./grade.ts";
-import { createNoneReranker, NONE_RERANKER_ID, type Reranker } from "./reranker.ts";
+import { createNoneReranker, NONE_RERANKER_ID, type RerankingProvider } from "./reranker.ts";
 import { createTestEmbedder, TEST_EMBEDDER } from "./test-embedder.ts";
 
 /**
@@ -11,6 +11,11 @@ import { createTestEmbedder, TEST_EMBEDDER } from "./test-embedder.ts";
  *
  * No real embedding or reranking provider is chosen in phase 7 (docs/07 §17.4). A configured
  * provider without an implementation here cannot be used — it fails, never silently.
+ *
+ * 8B-I2: the production providers (AWS Bedrock, src/lib/knowledge/providers/) exist but are
+ * deliberately NOT wired in here. The application can therefore not construct them, and no
+ * retrieval in the application can produce production evidence before the configuration
+ * register and P1–P9 exist (docs/08b §9–§10). Wiring them in belongs to that later step.
  */
 
 export class ProviderNotConfiguredError extends Error {
@@ -27,7 +32,7 @@ export class RerankerNotConfiguredError extends Error {
   }
 }
 
-export function createEmbedder(model: EmbeddingModelSpec, environment: RuntimeEnv = runtimeEnv()): Embedder {
+export function createEmbedder(model: EmbeddingModelSpec, environment: RuntimeEnv = runtimeEnv()): EmbeddingProvider {
   const label = modelLabel(model);
   if (
     model.provider === TEST_EMBEDDER.provider &&
@@ -43,7 +48,7 @@ export function createEmbedder(model: EmbeddingModelSpec, environment: RuntimeEn
 }
 
 /** The configured reranker: IPA_RERANKER, default "none". */
-export function createReranker(id: string = process.env.IPA_RERANKER || NONE_RERANKER_ID, environment: RuntimeEnv = runtimeEnv()): Reranker {
+export function createReranker(id: string = process.env.IPA_RERANKER || NONE_RERANKER_ID, environment: RuntimeEnv = runtimeEnv()): RerankingProvider {
   if (id === NONE_RERANKER_ID) {
     const reranker = createNoneReranker();
     assertGradeAllowed(`Rerankeren "${NONE_RERANKER_ID}"`, reranker.grade, environment);

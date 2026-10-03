@@ -1187,8 +1187,9 @@ implementeret.**
 
 | Deltrin | Indhold | Status |
 |---------|---------|--------|
-| **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Implementeret 2026-10-03 |
-| Øvrige | Udbydere, register og `evaluation_publisher`, evalueringsmiljø, baseline, worker, kundedataspærre, observability, aktivering | Ikke påbegyndt |
+| **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Gennemført og godkendt 2026-10-03 (rettet i 8B-I2: påkrævede passager som sæt, B-021) |
+| **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
+| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, worker, kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -1226,7 +1227,9 @@ implementeret.**
 
 **Udledt (fortolkninger af den låste tekst):**
 
-1. **Passage Recall:** den *primære* passage er den første passage med grad 3 i facit.
+1. **Passage Recall:** de påkrævede passager (grad 3) er et sæt. Et spørgsmål tæller først, når alle
+   er dækket inden for K, og rækkefølgen i facit har ingen betydning. Det afløser I1's oprindelige
+   fortolkning ("den første passage med grad 3") efter din godkendelse (B-021).
 2. **"Usikker":** for "≤"-gates (Q5, Q6) afgøres usikkerheden af den *øvre* grænse. Et ellers
    bestået resultat med et usikkert gate får den samlede afgørelse `uncertain`.
 3. **Distraktor-indtrængen** uden returnerede elementer er 0. Et tomt resultat fanges af Q5.
@@ -1270,3 +1273,110 @@ implementeret.**
 
 **Ingen production-grad:** en rapport fra 8B-I1 har altid `production.eligible: false`. Den kan
 hverken godkende, registrere eller aktivere en konfiguration, og P1–P9 er ikke implementeret.
+
+### 21.2 8B-I2 — Production embedding og reranking
+
+**Leveret:**
+
+- **Provider-kontrakten** (`src/lib/knowledge/core/provider.ts`): hver implementering har en
+  descriptor, der erklærer:
+  - udbyder og model
+  - vores egen versionsetiket (`modelVersion`)
+  - grad
+  - behandlingsprofil: `in_process`, `in_region` eller `geographic`
+  - indstillinger
+  - grænser
+  - for embedding desuden dimension og om input-typerne er symmetriske
+
+  Kontrakten indeholder også de typede fejl (`ProviderError` med `kind` og `retryable`), en
+  provider-uafhængig retry-politik (timeout pr. forsøg, eksponentiel backoff med fuld jitter, kun
+  genforsøg ved `unavailable`, `throttled` og `timeout`) og fingerprint-materialet (§10.1).
+  - `Embedder.embed` tager nu `{ inputType: "document" | "query" }` (K-2).
+  - Test-embedderen og "none" har descriptors med grad `development` og `in_process` og virker
+    som før.
+- **Cohere Embed v4** (`providers/bedrock/cohere-embed-v4.ts`):
+  - EU-geografisk via inferensprofilen `eu.cohere.embed-v4:0` med kilderegion `eu-central-1`.
+    Bedrock kan route til andre EU-regioner, så behandlingen er ikke Frankfurt-only.
+  - 1024 dimensioner, float og `truncate: "NONE"`.
+  - `search_document` for dokumenter og `search_query` for forespørgsler.
+  - Højst 96 tekster og 400.000 tegn pr. kald, og højst 8.000 tegn pr. tekst.
+  - Alle tekster valideres før første kald. En defekt tekst navngives med sit indeks, og intet
+    sendes.
+  - Svaret valideres: antal, dimension, endelige tal og ingen nulvektor.
+- **Cohere Rerank 3.5** (`providers/bedrock/cohere-rerank-3-5.ts`):
+  - In-region i `eu-central-1`, med `top_n` lig med alle kandidater og `api_version: 2`.
+  - Svaret skal give præcis én score i [0, 1] pr. kandidat og hvert indeks én gang. Ellers fejler
+    kaldet (fail-closed).
+  - Rækkefølgen bestemmes af scoren. Ved lighed gælder kandidatens oprindelige rækkefølge, og
+    udbyderens egen rækkefølge bruges aldrig.
+  - Rerankeren kan kun omrangere de kandidater, den får.
+- **Transport og credentials:**
+  - `@aws-sdk/client-bedrock-runtime` (InvokeModel) bruges kun i `sdk-transport.ts`.
+  - Credentials kommer fra SDK'ens standardkæde (OIDC/web identity, task-rolle) eller fra en
+    injiceret provider.
+  - Statiske nøgler uden session-token afvises i produktion.
+  - SDK'ens egne genforsøg er slået fra.
+- **Kataloget** (`providers/catalog.ts`) vælger en implementering ud fra modelrækken eller
+  reranker-id'et. Ukendte kombinationer fejler, og der er intet fallback til test-embedderen eller
+  "none".
+- **Fingerprint:** materialet består af:
+  - embedding: udbyder, model, version, dimension, behandlingsprofil og indstillinger
+  - reranker: det samme plus id og version
+  - algoritmeversion (`RETRIEVAL_ALGORITHM_VERSION` i retrieval-core)
+  - parametre
+  - chunker-versioner (som sæt)
+
+  Timeouts, genforsøg, transport, credentials og grænser indgår ikke.
+- **Eval-integration:**
+  - Konfigurationsformatet i `evals/` er nu fingerprint-materialet (skema 2).
+  - `configurations/bedrock-embed-v4-eu-1024-rerank-3-5.json` er I2's kandidatkonfiguration.
+  - `npm run eval:retrieval -- --providers bedrock` evaluerer adapterne, når der findes AWS-adgang.
+    Uden credentials fejler kørslen lukket og er ugyldig.
+- **Tests:** 65 nye tests mod en falsk Bedrock-transport, uden AWS-konto og uden netværk. En
+  mutationskørsel over I2-koden gav 30/30 fangede mutationer.
+
+**Hvorfor I2 alene ikke kan give production-grad:**
+
+- Providerne er bevidst ikke koblet ind i applikationens register (`core/registry.ts`).
+  `createEmbedder` og `createReranker` afviser fortsat Bedrock, så hverken retrieval, AI-gatewayen
+  eller workeren kan konstruere dem.
+- En guardrail-test sikrer, at intet applikationsmodul importerer `providers/`.
+- AWS SDK'en indgår hverken i klient- eller server-bundlen. Det er kontrolleret efter build.
+- I evalueringsværktøjet kan et EvidenceSet fra Bedrock-adapterne få graden `production` efter
+  fase 7-reglen. Det er nødvendigt for at kunne evaluere en kandidat (H6). Sættet forlader aldrig
+  evalueringsprocessen, og rapporten er altid `production.eligible: false`.
+- At koble providerne ind i registret hører til P1–P9 og registret (§9, §10).
+
+**Database:** ingen migration.
+
+- `chunk_embeddings.embedding` er `vector` uden fast dimension, og `embedding_models.dimensions`
+  tillader 1–2000. 1024 dimensioner kan derfor lagres uden ændringer, og testembeddings berøres ikke.
+- Modelrækken (`aws-bedrock` / `cohere.embed-v4:0` / `eu-1024-v1` / 1024) og dens partielle
+  HNSW-indeks oprettes med deres egen migration i det deltrin, der indfører modellen i et miljø.
+- Den rækkefølge er bevidst. En kandidatrække får workeren til at embedde med modellen, og det
+  kræver workerens produktionsadgang.
+
+**Udledt:**
+
+1. **Versionsetiketter:** `modelVersion` er vores egen etiket, fordi Bedrock ikke giver en
+   uforanderlig modelversion. Den er `eu-1024-v1` for Embed v4 og `euc1-v1` for Rerank 3.5.
+2. **Reranker-id:** id'et er `aws-bedrock:cohere.rerank-v3-5:0`.
+3. **Rerank-dokumentet:** teksten, der sendes til rerankeren, er overskriftskæden plus chunkens
+   tekst. Det svarer til embedding-input uden indledning.
+4. **Grænser:** grænserne er vores egne og konservative. Udbyderens faktiske grænser og kvoter
+   efterprøves i trin 1 (Å-1).
+5. **Baseline for Q7:** med Bedrock er sammenligningsgrundlaget den samme kørsel med "none", altså
+   fusionsrækkefølgen.
+
+**Til afklaring før providerne kobles på (ikke blokerende for I2):** forespørgsels-embedding og
+reranking sender brugerens forespørgsel til Bedrock, og Bedrock er en ekstern model.
+
+- Kundedataspærrens invariant (§8.2, L2) sidder i `invokeModel` og dækker dermed kun selve
+  modelkaldet, ikke forespørgsels-embedding og reranking.
+- Før retrieval må bruge Bedrock på et sagsbundet kald, skal spærren også gælde retrieval-vejen:
+  en sagsbunden forespørgsel må ikke sendes til en ekstern embedding- eller reranking-udbyder.
+- I I2 er vejen lukket, fordi intet applikationsmodul kan konstruere providerne. Punktet skal
+  afgøres sammen med kundedataspærren (§20 trin 7), før registret kobler providerne på.
+
+**Ikke implementeret:** Fargate, production worker, workerens DB-login, ClamAV, karantæne,
+registret og P1–P9, automatisk aktivering, 8C og enhver LLM/Copilot-model.

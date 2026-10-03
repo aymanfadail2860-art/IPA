@@ -1,0 +1,55 @@
+{
+  "schema": 2,
+  "label": "bedrock-embed-v4-eu-1024-rerank-3-5",
+  "description": "Kandidatkonfiguration (8B-I2, D-1–D-3): Cohere Embed v4 på AWS Bedrock via EU-inferensprofilen (EU-geografisk behandling, kilderegion eu-central-1), 1024 dimensioner, og Cohere Rerank 3.5 in-region i eu-central-1, med standardparametrene over det fiktive fixture-korpus. En kandidat — ikke godkendt og ikke aktiv. Evaluering kræver AWS-credentials.",
+  "configuration": {
+    "embedding": {
+      "provider": "aws-bedrock",
+      "model": "cohere.embed-v4:0",
+      "modelVersion": "eu-1024-v1",
+      "dimensions": 1024,
+      "processing": {
+        "kind": "geographic",
+        "geography": "EU",
+        "sourceRegion": "eu-central-1",
+        "inferenceProfile": "eu.cohere.embed-v4:0"
+      },
+      "settings": {
+        "embeddingType": "float",
+        "outputDimension": 1024,
+        "truncate": "NONE",
+        "inputTypeDocument": "search_document",
+        "inputTypeQuery": "search_query"
+      }
+    },
+    "reranker": {
+      "provider": "aws-bedrock",
+      "model": "cohere.rerank-v3-5:0",
+      "modelVersion": "euc1-v1",
+      "id": "aws-bedrock:cohere.rerank-v3-5:0",
+      "version": "euc1-v1",
+      "processing": {
+        "kind": "in_region",
+        "region": "eu-central-1"
+      },
+      "settings": {
+        "apiVersion": 2,
+        "topN": "all",
+        "document": "heading-path+text",
+        "ties": "candidate-order"
+      }
+    },
+    "algorithmVersion": "hybrid-rrf-1",
+    "params": {
+      "candidateK": 50,
+      "rerankN": 30,
+      "topK": 8,
+      "maxPerVersion": 3,
+      "minScore": 0.1,
+      "rrfK": 60
+    },
+    "chunkerVersions": [
+      "fixture-sections/1"
+    ]
+  }
+}

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { checksumOf, configurationFingerprint, evalSetChecksum, gateSetChecksum } from "./checksum.ts";
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor, type MinimumResult } from "./gates.ts";
-import { computeMetrics } from "./metrics.ts";
+import { computeMetrics, coversAllRequired } from "./metrics.ts";
 import { normalizeText, observeCase, type ObservationContext } from "./observe.ts";
 import { EvalSetError, type SchemaError } from "./schema.ts";
 import type {
@@ -32,8 +32,9 @@ import { CASE_TYPES } from "./types.ts";
  * evidence production grade (`production.eligible` is always false — publication.ts).
  */
 
-export const REPORT_SCHEMA_VERSION = 1;
-export const ENGINE_VERSION = "8B-I1/1";
+/** 2: Passage Recall uses the required passages as a set (no primaryPassageRank). */
+export const REPORT_SCHEMA_VERSION = 2;
+export const ENGINE_VERSION = "8B-I1/2";
 
 export interface Failure {
   caseId: string | null;
@@ -135,7 +136,6 @@ function errorObservation(evalCase: EvalCase, error: string): CaseObservation {
     itemCount: 0,
     empty: evalCase.expected.outcome === "evidence",
     sourceRank: null,
-    primaryPassageRank: null,
     firstGrade3Rank: null,
     requiredCovered: 0,
     requiredTotal: evalCase.expected.passages.filter((passage) => passage.grade === 3).length,
@@ -324,7 +324,7 @@ function caseQualityFailures(observations: readonly CaseObservation[]): Failure[
       if (observation.empty) add("Q5", "Besvarbart spørgsmål gav et tomt resultat (falsk afvisning).");
       else {
         if (observation.sourceRank === null) add("Q1", "Ingen forventet dokumentversion blandt de første K elementer.");
-        if (observation.primaryPassageRank === null) add("Q2", "Den primære passage (grad 3) er ikke dækket blandt de første K elementer.");
+        if (!coversAllRequired(observation)) add("Q2", `${observation.requiredCovered} af ${observation.requiredTotal} påkrævede passager (grad 3) er dækket blandt de første K elementer.`);
       }
     } else if (!observation.empty) {
       add("Q4", `Spørgsmålet skulle give "utilstrækkeligt grundlag", men gav ${observation.itemCount} element(er).`);

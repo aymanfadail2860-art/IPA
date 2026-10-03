@@ -1,4 +1,5 @@
 import { RESTRICTED_CONFLICT_MESSAGE, type EvidenceItem, type EvidenceSet } from "../../src/lib/knowledge/core/evidence.ts";
+import { embeddingLabel } from "../../src/lib/knowledge/core/provider.ts";
 
 import type {
   CaseObservation,
@@ -213,8 +214,9 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
   // ------------------------------------------------------------------------- metrics
   const withinK = resolved.slice(0, k);
   const passages = evalCase.expected.passages;
+  // The grade-3 passages are the required set. Their order in the facit carries no meaning:
+  // a passage counts once it is covered anywhere within K (Passage Recall, Full Coverage).
   const grade3 = passages.filter((passage) => passage.grade === 3);
-  const primary = grade3[0] ?? null;
   const expectedVersions = passages.map((passage) => ({ document: passage.document, version: passage.version }));
   const firstRank = (predicate: (entry: ResolvedItem) => boolean) => withinK.find(predicate)?.rank ?? null;
 
@@ -234,7 +236,6 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
     itemCount: set.items.length,
     empty: set.items.length === 0,
     sourceRank: firstRank((entry) => expectedVersions.some((ref) => matchesRef(entry, ref))),
-    primaryPassageRank: primary ? firstRank((entry) => covers(entry, primary)) : null,
     firstGrade3Rank: firstRank((entry) => grade3.some((passage) => covers(entry, passage))),
     requiredCovered: grade3.filter((passage) => withinK.some((entry) => covers(entry, passage))).length,
     requiredTotal: grade3.length,
@@ -260,8 +261,7 @@ export function developmentEvidence(caseId: string, run: RetrievalRun, configura
   if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);
   if (!retrieval.embeddingModel) reasons.push("Forespørgslen er ikke embedded med en aktiv model.");
   else if (retrieval.embeddingModel.grade !== "production") reasons.push(`Embedding-modellen har graden "${retrieval.embeddingModel.grade}".`);
-  const model = configuration.embeddingModel;
-  const expectedModel = model ? `${model.provider}:${model.model}@${model.version}` : null;
+  const expectedModel = configuration.embedding ? embeddingLabel(configuration.embedding) : null;
   if ((retrieval.embeddingModel?.id ?? null) !== expectedModel) {
     reasons.push(`Embedding-modellen (${retrieval.embeddingModel?.id ?? "ingen"}) er ikke den evaluerede (${expectedModel ?? "ingen"}).`);
   }

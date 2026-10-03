@@ -23,7 +23,6 @@ function observation(overrides: Partial<CaseObservation>): CaseObservation {
     itemCount: 1,
     empty: false,
     sourceRank: 1,
-    primaryPassageRank: 1,
     firstGrade3Rank: 1,
     requiredCovered: 1,
     requiredTotal: 1,
@@ -60,10 +59,10 @@ describe("Wilson 95 % interval", () => {
 
 describe("metrics (docs/08b §4.2)", () => {
   const observations: CaseObservation[] = [
-    observation({ caseId: "a", sourceRank: 1, primaryPassageRank: 1, firstGrade3Rank: 1 }),
-    observation({ caseId: "b", sourceRank: 2, primaryPassageRank: null, firstGrade3Rank: 4, requiredCovered: 1, requiredTotal: 2, gainsByRank: [0, 0, 0, 3], idealGains: [3, 3] }),
-    observation({ caseId: "c", sourceRank: null, primaryPassageRank: null, firstGrade3Rank: null, requiredCovered: 0, gainsByRank: [0], idealGains: [3] }),
-    observation({ caseId: "d", empty: true, itemCount: 0, sourceRank: null, primaryPassageRank: null, firstGrade3Rank: null, requiredCovered: 0, gainsByRank: [], itemsWithinK: 0 }),
+    observation({ caseId: "a", sourceRank: 1, firstGrade3Rank: 1 }),
+    observation({ caseId: "b", sourceRank: 2, firstGrade3Rank: 4, requiredCovered: 1, requiredTotal: 2, gainsByRank: [0, 0, 0, 3], idealGains: [3, 3] }),
+    observation({ caseId: "c", sourceRank: null, firstGrade3Rank: null, requiredCovered: 0, gainsByRank: [0], idealGains: [3] }),
+    observation({ caseId: "d", empty: true, itemCount: 0, sourceRank: null, firstGrade3Rank: null, requiredCovered: 0, gainsByRank: [], itemsWithinK: 0 }),
     observation({ caseId: "u1", type: "unanswerable", outcome: "insufficient", empty: true, itemCount: 0, itemsWithinK: 0 }),
     observation({ caseId: "u2", type: "permission", outcome: "insufficient", empty: false, itemCount: 3, itemsWithinK: 3 }),
     observation({ caseId: "x1", type: "distractor", itemsWithinK: 4, distractorItems: 1 }),
@@ -76,7 +75,7 @@ describe("metrics (docs/08b §4.2)", () => {
     expect(metrics.source_recall_at_k.interval).not.toBeNull();
   });
 
-  it("Passage Recall@K: the primary grade-3 passage must be covered", () => {
+  it("Passage Recall@K: every required (grade-3) passage must be covered — b covers 1 of 2 and does not count", () => {
     expect(metrics.passage_recall_at_k).toMatchObject({ numerator: 2, denominator: 5, value: 0.4 });
   });
 
@@ -429,7 +428,7 @@ describe("each hard-gate check stands on its own (one breach, one precise explan
   });
 
   it('H6: the "none" reranker is a breach even if it claims to be production and is the declared one', async () => {
-    const configuration = { ...PRODUCTION_DOUBLE_CONFIGURATION, reranker: { id: "none", version: "1" } };
+    const configuration = { ...PRODUCTION_DOUBLE_CONFIGURATION, reranker: { ...PRODUCTION_DOUBLE_CONFIGURATION.reranker, id: "none", version: "1" } };
     const report = await run({
       set: { ...inputs.set, cases: inputs.set.cases.filter((evalCase) => evalCase.id === "ex-direct-001") },
       retrieval: productionDouble(fixture, { configuration }),
@@ -448,7 +447,7 @@ describe("passage coverage is per version", () => {
         ),
     });
     const report = await run({ set: { ...inputs.set, cases: inputs.set.cases.filter((evalCase) => evalCase.id === "ex-direct-002") }, retrieval: otherVersion });
-    expect(report.cases[0]).toMatchObject({ sourceRank: null, primaryPassageRank: null, firstGrade3Rank: null });
+    expect(report.cases[0]).toMatchObject({ sourceRank: null, firstGrade3Rank: null, requiredCovered: 0 });
   });
 });
 
