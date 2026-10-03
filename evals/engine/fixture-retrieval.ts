@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { syntheticText } from "../../src/lib/egress/synthetic.ts";
 import { embeddingInput, type EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
 import { retrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
@@ -138,7 +139,8 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
   async function embedCorpus(): Promise<Map<string, number[]>> {
     if (!embeddings) {
       const vectors = await options.embedder.embed(
-        chunks.map((chunk) => embeddingInput({ text: chunk.text, lead_in: null, heading_path: [chunk.heading] })),
+        // The fixture corpus is synthetic evaluation material (8B-I2.5).
+        chunks.map((chunk) => syntheticText(embeddingInput({ text: chunk.text, lead_in: null, heading_path: [chunk.heading] }))),
         { inputType: "document" },
       );
       embeddings = new Map(chunks.map((chunk, i) => [chunk.id, vectors[i]!]));
@@ -317,7 +319,8 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
         const filters = evalCase.filters ?? {};
         const set = await runRetrieval(
           {
-            query: evalCase.question,
+            // An evaluation question is synthetic material, scanned for customer data (8B-I2.5).
+            query: syntheticText(evalCase.question),
             mode: evalCase.mode,
             ...(evalCase.asOf ? { asOf: evalCase.asOf } : {}),
             language: evalCase.language,

@@ -1,3 +1,4 @@
+import type { AuthorizedEgress } from "../../../egress/policy.ts";
 import { ProviderError, type ProviderErrorKind } from "../../core/provider.ts";
 
 /**
@@ -6,6 +7,11 @@ import { ProviderError, type ProviderErrorKind } from "../../core/provider.ts";
  * The adapters (cohere-embed-v4.ts, cohere-rerank-3-5.ts) only know this interface, so tests run
  * them against a fake transport without the AWS SDK and without any network. The real
  * transport (sdk-transport.ts) wraps @aws-sdk/client-bedrock-runtime.
+ *
+ * External-AI data boundary (8B-I2.5): every invocation carries the AuthorizedEgress the
+ * adapter obtained from the central policy. A transport MUST call assertTransmittable before
+ * any network I/O — it refuses a body without a genuine authorization, or with any text that
+ * was not authorized. A guardrail test keeps every network-capable module behind that check.
  */
 
 export const BEDROCK_PROVIDER = "aws-bedrock";
@@ -13,6 +19,8 @@ export const BEDROCK_PROVIDER = "aws-bedrock";
 export interface BedrockInvocation {
   /** A model id or an inference profile id. */
   modelId: string;
+  /** The policy's authorization of exactly the texts in `body`. */
+  egress: AuthorizedEgress;
   /** The JSON request body. Exactly this object is what leaves the platform. */
   body: Record<string, unknown>;
   signal: AbortSignal;

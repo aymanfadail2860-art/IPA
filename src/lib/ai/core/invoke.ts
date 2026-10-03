@@ -1,3 +1,4 @@
+import { authorizeEgress, EgressPolicyError, type EgressLog } from "@/lib/egress/policy";
 import { requireProductionEvidence, type EvidenceSet, type ProductionEvidenceSet } from "@/lib/knowledge/core/evidence";
 
 import type { Model } from "./model";
@@ -17,6 +18,11 @@ import type { ModelInput, ModelOutput } from "./types";
  *     non-issued and forced evidence.
  *   * Evidence parts cannot be smuggled past the check: every knowledge part must belong to the
  *     evidence set that was checked.
+ *   * External-AI data boundary (8B-I2.5, D-13/K-9): for an external model (any grade that is
+ *     not exactly "development") every part must carry its provenance, and ALL parts are
+ *     authorized through the central egress policy before the model is called. Customer-case
+ *     text, unknown or missing provenance and unredacted user text deny the whole call — the
+ *     model is not called. Nothing here can be switched off by a parameter or setting.
  */
 
 export class EvidencePairingError extends Error {
@@ -26,9 +32,14 @@ export class EvidencePairingError extends Error {
   }
 }
 
-export function invokeModel(model: Model<"production">, evidence: ProductionEvidenceSet | null, input: ModelInput): Promise<ModelOutput>;
-export function invokeModel(model: Model<"development">, evidence: EvidenceSet | null, input: ModelInput): Promise<ModelOutput>;
-export async function invokeModel(model: Model, evidence: EvidenceSet | null, input: ModelInput): Promise<ModelOutput> {
+export interface InvokeOptions {
+  /** The log for egress denials (technical metadata only). Tests inject it. */
+  egressLog?: EgressLog;
+}
+
+export function invokeModel(model: Model<"production">, evidence: ProductionEvidenceSet | null, input: ModelInput, options?: InvokeOptions): Promise<ModelOutput>;
+export function invokeModel(model: Model<"development">, evidence: EvidenceSet | null, input: ModelInput, options?: InvokeOptions): Promise<ModelOutput>;
+export async function invokeModel(model: Model, evidence: EvidenceSet | null, input: ModelInput, options: InvokeOptions = {}): Promise<ModelOutput> {
   const developmentModel = model.grade === "development";
   if (!developmentModel && evidence) requireProductionEvidence(evidence);
 
@@ -42,5 +53,26 @@ export async function invokeModel(model: Model, evidence: EvidenceSet | null, in
       }
     }
   }
-  return model.generate(input);
+  if (developmentModel) return model.generate(input);
+
+  // An external model: the egress boundary decides, before anything is sent.
+  input.parts.forEach((part, i) => {
+    if (!part.content || part.content.text !== part.text) {
+      throw new EgressPolicyError({
+        correlationId: "none",
+        module: "ai.invoke",
+        provider: String(model.id),
+        operation: "generate",
+        reason: "missing_provenance",
+        category: null,
+        role: part.kind,
+        partIndex: i,
+      });
+    }
+  });
+  const egress = authorizeEgress(
+    { provider: model.id, operation: "generate", module: "ai.invoke", parts: input.parts.map((part) => ({ role: part.kind, content: part.content })) },
+    { log: options.egressLog },
+  );
+  return model.generate(input, egress);
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { knowledgeText, unknownText } from "@/lib/egress/classification";
+
 import { DEFAULT_RRF_K, fuse, fusedScore } from "@/lib/knowledge/core/fusion";
 import { createEmbedder, createReranker } from "@/lib/knowledge/core/registry";
 import { mergeExcerpt, selectChunks, type SelectableChunk } from "@/lib/knowledge/core/selection";
@@ -136,12 +138,12 @@ describe('reranker "none" (docs/07 §9)', () => {
   it("keeps the fusion order, normalizes scores to [0,1] and returns at most topN", async () => {
     const reranker = createReranker("none", "test");
     const output = await reranker.rerank({
-      query: "x",
+      query: unknownText("x"),
       topN: 2,
       candidates: [
-        { chunkId: "low", text: "", headingPath: [], retrieval: { fusedScore: 0.01 } },
-        { chunkId: "top", text: "", headingPath: [], retrieval: { fusedScore: 0.03 } },
-        { chunkId: "mid", text: "", headingPath: [], retrieval: { fusedScore: 0.02 } },
+        { chunkId: "low", document: knowledgeText(""), retrieval: { fusedScore: 0.01 } },
+        { chunkId: "top", document: knowledgeText(""), retrieval: { fusedScore: 0.03 } },
+        { chunkId: "mid", document: knowledgeText(""), retrieval: { fusedScore: 0.02 } },
       ],
     });
     expect(output.reranker).toEqual({ id: "none", version: "1" });

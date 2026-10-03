@@ -1,3 +1,5 @@
+import type { ClassifiedText } from "../../egress/classification.ts";
+
 import type { Grade } from "./grade.ts";
 import type { RerankingProviderDescriptor } from "./provider.ts";
 
@@ -14,13 +16,17 @@ export type RankReason =
 
 export interface RerankCandidate {
   chunkId: string;
-  text: string;
-  headingPath: string[];
+  /**
+   * What a reranker may read of the candidate: heading chain and text (rerankDocumentText),
+   * classified as Knowledge Engine content by the retrieval layer (8B-I2.5).
+   */
+  document: ClassifiedText;
   retrieval: { vectorRank?: number; lexicalRank?: number; vectorScore?: number; lexicalScore?: number; fusedScore: number };
 }
 
 export interface RerankInput {
-  query: string;
+  /** The query with its provenance (8B-I2.5). */
+  query: ClassifiedText;
   candidates: RerankCandidate[];
   topN: number;
 }
@@ -37,6 +43,11 @@ export interface Reranker {
   /** A property of the implementation (docs/07 §9.1) — never set by the caller. */
   readonly grade: Grade;
   rerank(input: RerankInput): Promise<RerankOutput>;
+}
+
+/** The text of a candidate passage for reranking: heading chain and the chunk's own text. */
+export function rerankDocumentText(headingPath: readonly string[], text: string): string {
+  return [headingPath.join(" › "), text].filter((part) => part.length > 0).join("\n");
 }
 
 /** A reranker that declares itself (8B-I2). Every real implementation is one. */

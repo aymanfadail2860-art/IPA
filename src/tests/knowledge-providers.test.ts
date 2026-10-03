@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { NONE_RERANKER_DESCRIPTOR } from "@/lib/knowledge/core/reranker";
+import { knowledgeText, userText } from "@/lib/egress/classification";
+import { EgressPolicyError } from "@/lib/egress/policy";
+import { NONE_RERANKER_DESCRIPTOR, rerankDocumentText } from "@/lib/knowledge/core/reranker";
 import {
   backoffDelay,
   canonicalJson,
@@ -46,19 +48,21 @@ function reranker(handler: Parameters<typeof fakeBedrock>[0], options: { retry?:
   return { ...fake, reranker: createCohereRerank35({ transport: fake.transport, retry: options.retry ?? fast, retryDeps: noSleep }) };
 }
 
-const candidate = (i: number, overrides: Partial<RerankCandidate> = {}): RerankCandidate => ({
-  chunkId: `c${i}`,
-  text: `Fiktiv passage nummer ${i}.`,
-  headingPath: [`§ ${i}`],
-  retrieval: { fusedScore: 1 / (i + 1) },
-  ...overrides,
-});
+const docs = (texts: readonly string[]) => texts.map((text) => knowledgeText(text));
+const queries = (texts: readonly string[]) => texts.map((text) => userText(text, { caseBound: false, redacted: true }));
+const query = (text: string) => userText(text, { caseBound: false, redacted: true });
+
+const candidate = (i: number, overrides: Partial<RerankCandidate> & { headingPath?: string[]; text?: string } = {}): RerankCandidate => {
+  const { headingPath = [`§ ${i}`], text = `Fiktiv passage nummer ${i}.`, ...rest } = overrides;
+  return { chunkId: `c${i}`, document: knowledgeText(rerankDocumentText(headingPath, text)), retrieval: { fusedScore: 1 / (i + 1) }, ...rest };
+};
 
 async function kindOf(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
     return "ok";
   } catch (error) {
+    if (error instanceof EgressPolicyError) return `egress:${error.reason}`;
     return error instanceof ProviderError ? error.kind : `other:${(error as Error).name}`;
   }
 }
@@ -114,7 +118,7 @@ describe("the provider contract: every implementation declares itself", () => {
 describe("Cohere Embed v4 on Bedrock", () => {
   it("serializes exactly the documented request, to the EU inference profile", async () => {
     const { embedder: e, calls } = embedder((call) => embedResponse(call.body.texts as string[]));
-    await e.embed(["Forsikringen dækker ikke forurening."], { inputType: "document" });
+    await e.embed(docs(["Forsikringen dækker ikke forurening."]), { inputType: "document" });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.modelId).toBe(COHERE_EMBED_V4_EU_PROFILE);
     expect(calls[0]!.body).toEqual({ texts: ["Forsikringen dækker ikke forurening."], input_type: "search_document", embedding_types: ["float"], output_dimension: 1024, truncate: "NONE" });
@@ -122,16 +126,16 @@ describe("Cohere Embed v4 on Bedrock", () => {
 
   it("embeds documents and queries with different input types (asymmetric model, K-2)", async () => {
     const { embedder: e, calls } = embedder((call) => embedResponse(call.body.texts as string[]));
-    await e.embed(["dokument"], { inputType: "document" });
-    await e.embed(["forespørgsel"], { inputType: "query" });
+    await e.embed(docs(["dokument"]), { inputType: "document" });
+    await e.embed(queries(["forespørgsel"]), { inputType: "query" });
     expect(calls.map((call) => call.body.input_type)).toEqual(["search_document", "search_query"]);
     expect(embedRequestBody(["x"], "query").input_type).toBe("search_query");
-    expect(await kindOf(e.embed(["x"], {} as never))).toBe("configuration");
+    expect(await kindOf(e.embed(docs(["x"]), {} as never))).toBe("configuration");
   });
 
   it("returns 1024-dimensional vectors in input order and declares 1024 dimensions", async () => {
     const { embedder: e } = embedder((call) => embedResponse(call.body.texts as string[]));
-    const vectors = await e.embed(["a-tekst", "b-tekst"], { inputType: "document" });
+    const vectors = await e.embed(docs(["a-tekst", "b-tekst"]), { inputType: "document" });
     expect(e.dimensions).toBe(1024);
     expect(vectors).toEqual([fakeVector("a-tekst"), fakeVector("b-tekst")]);
     expect(e.id).toBe(embeddingLabel({ provider: "aws-bedrock", model: "cohere.embed-v4:0", modelVersion: "eu-1024-v1" }));
@@ -148,14 +152,14 @@ describe("Cohere Embed v4 on Bedrock", () => {
     ["a zero vector", () => ({ embeddings: { float: [new Array(1024).fill(0)] } }), "invalid_response"],
   ])("refuses a malformed response: %s", async (_label, response, kind) => {
     const { embedder: e, calls } = embedder(response as () => unknown);
-    expect(await kindOf(e.embed(["x"], { inputType: "document" }))).toBe(kind);
+    expect(await kindOf(e.embed(docs(["x"]), { inputType: "document" }))).toBe(kind);
     expect(calls).toHaveLength(1); // An invalid response is not retried.
   });
 
   it("batches within 96 texts and the character limit, keeping order", async () => {
     const { embedder: e, calls } = embedder((call) => embedResponse(call.body.texts as string[]));
     const texts = Array.from({ length: 200 }, (_, i) => `tekst ${i}`);
-    const vectors = await e.embed(texts, { inputType: "document" });
+    const vectors = await e.embed(docs(texts), { inputType: "document" });
     expect(calls.map((call) => (call.body.texts as string[]).length)).toEqual([96, 96, 8]);
     expect(vectors).toEqual(texts.map((text) => fakeVector(text)));
     const limits = { maxTextsPerRequest: 96, maxCharsPerText: 8000, maxCharsPerRequest: 10 };
@@ -169,12 +173,12 @@ describe("Cohere Embed v4 on Bedrock", () => {
       [["ok", "  ", "ok"], "invalid_request", 1],
       [["ok", "ok", tooLong], "input_too_large", 2],
     ] as const) {
-      const error = await e.embed([...texts], { inputType: "document" }).catch((caught: unknown) => caught);
+      const error = await e.embed(docs([...texts]), { inputType: "document" }).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(ProviderError);
       expect(error).toMatchObject({ kind, inputIndex: index, retryable: false });
     }
     expect(calls).toHaveLength(0);
-    expect(await e.embed([], { inputType: "document" })).toEqual([]);
+    expect(await e.embed(docs([]), { inputType: "document" })).toEqual([]);
   });
 
   it("refuses any other model, dimension, profile or region at construction (no wrong model)", () => {
@@ -199,10 +203,10 @@ describe("Cohere Rerank 3.5 on Bedrock", () => {
 
   it("serializes exactly the documented request, in-region, with every candidate scored", async () => {
     const { reranker: r, calls } = reranker(() => results([0.2, 0.9]));
-    await r.rerank({ query: "selvrisiko", topN: 1, candidates: [candidate(0, { headingPath: ["§ 3 Selvrisiko"] }), candidate(1, { headingPath: [] })] });
+    await r.rerank({ query: query("selvrisiko"), topN: 1, candidates: [candidate(0, { headingPath: ["§ 3 Selvrisiko"] }), candidate(1, { headingPath: [] })] });
     expect(calls[0]!.modelId).toBe(COHERE_RERANK_35_MODEL);
     expect(calls[0]!.body).toEqual({ query: "selvrisiko", documents: ["§ 3 Selvrisiko\nFiktiv passage nummer 0.", "Fiktiv passage nummer 1."], top_n: 2, api_version: 2 });
-    expect(rerankRequestBody("q", [candidate(0)])).toEqual({ query: "q", documents: ["§ 0\nFiktiv passage nummer 0."], top_n: 1, api_version: 2 });
+    expect(rerankRequestBody("q", ["§ 0\nFiktiv passage nummer 0."])).toEqual({ query: "q", documents: ["§ 0\nFiktiv passage nummer 0."], top_n: 1, api_version: 2 });
   });
 
   it("maps results back to the original candidates deterministically, keeps chunk identity and orders ties by candidate order", async () => {
@@ -213,7 +217,7 @@ describe("Cohere Rerank 3.5 on Bedrock", () => {
       { index: 2, relevance_score: 0.95 },
       { index: 1, relevance_score: 0.7 },
     ] }));
-    const output = await r.rerank({ query: "q", topN: 3, candidates: [0, 1, 2, 3].map((i) => candidate(i)) });
+    const output = await r.rerank({ query: query("q"), topN: 3, candidates: [0, 1, 2, 3].map((i) => candidate(i)) });
     expect(output.ranked).toEqual([
       { chunkId: "c2", score: 0.95, rank: 1, reasons: [{ kind: "reranker_score", score: 0.95 }] },
       { chunkId: "c1", score: 0.7, rank: 2, reasons: [{ kind: "reranker_score", score: 0.7 }] },
@@ -234,18 +238,20 @@ describe("Cohere Rerank 3.5 on Bedrock", () => {
     ["no results", { id: "x" }],
   ])("refuses %s (fail-closed)", async (_label, response) => {
     const { reranker: r, calls } = reranker(() => response);
-    expect(await kindOf(r.rerank({ query: "q", topN: 2, candidates: [candidate(0), candidate(1)] }))).toBe("invalid_response");
+    expect(await kindOf(r.rerank({ query: query("q"), topN: 2, candidates: [candidate(0), candidate(1)] }))).toBe("invalid_response");
     expect(calls).toHaveLength(1);
   });
 
   it("refuses duplicate chunk ids, empty or over-long documents and an empty query — before calling", async () => {
     const { reranker: r, calls } = reranker(() => results([0.5, 0.5]));
-    expect(await kindOf(r.rerank({ query: "q", topN: 2, candidates: [candidate(0), candidate(1, { chunkId: "c0" })] }))).toBe("invalid_request");
-    expect(await kindOf(r.rerank({ query: "q", topN: 2, candidates: [candidate(0), candidate(1, { text: "", headingPath: [] })] }))).toBe("invalid_request");
-    expect(await kindOf(r.rerank({ query: "q", topN: 2, candidates: [candidate(0), candidate(1, { text: "x".repeat(9000) })] }))).toBe("input_too_large");
-    expect(await kindOf(r.rerank({ query: " ", topN: 2, candidates: [candidate(0), candidate(1)] }))).toBe("invalid_request");
+    expect(await kindOf(r.rerank({ query: query("q"), topN: 2, candidates: [candidate(0), candidate(1, { chunkId: "c0" })] }))).toBe("invalid_request");
+    expect(await kindOf(r.rerank({ query: query("q"), topN: 2, candidates: [candidate(0), candidate(1, { text: " ", headingPath: [] })] }))).toBe("invalid_request");
+    // An empty passage is not even text: the boundary refuses it before validation.
+    expect(await kindOf(r.rerank({ query: query("q"), topN: 2, candidates: [candidate(0), candidate(1, { text: "", headingPath: [] })] }))).toBe("egress:invalid_text");
+    expect(await kindOf(r.rerank({ query: query("q"), topN: 2, candidates: [candidate(0), candidate(1, { text: "x".repeat(9000) })] }))).toBe("input_too_large");
+    expect(await kindOf(r.rerank({ query: query(" "), topN: 2, candidates: [candidate(0), candidate(1)] }))).toBe("invalid_request");
     expect(calls).toHaveLength(0);
-    expect(await r.rerank({ query: "q", topN: 5, candidates: [] })).toEqual({ ranked: [], reranker: { id: COHERE_RERANK_35_ID, version: "euc1-v1" } });
+    expect(await r.rerank({ query: query("q"), topN: 5, candidates: [] })).toEqual({ ranked: [], reranker: { id: COHERE_RERANK_35_ID, version: "euc1-v1" } });
   });
 
   it("refuses a transport outside eu-central-1 at construction (in-region only)", () => {
@@ -255,7 +261,7 @@ describe("Cohere Rerank 3.5 on Bedrock", () => {
   it("only reorders: it never adds a candidate it was not given", async () => {
     const { reranker: r } = reranker(() => results([0.3, 0.6, 0.1]));
     const candidates = [candidate(0), candidate(1), candidate(2)];
-    const output = await r.rerank({ query: "q", topN: 10, candidates });
+    const output = await r.rerank({ query: query("q"), topN: 10, candidates });
     expect(output.ranked.map((entry) => entry.chunkId).sort()).toEqual(candidates.map((entry) => entry.chunkId).sort());
   });
 });
@@ -269,7 +275,7 @@ describe("timeouts and retries", () => {
       signals.push(call.signal);
       return new Promise(() => {});
     });
-    const error = await e.embed(["x"], { inputType: "query" }).catch((caught: unknown) => caught);
+    const error = await e.embed(queries(["x"]), { inputType: "query" }).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ kind: "timeout", attempts: 3, retryable: true });
     expect(calls).toHaveLength(3);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
@@ -280,7 +286,7 @@ describe("timeouts and retries", () => {
       if (i < 2) throw classifyBedrockError(awsError("ThrottlingException", 429));
       return embedResponse(call.body.texts as string[]);
     });
-    expect(await e.embed(["x"], { inputType: "query" })).toHaveLength(1);
+    expect(await e.embed(queries(["x"]), { inputType: "query" })).toHaveLength(1);
     expect(calls).toHaveLength(3);
   });
 
@@ -288,7 +294,7 @@ describe("timeouts and retries", () => {
     const { embedder: e, calls } = embedder(() => {
       throw classifyBedrockError(awsError(name, 400));
     });
-    expect(await kindOf(e.embed(["x"], { inputType: "query" }))).not.toBe("ok");
+    expect(await kindOf(e.embed(queries(["x"]), { inputType: "query" }))).not.toBe("ok");
     expect(calls).toHaveLength(1);
   });
 
@@ -368,7 +374,7 @@ describe("fail-closed: no fallback, and no production evidence from 8B-I2 alone"
       throw classifyBedrockError(awsError("ServiceUnavailableException", 503));
     });
     const bedrockEmbedder = createProductionEmbedder(bedrockRow, { bedrock: transport, retryDeps: noSleep });
-    const failing = runRetrieval({ query: "selvrisiko" }, { db, embedding: { embedder: bedrockEmbedder, modelId: "m" }, reranker: createProductionReranker(COHERE_RERANK_35_ID, { bedrock: transport }) });
+    const failing = runRetrieval({ query: query("selvrisiko") }, { db, embedding: { embedder: bedrockEmbedder, modelId: "m" }, reranker: createProductionReranker(COHERE_RERANK_35_ID, { bedrock: transport }) });
     await expect(failing).rejects.toMatchObject({ name: "ProviderError", kind: "unavailable" });
   });
 
@@ -378,7 +384,7 @@ describe("fail-closed: no fallback, and no production evidence from 8B-I2 alone"
       product_id: "p", product_name: "Fiktiv", source_type: "manual_upload", temporal_status: "current", vector_rank: null, vector_score: null, lexical_rank: 1, lexical_score: 1, lexical_terms: ["fiktiv"] } satisfies SearchRow;
     const db: KnowledgeRpcClient = { rpc: async (fn) => ({ data: fn === "search_chunks" ? [row] : [], error: null }) };
     const { transport } = fakeBedrock(() => ({ results: [] }));
-    const failing = runRetrieval({ query: "fiktiv" }, { db, embedding: null, reranker: createProductionReranker(COHERE_RERANK_35_ID, { bedrock: transport, retryDeps: noSleep }) });
+    const failing = runRetrieval({ query: query("fiktiv") }, { db, embedding: null, reranker: createProductionReranker(COHERE_RERANK_35_ID, { bedrock: transport, retryDeps: noSleep }) });
     await expect(failing).rejects.toMatchObject({ kind: "invalid_response" });
   });
 

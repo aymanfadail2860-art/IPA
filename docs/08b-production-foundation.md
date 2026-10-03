@@ -744,6 +744,15 @@ Regler:
 
 ### 8.1 Udgangspunkt
 
+**Princip (skærpet i 8B-I2.5, B-022):** Kundeidentificerbare data må ikke forlade platformens
+godkendte trust boundary til en ekstern AI-udbyder uden en senere, eksplicit godkendt politik.
+
+- Princippet gælder **ethvert** eksternt AI-kald: modelgenerering, forespørgsels-embedding,
+  dokument-embedding og reranking (både forespørgsel og passager). Det er ikke kun et krav til
+  `invokeModel`.
+- EU-hosting ændrer ikke princippet, og det gør redaction heller ikke.
+- Det er en sikkerhedsstramning af D-13/K-9, ikke en åbning for kundedata.
+
 **8B åbner ikke for kundedata til ekstern AI.** Roadmappen kræver, at kundedata ikke kan
 godkendes til modelbrug, før enten:
 
@@ -762,6 +771,9 @@ fire egenskaber:
 - **Ekstern model:** enhver model, hvis grad ikke er præcis `development`. Det svarer til
   parringsreglen (B-012, fail-closed). Stub-modellen kører kun lokalt og i test og er ikke
   ekstern.
+- **Ekstern AI-udbyder (8B-I2.5):** enhver ekstern model og enhver embedding- eller
+  reranking-udbyder, der behandler tekst uden for platformens proces, fx Bedrock.
+  Test-embedderen, "none" og stub-modellen sender intet ud og ligger uden for grænsen.
 - **Fri tekst fra en kundesag:** alt brugerinput og al kontekst i et kald med kundesags-reference
   (`caseId`), og ethvert felt fra en kundesag.
 
@@ -773,7 +785,7 @@ alene stopper kaldet:
 | Lag | Hvor | Hvad | Kan ændres af |
 |-----|------|------|---------------|
 | **L1 — Proveniens** | Gatewayens konstruktører af `SentPart` (8A) | Hver del bærer uforanderlig proveniens: `caseBound` (sat, når kaldet har en kundesags-reference) og `redacted` (sat kun af redactoren, når den har kørt uden fejl). Delene er frosne | Kun kode |
-| **L2 — Invariant i `invokeModel`** | Det eneste sted, der kalder en model (B-012) | Er modellen ekstern, afvises kaldet, hvis (a) en del er `caseBound`, eller (b) en fritekstdel (`question`, `context`) mangler `redacted`. Modellen kaldes ikke. Der er ingen parameter, konfiguration eller miljøvariabel, der slår kontrollen fra | Kun kode (med review og mutationstest) |
+| **L2 — Central egress-policy (8B-I2.5)** | `src/lib/egress/policy.ts`, kaldt af `invokeModel` for en ekstern model, af embedding- og reranking-adapterne før hvert kald og kontrolleret igen i transporten (`assertTransmittable`) | Hvert eksternt kald autoriseres samlet, før noget sendes. Én del, der ikke må ud, afviser hele kaldet, og intet sendes. Afvises: `caseBound`, `customer_identifiable`, `audit_access`, `unknown`, manglende proveniens og brugertekst uden `redacted`. Hver operation har en fast tabel over tilladte kategorier pr. rolle. Der er ingen parameter, konfiguration, databaserække, miljøvariabel eller descriptor, der slår kontrollen fra | Kun kode (med review, arkitekturtest og mutationstest) |
 | **L3 — Klassificering** | Gatewayens pipeline | Er kaldet sagsbundet, klassificeres brugerens tekst og kontekst som `customer_identifiable`, ikke `user_question`. Matricen afviser kategorien (L4) | Kun kode |
 | **L4 — Matricen** | Databasen: constraint på `ai.data_category_policy` | `customer_identifiable` kan kun være `deny`, som `audit_access`. Hverken funktionen, administratoren eller service-rollen kan ændre det. Kun en migration kan | Kun migration (review og eksplicit beslutning) |
 | **L5 — Profilerne** | Repoet | Ingen profil har `customer_identifiable` i sine kategorier. Enhedstest | Kun kode |
@@ -790,6 +802,13 @@ AI-modellen". Det er en klar tilstand og ikke en systemfejl.
 spærren ophæves ved en senere beslutning. Uden sags-kontekst fungerer Copilot. Med
 stub-modellen lokalt og i test virker sagsbundne kald som i 8A, så mekanikken fortsat kan
 testes.
+
+**Proveniens følger teksten (8B-I2.5):**
+- Gatewayen klassificerer brugerens tekst én gang.
+- Klassifikationen følger forespørgslen uændret gennem retrieval til forespørgsels-embedding og
+  reranking og følger hver del til modellen.
+- Mangler proveniensen, sendes intet eksternt.
+- Detaljerne står i §21.3.
 
 ### 8.3 Ophævelse kræver en dokumenteret beslutning
 
@@ -812,6 +831,9 @@ virksomhedsnavne). Ingen NER-model og ingen ny redaction i 8B.
 | Direkte `insert`/`update` med `allow`/`allow_redacted`, også som service-rolle | Afvist af constraint |
 | En profil med `customer_identifiable` | Enhedstesten fejler |
 | Stub-model og sagsbundet kald | Virker som i 8A (regressionstest) |
+| Sagsbunden forespørgsel og ekstern embedding eller reranking (8B-I2.5) | Ingen embedding- og ingen rerank-request. Nul eksterne kald |
+| Rerank med én ulovlig passage (8B-I2.5) | Hele kaldet afvises, og intet sendes |
+| Transporten kaldt direkte uden gyldig autorisation (8B-I2.5) | Afvist. Intet sendes |
 | **Mutationer:** L2(a) fjernet, L2(b) fjernet, L3 fjernet, constraint fjernet, fail-open ved ukendt grad | Hver fanges af mindst én test |
 
 ---
@@ -1188,7 +1210,8 @@ implementeret.**
 | Deltrin | Indhold | Status |
 |---------|---------|--------|
 | **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Gennemført og godkendt 2026-10-03 (rettet i 8B-I2: påkrævede passager som sæt, B-021) |
-| **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
+| **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Ikke koblet på applikationen |
+| **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
 | Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, worker, kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
@@ -1368,15 +1391,94 @@ hverken godkende, registrere eller aktivere en konfiguration, og P1–P9 er ikke
 5. **Baseline for Q7:** med Bedrock er sammenligningsgrundlaget den samme kørsel med "none", altså
    fusionsrækkefølgen.
 
-**Til afklaring før providerne kobles på (ikke blokerende for I2):** forespørgsels-embedding og
-reranking sender brugerens forespørgsel til Bedrock, og Bedrock er en ekstern model.
-
-- Kundedataspærrens invariant (§8.2, L2) sidder i `invokeModel` og dækker dermed kun selve
-  modelkaldet, ikke forespørgsels-embedding og reranking.
-- Før retrieval må bruge Bedrock på et sagsbundet kald, skal spærren også gælde retrieval-vejen:
-  en sagsbunden forespørgsel må ikke sendes til en ekstern embedding- eller reranking-udbyder.
-- I I2 er vejen lukket, fordi intet applikationsmodul kan konstruere providerne. Punktet skal
-  afgøres sammen med kundedataspærren (§20 trin 7), før registret kobler providerne på.
+**Lukket i 8B-I2.5:** forespørgsels-embedding og reranking sender brugerens forespørgsel til
+Bedrock. Kundedataspærren gælder nu alle eksterne AI-kald gennem den centrale egress-policy, ikke
+kun `invokeModel` (§8.2 L2, §21.3).
 
 **Ikke implementeret:** Fargate, production worker, workerens DB-login, ClamAV, karantæne,
 registret og P1–P9, automatisk aktivering, 8C og enhver LLM/Copilot-model.
+
+### 21.3 8B-I2.5 — Ekstern AI-datagrænse
+
+**Princip:** Kundeidentificerbare data må ikke forlade platformens godkendte trust boundary til en
+ekstern AI-udbyder uden en senere, eksplicit godkendt politik. Det gælder modelgenerering,
+forespørgsels-embedding, dokument-embedding og reranking (B-022, §8.1).
+
+**Arkitektur:**
+
+```
+anvendelse/domæne (gateway, retrieval, worker, eval)
+  → klassificeret tekst (ClassifiedText: tekst + proveniens, uadskillelige)
+  → authorizeEgress (central policy, src/lib/egress/policy.ts) → AuthorizedEgress
+  → provider-transport (assertTransmittable) → ekstern tjeneste
+```
+
+- **Klassifikation** (`src/lib/egress/classification.ts`):
+  - 8A's datakategorier, udvidet med to egress-værdier: `evaluation_synthetic` og `unknown`. Der
+    er én model, og `ai/core/types.ts` re-eksporterer `DATA_CATEGORIES` herfra.
+  - Proveniens består af kategori, kilde, `caseBound` og `redacted`.
+  - Klassificeret tekst laves kun af konstruktører. Den fryses og registreres, så en kopi eller et
+    håndbygget objekt aldrig tæller som klassificeret.
+  - `narrowed` kan kun give proveniens videre til en del af den oprindelige tekst.
+  - Den syntetiske konstruktør ligger i `synthetic.ts` og må kun importeres af `evals/` og tests.
+- **Policy** (`src/lib/egress/policy.ts`):
+  - Hvert eksternt kald autoriseres samlet, før noget sendes.
+  - Altid afvist: `caseBound` (også efter redaction), `customer_identifiable`, `audit_access` og
+    `unknown`, manglende eller håndbygget proveniens, tom tekst og brugertekst uden `redacted`.
+  - Tilladt pr. operation og rolle:
+    - `embed_document`: dokument = `knowledge` eller `evaluation_synthetic`.
+    - `embed_query`: forespørgsel = `user_question` eller `evaluation_synthetic`.
+    - `rerank`: forespørgsel som `embed_query` og passager som `embed_document`.
+    - `generate`: spørgsmål og kontekst = `user_question`, evidens = `knowledge`.
+  - Kundedokumenter får aldrig samme ret som Knowledge Engine-dokumenter.
+  - Policyen læser hverken database, miljø, indstillinger eller descriptor.
+- **Transporten** (`assertTransmittable`): en request sendes kun med en ægte autorisation til den
+  pågældende udbyder. Hver streng i requesten skal være en autoriseret tekst eller en reviewet
+  protokolkonstant, og model-id'et skal være et maskin-id.
+- **Logning:** en afvisning logges som teknisk metadata: hændelse, tidspunkt, korrelations-id,
+  modul, udbyder, operation, årsag, kategori, rolle og del-indeks. Selve teksten, PII og den rå
+  forespørgsel logges aldrig.
+
+**Hvor proveniensen opstår, og hvordan den følger forespørgslen:**
+
+1. **Gatewayen** (`gateway-core.ts`) redigerer brugerens tekst og laver `userText(question,
+   { caseBound: caseId !== null, redacted: true })`. I et sagsbundet kald er teksten
+   `customer_identifiable`, uanset redaction.
+2. **Retrieval** får forespørgslen som `ClassifiedText`, og `retrieveEvidence` kræver det i typen.
+   - `normalizeRequest` trimmer med `narrowed`, så proveniensen bevares.
+   - En almindelig streng markeres som manglende proveniens og sendes aldrig eksternt.
+3. **Forespørgsels-embedding:** `embedder.embed([query], { inputType: "query" })` med den samme
+   klassificerede værdi.
+4. **Reranking:** `reranker.rerank({ query, candidates })`. Hver kandidats `document` klassificeres
+   som `knowledge` af retrieval-laget, og kun rækker, databasen allerede har givet brugeren adgang
+   til, kommer med.
+5. **Model:** hver `SentPart` bærer `content` med samme tekst. `invokeModel` autoriserer alle dele
+   for en ekstern model og giver autorisationen videre til `generate`.
+6. **Worker:** chunks af en Knowledge Engine-dokumentversion klassificeres som `knowledge`.
+7. **Eval:** fixtures og spørgsmål er `evaluation_synthetic`.
+8. **Admin-værktøjet "Afprøv retrieval"** klassificerer administratorens tekst som ikke redigeret.
+   Det virker in-process, men grænsen afviser teksten, hvis en ekstern udbyder kobles på. Før det
+   sker, skal det afgøres, om værktøjet skal redigere teksten.
+
+**Lag:**
+
+| Lag | Status efter 8B-I2.5 |
+|-----|----------------------|
+| L1 Proveniens | ✅ `ClassifiedText` på forespørgsel, passager, chunks og hver `SentPart` |
+| L2 Central egress-policy | ✅ Generering, embedding og reranking, kontrolleret igen i transporten |
+| L3 Klassificering | ✅ Sagsbunden tekst er `customer_identifiable` ved grænsen. Matricen bruger fortsat 8A's kategori, så stub-modellen virker som i 8A |
+| L4 Matricen | ✅ Migration `20261003000100_external_ai_boundary.sql`: constraint `customer_identifiable_always_denied` |
+| L5 Profilerne | ✅ Uændret (ingen profil har `customer_identifiable`) |
+
+**Tests:**
+
+- 43 tests i `egress-boundary.test.ts` og 13 i `egress-architecture.test.ts`. Hver afvisning
+  beviser nul eksterne kald.
+- 9 pgTAP-tests i `external_ai_boundary.test.sql`.
+- Mutationer: 27/28 fanget. Den sidste er ækvivalent: den sender de samme, allerede autoriserede
+  strenge, og transporten kontrollerer indholdet uanset.
+- Parringsreglen (B-012) og alle 8A-tests består uændret.
+
+**Ikke implementeret:** Fargate, workerens DB-identitet, ClamAV, karantæne, registret og P1–P9,
+aktivering af providerne, 8C, godkendelse af redaction til kundedata og en rigtig Copilot-model.
+Bedrock-providerne er fortsat ikke koblet ind i applikationens register.

@@ -1,8 +1,12 @@
+import { assertTransmittable } from "@/lib/egress/policy";
 import type { BedrockInvocation, BedrockTransport } from "@/lib/knowledge/providers/bedrock/transport";
 
 /**
  * A fake Bedrock transport for tests (8B-I2). No AWS account, no SDK, no network: each call is
  * recorded and answered by the handler. Fictional data only.
+ *
+ * Like the real transport it refuses anything the egress policy did not authorize (8B-I2.5), so
+ * a recorded call is always one that would have been allowed to leave.
  */
 
 export interface FakeCall {
@@ -16,6 +20,7 @@ export function fakeBedrock(handler: (call: FakeCall, index: number) => unknown 
   const transport: BedrockTransport = {
     region,
     async invoke(call: BedrockInvocation) {
+      assertTransmittable(call.egress, { provider: "aws-bedrock", modelId: call.modelId, body: call.body, log: () => {} });
       const recorded = { modelId: call.modelId, body: structuredClone(call.body), signal: call.signal };
       calls.push(recorded);
       return handler(recorded, calls.length - 1);

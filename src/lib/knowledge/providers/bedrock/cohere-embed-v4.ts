@@ -1,3 +1,5 @@
+import type { ClassifiedText } from "../../../egress/classification.ts";
+import { authorizeEgress, type EgressLog } from "../../../egress/policy.ts";
 import { modelLabel, type EmbedOptions, type EmbeddingProvider } from "../../core/embedding.ts";
 import { ProviderError, withRetry, type EmbeddingProviderDescriptor, type RetryDeps, type RetryPolicy } from "../../core/provider.ts";
 
@@ -15,6 +17,11 @@ import { BEDROCK_PROVIDER, type BedrockTransport } from "./transport.ts";
  *              own text (core/embedding.ts embeddingInput) — nothing else
  *   query    → the normalized retrieval query — nothing else
  * plus fixed settings. No ids, titles, user, case or tenant data are ever part of the request.
+ *
+ * External-AI boundary (8B-I2.5): ALL texts are authorized by the central egress policy before
+ * the first call — documents as "embed_document", queries as "embed_query". Customer-case text,
+ * unknown or missing provenance and unredacted user text deny the whole request: no call is
+ * made. EU processing does not change that.
  */
 
 /** Bedrock model and inference profile. Provider facts from 2026-10-02/03, to be re-verified (Å-1). */
@@ -58,6 +65,8 @@ export interface CohereEmbedV4Options {
   descriptor?: EmbeddingProviderDescriptor;
   retry?: RetryPolicy;
   retryDeps?: RetryDeps;
+  /** The log for egress denials (technical metadata only). Tests inject it. */
+  egressLog?: EgressLog;
 }
 
 /** The exact request body for one batch. Exported so the data boundary can be tested. */
@@ -130,11 +139,23 @@ export function createCohereEmbedV4(options: CohereEmbedV4Options): EmbeddingPro
     grade: descriptor.grade,
     dimensions: descriptor.dimensions,
     descriptor,
-    async embed(texts: string[], embedOptions: EmbedOptions): Promise<number[][]> {
+    async embed(classifiedTexts: readonly ClassifiedText[], embedOptions: EmbedOptions): Promise<number[][]> {
       const inputType = embedOptions?.inputType;
       if (inputType !== "document" && inputType !== "query") {
         throw new ProviderError("configuration", BEDROCK_PROVIDER, "Input-typen (document eller query) skal angives.");
       }
+      if (classifiedTexts.length === 0) return [];
+      // The external-AI boundary first: every text, or none (throws EgressPolicyError).
+      const egress = authorizeEgress(
+        {
+          provider: BEDROCK_PROVIDER,
+          operation: inputType === "document" ? "embed_document" : "embed_query",
+          module: "bedrock.embed-v4",
+          parts: classifiedTexts.map((content) => ({ role: inputType, content })),
+        },
+        { log: options.egressLog },
+      );
+      const texts = egress.texts;
       // Validate every text before any call: a defective text is reported by index and nothing
       // is sent, so a batch never ends half-embedded.
       texts.forEach((text, i) => {
@@ -149,7 +170,7 @@ export function createCohereEmbedV4(options: CohereEmbedV4Options): EmbeddingPro
         const result = await withRetry(
           BEDROCK_PROVIDER,
           retry,
-          async (signal) => parseVectors(await options.transport.invoke({ modelId: COHERE_EMBED_V4_EU_PROFILE, body, signal }), batch.texts.length, descriptor.dimensions),
+          async (signal) => parseVectors(await options.transport.invoke({ modelId: COHERE_EMBED_V4_EU_PROFILE, egress, body, signal }), batch.texts.length, descriptor.dimensions),
           options.retryDeps,
         );
         vectors.push(...result);

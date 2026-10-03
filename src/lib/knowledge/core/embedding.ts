@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import type { ClassifiedText } from "../../egress/classification.ts";
+
 import type { Grade } from "./grade.ts";
 import type { EmbeddingInputType, EmbeddingProviderDescriptor } from "./provider.ts";
 
@@ -30,7 +32,11 @@ export interface Embedder {
   readonly id: string;
   readonly grade: Grade;
   readonly dimensions: number;
-  embed(texts: string[], options: EmbedOptions): Promise<number[][]>;
+  /**
+   * The texts WITH their provenance (8B-I2.5). An external provider authorizes them at the
+   * egress boundary before sending; an in-process one only reads `.text`.
+   */
+  embed(texts: readonly ClassifiedText[], options: EmbedOptions): Promise<number[][]>;
 }
 
 /** An embedder that declares itself (8B-I2). Every real implementation is one. */

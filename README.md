@@ -6,8 +6,9 @@ AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instr
 **Status:** Fase 1–7 og underfase 8A — AI Gateway er gennemført og låst
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B. Specifikationen er godkendt og
 låst (`docs/08b-production-foundation.md`). Deltrin 8B-I1 (evalueringsframework og gates) er
-gennemført. 8B-I2 (production embedding og reranking på AWS Bedrock, ikke koblet ind i appen) er
-implementeret og afventer godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+gennemført, og det samme er 8B-I2 (production embedding og reranking på AWS Bedrock, ikke koblet
+ind i appen). 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
+AI-udbyder) er implementeret og afventer godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

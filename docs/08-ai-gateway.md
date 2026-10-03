@@ -294,6 +294,11 @@ Matricen er data, ikke kode (`docs/03` §9). Den ligger i databasen i
 - **`customer_identifiable` er `deny` for alle modeller som standard** (`docs/03` §9, §11).
   Ændringen kræver en eksplicit politikbeslutning (`docs/03` §17 pkt. 4) og hører ikke til i
   8A.
+  - Skærpet i 8B-I2.5 (B-022): databasen tillader nu kun `deny` for kategorien (constraint, som
+    for `audit_access`).
+  - Kundeidentificerbare data må ikke forlade platformens trust boundary til en ekstern
+    AI-udbyder. Det gælder modelgenerering, embedding og reranking og håndhæves af den centrale
+    egress-policy, ikke kun af matricen eller `invokeModel` (`docs/08b` §8, §21.3).
 - **`audit_access` er `deny` uden undtagelse.** Databasen afviser en række med en anden
   regel (check-constraint).
 - Startværdier for stub-modellen: `knowledge` allow, `user_question` allow_redacted,

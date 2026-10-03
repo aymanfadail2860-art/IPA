@@ -1,3 +1,4 @@
+import type { ClassifiedText, DataCategory } from "@/lib/egress/classification";
 import type { Grade } from "@/lib/knowledge/core/grade";
 import type { TemporalStatus } from "@/lib/knowledge/core/evidence";
 
@@ -8,9 +9,8 @@ import type { TemporalStatus } from "@/lib/knowledge/core/evidence";
 
 export type ProfileId = "copilot" | "learn" | "practice" | "advise" | "assessment";
 
-/** The data categories of docs/03 §9 (docs/08 §5.1). */
-export const DATA_CATEGORIES = ["knowledge", "user_question", "learning", "training_fictional", "customer_identifiable", "audit_access"] as const;
-export type DataCategory = (typeof DATA_CATEGORIES)[number];
+/** The data categories of docs/03 §9 (docs/08 §5.1) — one model, defined with the egress boundary. */
+export { DATA_CATEGORIES, type DataCategory } from "@/lib/egress/classification";
 
 export type PolicyRule = "allow" | "allow_redacted" | "deny";
 
@@ -38,8 +38,14 @@ export interface AiContext {
 /** One piece of content sent to a model. Constructed only by the gateway (parts.ts). */
 export interface SentPart {
   readonly kind: "question" | "context" | "evidence";
+  /** The matrix category (docs/08 §5). */
   readonly category: DataCategory;
   readonly text: string;
+  /**
+   * The same text with its provenance (L1, 8B-I2.5). For an external model invokeModel
+   * authorizes exactly these through the egress boundary; `text` must equal `content.text`.
+   */
+  readonly content: ClassifiedText;
   /** Evidence parts only: what the model needs to cite and mark correctly. */
   readonly evidence?: { evidenceId: string; label: string; temporalStatus: TemporalStatus; inConflict: boolean };
 }

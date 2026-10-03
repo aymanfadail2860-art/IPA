@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ADMIN_REQUIREMENT } from "@/config/navigation";
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { authorize } from "@/lib/auth/server-session";
+import { userText } from "@/lib/egress/classification";
 import type { PermissionRequirement } from "@/lib/auth/permissions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -175,7 +176,9 @@ export async function testRetrieval(request: RetrievalRequest, dev: { devForceIn
   if (isDemoMode()) return { kind: "unavailable", message: DEMO };
   if (!(await authorize(ADMIN_REQUIREMENT)) || !(await authorize({ allOf: ["knowledge.document.read"] }))) return { kind: "denied", message: DENIED };
   const outcome = await retrieveEvidenceOutcome({
-    query: request.query,
+    // An administrator's test query: user text, not redacted and never case-bound (8B-I2.5).
+    // It works with the in-process providers; the external-AI boundary refuses unredacted text.
+    query: userText(typeof request.query === "string" ? request.query : "", { caseBound: false, redacted: false }),
     mode: request.mode,
     asOf: request.asOf,
     language: request.language,

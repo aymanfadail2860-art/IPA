@@ -1,8 +1,9 @@
+import type { EgressCategory } from "@/lib/egress/classification";
 import type { EvidenceItem } from "@/lib/knowledge/core/evidence";
 import type { Grade } from "@/lib/knowledge/core/grade";
 
 import type { ContractOutput, ContractReason } from "./core/contracts";
-import type { DataCategory, ProfileId } from "./core/types";
+import type { ProfileId } from "./core/types";
 
 /**
  * The gateway's explicit outcome (docs/08 §1) and how it is shown. Pure — usable in client
@@ -19,7 +20,7 @@ export type AiOutcome =
   | { kind: "unverifiable"; profile: ProfileId; reason: ContractReason; evidence: EvidenceItem[] }
   | { kind: "locked"; reason: "assessment_active" | "roleplay_active" }
   | { kind: "denied"; message: string }
-  | { kind: "blocked_policy"; category: DataCategory; message: string }
+  | { kind: "blocked_policy"; category: EgressCategory; message: string }
   | { kind: "invalid_request"; message: string }
   | { kind: "unavailable"; message: string };
 

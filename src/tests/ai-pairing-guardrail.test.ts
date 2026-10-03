@@ -7,6 +7,7 @@ import type { Model } from "@/lib/ai/core/model";
 import { createContractBreakingStub, createModel, ModelNotConfiguredError } from "@/lib/ai/core/registry";
 import { createStubModel, STUB_MODEL } from "@/lib/ai/core/stub-model";
 import type { ModelInput, SentPart } from "@/lib/ai/core/types";
+import { knowledgeText, userText } from "@/lib/egress/classification";
 import { requireProductionEvidence, type EvidenceSet } from "@/lib/knowledge/core/evidence";
 import { GradeNotAllowedError, type Grade } from "@/lib/knowledge/core/grade";
 
@@ -36,12 +37,14 @@ function spyModel(grade: string) {
 }
 
 function inputFor(set: EvidenceSet | null): ModelInput {
-  const parts: SentPart[] = [{ kind: "question", category: "user_question", text: "Dækker forsikringen droner?" }];
+  const question = "Dækker forsikringen droner?";
+  const parts: SentPart[] = [{ kind: "question", category: "user_question", text: question, content: userText(question, { caseBound: false, redacted: true }) }];
   for (const item of set?.items ?? []) {
     parts.push({
       kind: "evidence",
       category: "knowledge",
       text: item.excerpt.text,
+      content: knowledgeText(item.excerpt.text),
       evidence: { evidenceId: item.evidenceId, label: item.sourceReference.label, temporalStatus: item.validity.temporalStatus, inConflict: false },
     });
   }

@@ -1,3 +1,4 @@
+import { knowledgeText } from "../../src/lib/egress/classification.ts";
 import { embeddingInput, inputHash, modelLabel, type Embedder, type EmbeddingModelSpec } from "../../src/lib/knowledge/core/embedding.ts";
 import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
 
@@ -96,7 +97,9 @@ async function embedAndIndex(job: ClaimedJob, deps: PipelineDeps): Promise<{ mod
     for (let i = 0; i < pending.length; i += EMBED_BATCH) {
       const batch = pending.slice(i, i + EMBED_BATCH);
       const inputs = batch.map((chunk) => embeddingInput(chunk));
-      const vectors = await embedder.embed(inputs, { inputType: "document" });
+      // Chunks of a Knowledge Engine document version (8B-I2.5): classified as knowledge, so an
+      // external embedder may receive them under the document policy. Nothing else is embedded.
+      const vectors = await embedder.embed(inputs.map(knowledgeText), { inputType: "document" });
       if (vectors.length !== batch.length || vectors.some((vector) => vector.length !== model.dimensions)) {
         throw new Error("Embedderen returnerede et forkert antal vektorer eller en forkert dimension.");
       }

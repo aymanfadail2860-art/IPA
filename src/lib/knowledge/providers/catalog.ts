@@ -1,4 +1,5 @@
 import { modelLabel, type EmbeddingModelSpec, type EmbeddingProvider } from "../core/embedding.ts";
+import type { EgressLog } from "../../egress/policy.ts";
 import { ProviderError, type EmbeddingProviderDescriptor, type RerankingProviderDescriptor, type RetryDeps } from "../core/provider.ts";
 import type { RerankingProvider } from "../core/reranker.ts";
 
@@ -22,6 +23,8 @@ export interface ProviderRuntime {
   /** The Bedrock transport for eu-central-1 (sdk-transport.ts, or a fake in tests). */
   bedrock: BedrockTransport;
   retryDeps?: RetryDeps;
+  /** The log for egress denials (technical metadata only). */
+  egressLog?: EgressLog;
 }
 
 export const PRODUCTION_EMBEDDING_DESCRIPTORS: readonly EmbeddingProviderDescriptor[] = Object.freeze([EMBED_V4_EU_1024_DESCRIPTOR]);
@@ -49,10 +52,10 @@ export function createProductionEmbedder(model: Omit<EmbeddingModelSpec, "id">, 
   if (!descriptor) {
     throw new ProviderError("configuration", model.provider, `Der er ingen production-implementering af ${modelLabel(model)} med ${model.dimensions} dimensioner.`);
   }
-  return createCohereEmbedV4({ transport: runtime.bedrock, descriptor, retryDeps: runtime.retryDeps });
+  return createCohereEmbedV4({ transport: runtime.bedrock, descriptor, retryDeps: runtime.retryDeps, egressLog: runtime.egressLog });
 }
 
 export function createProductionReranker(id: string, runtime: ProviderRuntime): RerankingProvider {
   if (id !== COHERE_RERANK_35_ID) throw new ProviderError("configuration", "ukendt", `Der er ingen production-implementering af rerankeren "${id}".`);
-  return createCohereRerank35({ transport: runtime.bedrock, retryDeps: runtime.retryDeps });
+  return createCohereRerank35({ transport: runtime.bedrock, retryDeps: runtime.retryDeps, egressLog: runtime.egressLog });
 }

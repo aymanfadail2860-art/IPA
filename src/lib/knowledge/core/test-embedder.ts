@@ -1,3 +1,5 @@
+import { plainText, type ClassifiedText } from "../../egress/classification.ts";
+
 import type { EmbeddingProvider } from "./embedding.ts";
 import type { EmbeddingProviderDescriptor } from "./provider.ts";
 
@@ -70,8 +72,9 @@ export function createTestEmbedder(): EmbeddingProvider {
     grade: "development" as const,
     dimensions: TEST_EMBEDDER.dimensions,
     descriptor: TEST_EMBEDDER_DESCRIPTOR,
-    async embed(texts: string[]) {
-      return texts.map((text) => hashEmbedding(text, TEST_EMBEDDER.dimensions));
+    // In-process: nothing leaves the platform, so only the text is read.
+    async embed(texts: readonly ClassifiedText[]) {
+      return texts.map((text) => hashEmbedding(plainText(text), TEST_EMBEDDER.dimensions));
     },
   });
 }

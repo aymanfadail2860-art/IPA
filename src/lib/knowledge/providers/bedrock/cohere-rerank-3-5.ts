@@ -1,5 +1,6 @@
+import { authorizeEgress, type EgressLog } from "../../../egress/policy.ts";
 import { ProviderError, withRetry, type RerankingProviderDescriptor, type RetryDeps, type RetryPolicy } from "../../core/provider.ts";
-import type { RerankCandidate, RerankInput, RerankOutput, RerankingProvider } from "../../core/reranker.ts";
+import type { RerankInput, RerankOutput, RerankingProvider } from "../../core/reranker.ts";
 
 import { EU_SOURCE_REGION } from "./cohere-embed-v4.ts";
 import { BEDROCK_PROVIDER, type BedrockTransport } from "./transport.ts";
@@ -14,7 +15,11 @@ import { BEDROCK_PROVIDER, type BedrockTransport } from "./transport.ts";
  * mapping back to the candidate is by position, validated in full.
  *
  * What is sent (data boundary): the normalized query and, per candidate, its heading chain and
- * text. No ids, titles, user, case or tenant data.
+ * text (core/reranker.ts rerankDocumentText). No ids, titles, user, case or tenant data.
+ *
+ * External-AI boundary (8B-I2.5): the query AND every passage are authorized together by the
+ * central egress policy before the call. If the query or a single passage may not leave, the
+ * whole rerank is denied and nothing is sent — no partial transmission.
  */
 
 export const COHERE_RERANK_35_MODEL = "cohere.rerank-v3-5:0";
@@ -41,16 +46,13 @@ export interface CohereRerank35Options {
   transport: BedrockTransport;
   retry?: RetryPolicy;
   retryDeps?: RetryDeps;
-}
-
-/** The text sent for one candidate: heading chain and the chunk's own text. */
-export function rerankDocument(candidate: Pick<RerankCandidate, "headingPath" | "text">): string {
-  return [candidate.headingPath.join(" › "), candidate.text].filter((part) => part.length > 0).join("\n");
+  /** The log for egress denials (technical metadata only). Tests inject it. */
+  egressLog?: EgressLog;
 }
 
 /** The exact request body. Exported so the data boundary can be tested. */
-export function rerankRequestBody(query: string, candidates: readonly Pick<RerankCandidate, "headingPath" | "text">[]): Record<string, unknown> {
-  return { query, documents: candidates.map(rerankDocument), top_n: candidates.length, api_version: 2 };
+export function rerankRequestBody(query: string, documents: readonly string[]): Record<string, unknown> {
+  return { query, documents: [...documents], top_n: documents.length, api_version: 2 };
 }
 
 /** Validates the response: exactly one finite score in [0,1] per candidate, every index once. */
@@ -98,7 +100,18 @@ export function createCohereRerank35(options: CohereRerank35Options): RerankingP
       if (candidates.length > descriptor.limits.maxDocumentsPerRequest) {
         throw new ProviderError("input_too_large", BEDROCK_PROVIDER, `${candidates.length} kandidater (højst ${descriptor.limits.maxDocumentsPerRequest}).`);
       }
-      if (input.query.trim().length === 0 || input.query.length > descriptor.limits.maxQueryChars) {
+      // The external-AI boundary first: the query and every passage, or nothing.
+      const egress = authorizeEgress(
+        {
+          provider: BEDROCK_PROVIDER,
+          operation: "rerank",
+          module: "bedrock.rerank-3-5",
+          parts: [{ role: "query", content: input.query }, ...candidates.map((candidate) => ({ role: "document" as const, content: candidate.document }))],
+        },
+        { log: options.egressLog },
+      );
+      const [query, ...documents] = egress.texts as [string, ...string[]];
+      if (query.trim().length === 0 || query.length > descriptor.limits.maxQueryChars) {
         throw new ProviderError("invalid_request", BEDROCK_PROVIDER, "Forespørgslen er tom eller for lang til reranking.");
       }
       // Chunk identity must be unambiguous, or the mapping back could mix up sources.
@@ -106,18 +119,18 @@ export function createCohereRerank35(options: CohereRerank35Options): RerankingP
       candidates.forEach((candidate, i) => {
         if (ids.has(candidate.chunkId)) throw new ProviderError("invalid_request", BEDROCK_PROVIDER, `Kandidat ${i} har samme chunk-id som en anden.`, { inputIndex: i });
         ids.add(candidate.chunkId);
-        const document = rerankDocument(candidate);
+        const document = documents[i]!;
         if (document.trim().length === 0) throw new ProviderError("invalid_request", BEDROCK_PROVIDER, `Kandidat ${i} er tom.`, { inputIndex: i });
         if (document.length > descriptor.limits.maxCharsPerDocument) {
           throw new ProviderError("input_too_large", BEDROCK_PROVIDER, `Kandidat ${i} er ${document.length} tegn (højst ${descriptor.limits.maxCharsPerDocument}).`, { inputIndex: i });
         }
       });
 
-      const body = rerankRequestBody(input.query, candidates);
+      const body = rerankRequestBody(query, documents);
       const results = await withRetry(
         BEDROCK_PROVIDER,
         retry,
-        async (signal) => parseRerankResults(await options.transport.invoke({ modelId: COHERE_RERANK_35_MODEL, body, signal }), candidates.length),
+        async (signal) => parseRerankResults(await options.transport.invoke({ modelId: COHERE_RERANK_35_MODEL, egress, body, signal }), candidates.length),
         options.retryDeps,
       );
       // Deterministic order: score descending; ties keep the incoming (fused) order. The

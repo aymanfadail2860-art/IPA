@@ -10,6 +10,7 @@ import { createRedactor, reidentify } from "@/lib/ai/core/redaction";
 import { createModel } from "@/lib/ai/core/registry";
 import type { AiRequest, ModelInput, ProfileId } from "@/lib/ai/core/types";
 import { presentAi, type AiOutcome } from "@/lib/ai/outcome";
+import { knowledgeText, type Provenance } from "@/lib/egress/classification";
 import type { EvidenceItem, EvidenceSet } from "@/lib/knowledge/core/evidence";
 import { RetrievalError } from "@/lib/knowledge/retrieval-core";
 
@@ -47,7 +48,7 @@ function harness(options: {
   retrieveError?: RetrievalError;
 } = {}): Harness {
   const records: CallRecord[] = [];
-  const retrievals: { query: string }[] = [];
+  const retrievals: { query: string; provenance: Provenance }[] = [];
   const model = options.model ?? createModel("stub", "test");
   const permissions = options.permissions ?? ["learning.progress.read:own", "practice.session.write:own", "advise.case.read:own"];
   const deps: GatewayDeps = {
@@ -60,7 +61,7 @@ function harness(options: {
     },
     policyRows: async () => options.rows ?? STUB_ROWS,
     retrieve: async (request, dev) => {
-      retrievals.push({ query: request.query });
+      retrievals.push({ query: request.query.text, provenance: request.query.provenance });
       if (options.retrieveError) throw options.retrieveError;
       if (dev.devForceInsufficient) return issueEvidence([], { devOverride: "force_insufficient" });
       return options.evidence ? options.evidence() : issueEvidence(options.items ?? [evidenceItem(1), evidenceItem(2)]);
@@ -308,7 +309,7 @@ describe("output contracts — a breach is never shown (B-016)", () => {
   });
 
   it("validates the other profiles' contracts", () => {
-    const parts = [{ kind: "evidence" as const, category: "knowledge" as const, text: "x", evidence: { evidenceId: "e1", label: "L", temporalStatus: "current" as const, inConflict: false } }];
+    const parts = [{ kind: "evidence" as const, category: "knowledge" as const, text: "x", content: knowledgeText("x"), evidence: { evidenceId: "e1", label: "L", temporalStatus: "current" as const, inConflict: false } }];
     expect(validateOutput(CONTRACTS.learnExplain, { paragraphs: [[{ text: "a" }, { cite: "e1" }]], examples: [{ text: "x", fictional: false }] }, parts)).toEqual({ ok: false, reason: "example_not_marked" });
     expect(validateOutput(CONTRACTS.practiceTurn, { reply: "hej", cite: "e1" }, parts)).toEqual({ ok: false, reason: "unexpected_citation" });
     expect(validateOutput(CONTRACTS.adviseSuggest, { suggestions: [{ status: "final", segments: [{ cite: "e1" }] }] }, parts)).toEqual({ ok: false, reason: "malformed" });

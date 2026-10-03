@@ -10,6 +10,37 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-022 — Kundedata-spærren gælder alle eksterne AI-kald (ekstern AI-datagrænse)
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §8 og §21.3, `docs/08-ai-gateway.md` §5.2,
+`src/lib/egress/`, migration `20261003000100_external_ai_boundary.sql`
+
+**Beslutning:**
+- Kundeidentificerbare data må ikke forlade platformens godkendte trust boundary til en ekstern
+  AI-udbyder uden en senere, eksplicit godkendt politik.
+- D-13/K-9 gælder derfor alle eksterne AI-kald: modelgenerering, forespørgsels-embedding,
+  dokument-embedding og reranking. Det håndhæves af én central egress-policy, som alle eksterne
+  provider-kald skal passere før transmission, og som transporten kontrollerer igen.
+- Altid afvist:
+  - fri tekst fra kundesager og sagsbunden tekst, også efter redaction
+  - `customer_identifiable`, `audit_access` og `unknown`
+  - manglende proveniens og brugertekst uden redaction
+- Databasen tillader kun `deny` for `customer_identifiable` (lag L4).
+- EU-hosting, administratorkonfiguration og provider-descriptors kan ikke ændre det.
+
+**Overvejede alternativer:**
+- *En invariant pr. adapter.* Fravalgt: en ny adapter kunne glemme den. Én central policy, en
+  transport, der kræver autorisationen, og arkitekturtests gør det svært at komme uden om.
+- *Redaction som adgang for kundedata til embedding.* Fravalgt: redaction finder ikke navne i fri
+  tekst og er ikke valideret mod et testsæt (§8.3).
+
+**Begrundelse:** Hullet blev fundet i 8B-I2: forespørgsels-embedding og reranking sender
+brugerens tekst til en ekstern udbyder, og invarianten i `invokeModel` dækkede kun selve modelkaldet.
+Ændringen er en sikkerhedsstramning og ikke en åbning for kundedata.
+
+---
+
 ## B-021 — Passage Recall bruger de påkrævede passager som et sæt
 
 **Dato:** 3. oktober 2026

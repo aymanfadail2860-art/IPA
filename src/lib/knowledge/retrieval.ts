@@ -10,7 +10,7 @@ import type { EvidenceSet } from "./core/evidence";
 import { createEmbedder, createReranker } from "./core/registry";
 import type { Reranker } from "./core/reranker";
 import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
-import { DEFAULT_RETRIEVAL_CONFIG, RetrievalError, runRetrieval, type RetrievalRequest } from "./retrieval-core";
+import { DEFAULT_RETRIEVAL_CONFIG, RetrievalError, runRetrieval, type ClassifiedRetrievalRequest, type RetrievalRequest } from "./retrieval-core";
 import type { RetrievalOutcome } from "./result-presentation";
 
 /**
@@ -44,7 +44,7 @@ function embedderFor(model: EmbeddingModelSpec): Embedder {
   return embedder;
 }
 
-export { RetrievalError, type RetrievalAvailability, type RetrievalRequest };
+export { RetrievalError, type ClassifiedRetrievalRequest, type RetrievalAvailability, type RetrievalRequest };
 
 async function activeModel(knowledge: KnowledgeClient): Promise<EmbeddingModelSpec | null | undefined> {
   const { data, error } = await knowledge.rpc("active_embedding_model");
@@ -69,7 +69,7 @@ export interface RetrievalDevOptions {
   devForceInsufficient?: boolean;
 }
 
-export async function retrieveEvidence(request: RetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
+export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   // An active platform user is required. WHICH documents the user may read is decided by the
   // database (docs/07 §4.1): administrators through the role, advisors and leaders through
@@ -88,7 +88,7 @@ export async function retrieveEvidence(request: RetrievalRequest, dev: Retrieval
 }
 
 /** retrieveEvidence as an explicit outcome for the UI: a failure is never an empty result. */
-export async function retrieveEvidenceOutcome(request: RetrievalRequest, dev: RetrievalDevOptions = {}): Promise<RetrievalOutcome> {
+export async function retrieveEvidenceOutcome(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions = {}): Promise<RetrievalOutcome> {
   try {
     return { kind: "evidence", set: await retrieveEvidence(request, dev) };
   } catch (error) {

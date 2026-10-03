@@ -1,6 +1,8 @@
+import { knowledgeText, userText, type EgressCategory } from "@/lib/egress/classification";
+import { EgressPolicyError } from "@/lib/egress/policy";
 import type { EvidenceItem, EvidenceSet } from "@/lib/knowledge/core/evidence";
 import { combinedGrade, runtimeEnv, type Grade, type RuntimeEnv } from "@/lib/knowledge/core/grade";
-import type { RetrievalRequest } from "@/lib/knowledge/retrieval-core";
+import type { ClassifiedRetrievalRequest } from "@/lib/knowledge/retrieval-core";
 import type { PermissionKey, PermissionScope } from "@/lib/auth/permissions";
 
 import type { AiOutcome } from "../outcome";
@@ -66,7 +68,7 @@ export interface GatewayDeps {
   gatingState(): Promise<GatingState>;
   policyRows(modelId: string): Promise<PolicyRow[]>;
   /** retrieveEvidence as the user. Throws RetrievalError. */
-  retrieve(request: RetrievalRequest, dev: { devForceInsufficient?: boolean }): Promise<EvidenceSet>;
+  retrieve(request: ClassifiedRetrievalRequest, dev: { devForceInsufficient?: boolean }): Promise<EvidenceSet>;
   /** The configured model. Throws when it may not be used here (fail-closed registry). */
   model(): Model;
   record(entry: CallRecord): Promise<void>;
@@ -94,6 +96,21 @@ class Stop extends Error {
 }
 
 const invalid = (message: string, code: string) => new Stop({ kind: "invalid_request", message }, code);
+
+/** The user's outcome for a denial at the external-AI boundary (8B-I2.5, docs/08b §8.2). */
+export const CASE_DATA_BLOCKED_MESSAGE = "Oplysninger fra en kundesag sendes ikke til AI-modellen.";
+const egressBlocked = (error: EgressPolicyError) =>
+  new Stop(
+    {
+      kind: "blocked_policy",
+      category: (error.category ?? "unknown") as EgressCategory,
+      message:
+        error.category === "customer_identifiable" || error.reason === "case_bound"
+          ? CASE_DATA_BLOCKED_MESSAGE
+          : "Oplysningerne må ikke sendes til en ekstern AI-udbyder efter platformens politik.",
+    },
+    `egress_denied_${error.reason}`,
+  );
 const denied = (message: string, code: string) => new Stop({ kind: "denied", message }, code);
 const unavailable = (message: string, code: string) => new Stop({ kind: "unavailable", message }, code);
 
@@ -120,11 +137,12 @@ function minimizeContext(context: AiContext | undefined, profile: WorkflowProfil
 }
 
 function evidencePart(item: EvidenceItem, maxChars: number): SentPart {
-  const text = [item.excerpt.leadIn, item.excerpt.text].filter(Boolean).join("\n");
+  const text = [item.excerpt.leadIn, item.excerpt.text].filter(Boolean).join("\n").slice(0, maxChars);
   return Object.freeze({
     kind: "evidence" as const,
     category: "knowledge" as const,
-    text: text.slice(0, maxChars),
+    text,
+    content: knowledgeText(text),
     evidence: Object.freeze({
       evidenceId: item.evidenceId,
       label: item.sourceReference.label,
@@ -132,6 +150,17 @@ function evidencePart(item: EvidenceItem, maxChars: number): SentPart {
       inConflict: item.conflicts.length > 0,
     }),
   });
+}
+
+/** What was sent, as logged: the texts and their provenance flags — the text once, not twice. */
+function forLog(input: ModelInput) {
+  return {
+    ...input,
+    parts: input.parts.map(({ content, ...part }) => ({
+      ...part,
+      provenance: { category: content.provenance.category, caseBound: content.provenance.caseBound, redacted: content.provenance.redacted },
+    })),
+  };
 }
 
 function permissionsFor(profile: WorkflowProfile): { key: PermissionKey; scope: PermissionScope }[] {
@@ -233,6 +262,11 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     const redactor = createRedactor(knownNames);
     const question = redactor.redact(input);
     const label = typeof context.label === "string" ? redactor.redact(context.label.slice(0, MAX_LABEL_CHARS)) : null;
+    // L1/L3 (8B-I2.5): provenance is fixed here and travels with the text to retrieval, query
+    // embedding, reranking and the model. In a case-bound call the user's text is customer data
+    // — redacted or not — and never passes the external-AI boundary.
+    const questionContent = userText(question, { caseBound: caseId !== null, redacted: true });
+    const labelContent = label === null ? null : userText(label, { caseBound: caseId !== null, redacted: true });
     redactions = redactor.counts;
     gapQuestion = question;
 
@@ -257,10 +291,11 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
       const productIds = Array.isArray(context.productIds) ? context.productIds.filter((id): id is string => typeof id === "string") : undefined;
       try {
         evidence = await deps.retrieve(
-          { query: question, mode, asOf: mode === "as_of" ? (context.asOf as string) : undefined, productIds, documentTypes, topK: profile.retrieval.topK },
+          { query: questionContent, mode, asOf: mode === "as_of" ? (context.asOf as string) : undefined, productIds, documentTypes, topK: profile.retrieval.topK },
           { devForceInsufficient: dev.forceInsufficient === true },
         );
       } catch (error) {
+        if (error instanceof EgressPolicyError) throw egressBlocked(error);
         const code = (error as { code?: string }).code;
         if (code === "denied") throw denied("Du har ikke adgang til vidensgrundlaget.", "retrieval_denied");
         if (code === "invalid_request") throw invalid((error as Error).message, "retrieval_invalid");
@@ -278,8 +313,8 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     }
 
     // 8. Data minimisation of the content: allowlisted parts and limits only.
-    const parts: SentPart[] = [Object.freeze({ kind: "question" as const, category: "user_question" as const, text: question })];
-    if (label) parts.push(Object.freeze({ kind: "context" as const, category: "user_question" as const, text: label }));
+    const parts: SentPart[] = [Object.freeze({ kind: "question" as const, category: "user_question" as const, text: question, content: questionContent })];
+    if (label && labelContent) parts.push(Object.freeze({ kind: "context" as const, category: "user_question" as const, text: label, content: labelContent }));
     let total = parts.reduce((sum, part) => sum + part.text.length, 0);
     for (const item of evidence?.items.slice(0, profile.limits.maxEvidence) ?? []) {
       const part = evidencePart(item, profile.limits.maxCharsPerPart);
@@ -318,6 +353,11 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
         : invokeModel(model as Model<"production">, evidence as never, sent));
       returned = output.raw;
     } catch (error) {
+      if (error instanceof EgressPolicyError) {
+        // Nothing left the platform: no model, no payload in the log.
+        sent = null;
+        throw egressBlocked(error);
+      }
       if ((error as Error).name === "EvidenceGradeError" || (error as Error).name === "EvidencePairingError") {
         throw unavailable("Svaret kan ikke dannes på et udviklingsgrundlag.", "evidence_pairing_refused");
       }
@@ -386,7 +426,7 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
         sent: sentEvidenceIds.has(item.evidenceId),
         cited: cited.includes(item.evidenceId),
       })),
-      payload: sent ? { sent, returned } : null,
+      payload: sent ? { sent: forLog(sent), returned } : null,
       gapQuestion: outcome.kind === "insufficient" ? gapQuestion : null,
     };
     try {

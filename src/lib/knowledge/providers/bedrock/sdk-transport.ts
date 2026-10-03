@@ -1,5 +1,6 @@
 import { BedrockRuntimeClient, InvokeModelCommand, type BedrockRuntimeClientConfig } from "@aws-sdk/client-bedrock-runtime";
 
+import { assertTransmittable } from "../../../egress/policy.ts";
 import { runtimeEnv } from "../../core/grade.ts";
 import { ProviderError } from "../../core/provider.ts";
 
@@ -33,6 +34,9 @@ export function createSdkBedrockTransport(options: SdkTransportOptions): Bedrock
   return Object.freeze({
     region: options.region,
     async invoke(call: BedrockInvocation): Promise<unknown> {
+      // The external-AI data boundary: nothing is transmitted without a genuine authorization of
+      // exactly these texts (8B-I2.5). Checked before the client even exists.
+      assertTransmittable(call.egress, { provider: BEDROCK_PROVIDER, modelId: call.modelId, body: call.body });
       client ??= new BedrockRuntimeClient({ region: options.region, maxAttempts: 1, ...(options.credentials ? { credentials: options.credentials } : {}) });
       let output;
       try {

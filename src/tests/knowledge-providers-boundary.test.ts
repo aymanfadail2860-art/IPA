@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { userText } from "@/lib/egress/classification";
 import { embeddingInput } from "@/lib/knowledge/core/embedding";
 import { retrievalFingerprint, retrievalFingerprintMaterial } from "@/lib/knowledge/core/provider";
 import { DEFAULT_RETRIEVAL_CONFIG, RETRIEVAL_ALGORITHM_VERSION, runRetrieval, type KnowledgeRpcClient, type SearchRow } from "@/lib/knowledge/retrieval-core";
@@ -46,7 +47,7 @@ describe("the data boundary: exactly what is sent to Bedrock", () => {
     const fake = fakeBedrock(bedrockHandler);
     const db: KnowledgeRpcClient = { rpc: async (fn) => ({ data: fn === "search_chunks" ? [ROW] : [], error: null }) };
     const runtime = { bedrock: fake.transport, retryDeps: noSleep };
-    await runRetrieval({ query }, { db, embedding: { embedder: createProductionEmbedder(bedrockRow, runtime), modelId: "m" }, reranker: createProductionReranker(COHERE_RERANK_35_ID, runtime) });
+    await runRetrieval({ query: userText(query, { caseBound: false, redacted: true }) }, { db, embedding: { embedder: createProductionEmbedder(bedrockRow, runtime), modelId: "m" }, reranker: createProductionReranker(COHERE_RERANK_35_ID, runtime) });
     return fake.calls;
   }
 
@@ -157,10 +158,13 @@ describe("the SDK transport (mocked SDK, no network)", () => {
       },
     }));
     const { createSdkBedrockTransport } = await import("@/lib/knowledge/providers/bedrock/sdk-transport");
+    const { authorizeEgress: authorize } = await import("@/lib/egress/policy");
+    const { knowledgeText: knowledge } = await import("@/lib/egress/classification");
     const transport = createSdkBedrockTransport({ region: "eu-central-1", env: { IPA_RUNTIME_ENV: "test" } });
     expect(configs).toHaveLength(0); // No client (and no credentials) until the first call.
     const signal = new AbortController().signal;
-    const parsed = await transport.invoke({ modelId: "eu.cohere.embed-v4:0", body: { texts: ["x"] }, signal });
+    const egress = authorize({ provider: "aws-bedrock", operation: "embed_document", module: "test", parts: [{ role: "document", content: knowledge("x") }] }, { log: () => {} });
+    const parsed = await transport.invoke({ modelId: "eu.cohere.embed-v4:0", egress, body: { texts: ["x"] }, signal });
     expect(parsed).toEqual(embedResponse(["x"]));
     expect(configs).toEqual([{ region: "eu-central-1", maxAttempts: 1 }]);
     expect(sent[0]!.input).toMatchObject({ modelId: "eu.cohere.embed-v4:0", contentType: "application/json", accept: "application/json" });
@@ -182,8 +186,11 @@ describe("the SDK transport (mocked SDK, no network)", () => {
       InvokeModelCommand: class {},
     }));
     const { createSdkBedrockTransport } = await import("@/lib/knowledge/providers/bedrock/sdk-transport");
+    const { authorizeEgress: authorize } = await import("@/lib/egress/policy");
+    const { knowledgeText: knowledge } = await import("@/lib/egress/classification");
     const transport = createSdkBedrockTransport({ region: "eu-central-1", env: { IPA_RUNTIME_ENV: "test" } });
-    const call = () => transport.invoke({ modelId: "m", body: {}, signal: new AbortController().signal });
+    const egress = authorize({ provider: "aws-bedrock", operation: "embed_document", module: "test", parts: [{ role: "document", content: knowledge("x") }] }, { log: () => {} });
+    const call = () => transport.invoke({ modelId: "m", egress, body: {}, signal: new AbortController().signal });
     await expect(call()).rejects.toMatchObject({ kind: "throttled", retryable: true });
     mode = "text";
     await expect(call()).rejects.toMatchObject({ kind: "invalid_response" });

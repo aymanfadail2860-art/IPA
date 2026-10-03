@@ -1,4 +1,5 @@
 import { forceInsufficientAllowed } from "@/dev/knowledge/force-insufficient";
+import { isClassified, knowledgeText, missingProvenance, narrowed, type ClassifiedText } from "@/lib/egress/classification";
 
 import { isDocumentTypeKey } from "./document-types";
 import type { Embedder } from "./core/embedding";
@@ -14,7 +15,7 @@ import {
   type TemporalStatus,
 } from "./core/evidence";
 import { DEFAULT_RRF_K, fuse } from "./core/fusion";
-import type { RankReason, Reranker } from "./core/reranker";
+import { rerankDocumentText, type RankReason, type Reranker } from "./core/reranker";
 import { mergeExcerpt, selectChunks, type SelectableChunk } from "./core/selection";
 import { isUuid } from "./upload-validation";
 
@@ -40,7 +41,12 @@ export const MAX_QUERY_CHARS = 1000;
 export const RETRIEVAL_ALGORITHM_VERSION = "hybrid-rrf-1";
 
 export interface RetrievalRequest {
-  query: string;
+  /**
+   * The query WITH its provenance (8B-I2.5): it travels unchanged to query embedding and
+   * reranking, where an external provider's boundary decides. A plain string has no provenance:
+   * it still works in-process, but can never be sent to an external provider (fail-closed).
+   */
+  query: ClassifiedText | string;
   mode?: RetrievalMode;
   /** YYYY-MM-DD, required for `as_of`. */
   asOf?: string;
@@ -50,6 +56,9 @@ export interface RetrievalRequest {
   documentTypes?: string[];
   topK?: number;
 }
+
+/** A request whose query carries provenance — what application code must pass (8B-I2.5). */
+export type ClassifiedRetrievalRequest = Omit<RetrievalRequest, "query"> & { query: ClassifiedText };
 
 export interface RetrievalConfig {
   /** Candidates per retriever (vector, lexical). */
@@ -142,7 +151,8 @@ export interface SearchRow {
 }
 
 interface NormalizedRequest {
-  query: string;
+  /** The trimmed query, with the provenance of the original. */
+  query: ClassifiedText;
   mode: RetrievalMode;
   asOf: string | null;
   language: string;
@@ -162,9 +172,14 @@ function isDate(value: string): boolean {
 
 /** Validates the request. Only known fields are read — anything else (e.g. a "grade") is ignored. */
 export function normalizeRequest(request: RetrievalRequest, config: RetrievalConfig = DEFAULT_RETRIEVAL_CONFIG): NormalizedRequest {
-  const query = (request.query ?? "").trim();
-  if (query.length === 0) throw new RetrievalError("invalid_request", "Skriv en forespørgsel.");
-  if (query.length > MAX_QUERY_CHARS) throw new RetrievalError("invalid_request", `Forespørgslen må højst være ${MAX_QUERY_CHARS} tegn.`);
+  const raw = request.query;
+  const rawText = isClassified(raw) ? raw.text : typeof raw === "string" ? raw : "";
+  const trimmed = rawText.trim();
+  if (trimmed.length === 0) throw new RetrievalError("invalid_request", "Skriv en forespørgsel.");
+  if (trimmed.length > MAX_QUERY_CHARS) throw new RetrievalError("invalid_request", `Forespørgslen må højst være ${MAX_QUERY_CHARS} tegn.`);
+  // Provenance is kept, never re-derived: a classified query stays classified; anything else is
+  // marked as missing provenance, which the external-AI boundary refuses.
+  const query = isClassified(raw) ? narrowed(raw, trimmed) : missingProvenance(trimmed);
   const mode = request.mode ?? "current";
   if (mode !== "current" && mode !== "as_of") throw new RetrievalError("invalid_request", "Ukendt tilstand.");
   let asOf: string | null = null;
@@ -218,7 +233,7 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
   const date = normalized.asOf ?? danishDate(now);
   const search = (documentIds: string[] | null, candidateK: number) =>
     rpcRows<SearchRow>(deps.db, "search_chunks", {
-      p_query: normalized.query,
+      p_query: normalized.query.text,
       p_query_embedding: queryEmbedding ? `[${queryEmbedding.join(",")}]` : null,
       p_model_id: deps.embedding?.modelId ?? null,
       p_mode: normalized.mode,
@@ -240,8 +255,8 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
     topN: config.rerankN,
     candidates: fused.slice(0, config.rerankN).map((row) => ({
       chunkId: row.chunk_id,
-      text: row.text,
-      headingPath: row.heading_path,
+      // Knowledge Engine content: only rows the database already let this user read.
+      document: knowledgeText(rerankDocumentText(row.heading_path, row.text)),
       retrieval: {
         ...(row.vector_rank !== null ? { vectorRank: row.vector_rank } : {}),
         ...(row.lexical_rank !== null ? { lexicalRank: row.lexical_rank } : {}),
@@ -299,7 +314,7 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
 
 function queryBlock(normalized: NormalizedRequest, now: Date): EvidenceQuery {
   return {
-    text: normalized.query,
+    text: normalized.query.text,
     mode: normalized.mode,
     asOf: normalized.asOf ?? danishDate(now),
     language: normalized.language,
