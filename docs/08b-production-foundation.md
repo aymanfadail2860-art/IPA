@@ -1,7 +1,9 @@
 # 08B — Produktionsgrundlag
 
 **Fase:** 8B — Produktionsgrundlag (underfase af masterfase 8 — AI Copilot, B-019)
-**Status:** 📝 **Specifikation — afventer godkendelse.** Intet er implementeret.
+**Status:** 📝 **Specifikation — principielt godkendt 2026-10-03, afventer endelig godkendelse.**
+Intet er implementeret. Retningen og D-1–D-5, D-7–D-9, D-11–D-14, D-16 og D-17 er principielt
+godkendt. D-6, D-10, D-15 og de nye D-18–D-20 samt K-9 afventer (§19).
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/08` (låst: fase 1–7 og 8A) og `docs/decisions.md` (til og med
 B-019). Udbyderanalysen fra 2026-10-02 står i `docs/roadmap.md` under 8B.
@@ -103,7 +105,7 @@ samme aftale.
 
 | | **Cohere Embed v4** (Bedrock) | **Cohere embed-multilingual-v3** (Bedrock) | **Azure OpenAI text-embedding-3-large** |
 |---|---|---|---|
-| Hvor data behandles | EU-geografi: EU-profilen ruter mellem AWS' EU-regioner (fx Frankfurt, Irland, Paris). Ikke kun Frankfurt | Kun Frankfurt (in-region) | EU-region **[skal verificeres]** (`docs/roadmap.md` 8B) |
+| Hvor data behandles | **EU-geografisk.** Kaldet sendes til Frankfurt (kilderegion), men Bedrock kan rute det til en anden destinationsregion inden for EU-profilen. **Ikke kun Frankfurt** | Kun Frankfurt (in-region) | EU-region (skal verificeres ved valg; ikke valgt) |
 | Databehandleraftale | AWS' GDPR-databehandleraftale | Samme | Microsofts databehandleraftale |
 | Kontekst pr. tekst | Ca. 128.000 tokens | **512 tokens (ca. 2.048 tegn)** | 8.191 tokens |
 | Dimension | 256, 512, 1024 eller 1536 (valgfri) | 1024 | 3072, kan reduceres |
@@ -120,17 +122,24 @@ mod. Danske sammensatte ord giver desuden flere tokens pr. tegn end engelsk.
 
 ### 2.3 Anbefaling
 
-**Cohere Embed v4 på AWS Bedrock med EU-profilen og dimension 1024.** Embed-multilingual-v3 i
-Frankfurt evalueres samtidig som kandidat.
+**Cohere Embed v4 på AWS Bedrock med den EU-geografiske inferensprofil og dimension 1024**
+(D-1, principielt godkendt). Embed-multilingual-v3 i Frankfurt og andre modeller kan evalueres
+mod samme sæt (§4.5).
 
 - Begrundelse: hele chunket kan embeddes uden at ændre chunkingen. Data forlader ikke EU, og
   embedding, reranking og worker kan ligge hos samme leverandør under én aftale.
+- Udbyder og model er data (`embedding_models`) og konfiguration, aldrig en fast værdi i
+  domænemodellen. Et senere skifte er en ny model med eget indeks, evaluering og godkendelse.
 - 1024 dimensioner holder indekset lille og ligger langt under pgvectors grænse på 2000. Et
   skift til 1536 er en ny model med eget indeks, ikke en ændring.
-- **Afvigelse fra den registrerede anbefaling:** roadmappen anbefaler v3, fordi alt er
-  dokumenteret in-region i Frankfurt. Embed v4 behandles i EU, men ikke nødvendigvis i
-  Frankfurt. Hvis kravet er "Frankfurt alene", kan v3 bruges med mindre chunks. Det er
-  beslutning **D-1**.
+- **EU-residency (præcis):**
+  - Behandlingen af embeddings er **EU-geografisk, ikke kun Frankfurt.**
+  - Kilderegionen, som appen og workeren kalder, er eu-central-1 (Frankfurt). Bedrock kan
+    rute et Embed v4-kald videre til en anden destinationsregion inden for EU-profilen.
+  - Dokumentationen må ikke beskrive det som "Frankfurt-only".
+  - Rerank 3.5 kører derimod in-region i Frankfurt.
+  - Det afviger fra roadmappens oprindelige anbefaling (v3, kun Frankfurt), og afvigelsen er
+    godkendt med D-1.
 - Den endelige model vælges af evalueringen (§4), ikke af denne tabel. Det er fremgangsmåden fra
   roadmappen: vælg én, prøv den mod evalueringssættet, og skift, hvis den ikke rammer.
 
@@ -286,78 +295,126 @@ K er konfigurationens `topK` (i dag 8). Recall@1 og Recall@3 rapporteres desuden
   antal og et 95 %-konfidensinterval (Wilson) for hver andel. Et kvalitetsgate afgøres på
   punktestimatet, men rapporten markerer, når intervallet krydser grænsen.
 
-### 4.4 Gates
+### 4.4 Gates (D-6)
 
-**Hårde gates — nul tolerance.** Fejler én, kan konfigurationen ikke godkendes. Det er
-korrekthed og sikkerhed, ikke statistik:
+**Princip.** Hårde gates beskytter sikkerhed og isolation og har nul tolerance. Kvalitetsgates
+måler, hvor godt retrieval rammer, og har statistiske tærskler. **Et godt gennemsnit kan aldrig
+kompensere for et sikkerhedsbrud.** Fejler én hård gate, er kørslen dumpet, uanset alle andre tal.
 
-| # | Gate | Krav |
-|---|------|------|
-| H1 | Adgangslæk | 0 |
-| H2 | Filterbrud (produkt og dokumenttype) | 0 |
-| H3 | Upublicerede, deaktiverede eller tilbagetrukne versioner i resultatet | 0 |
-| H4 | Temporal korrekthed (forkert version eller manglende historisk markering) | 100 % |
-| H5 | Konfliktdækning, hvor brugeren har adgang til begge parter | 100 % |
-| H6 | Ingen udviklingsimplementering i kørslen (embedder, reranker, `devOverride`) | Opfyldt |
-| H7 | Evalueringssættet og korpusset er uændrede under kørslen (checksums) | Opfyldt |
+#### Hårde gates (safety/security) — nul tolerance
 
-**Kvalitetsgates — foreløbige tal.** De kalibreres på den første baseline-kørsel og godkendes af
-dig (beslutning **D-6**):
+| # | Metric | Tærskel | Hvorfor | Ved fejl ved godkendelse | Ved fejl i regression |
+|---|--------|---------|---------|--------------------------|-----------------------|
+| **H1** | **Uautoriseret retrieval:** antal evidenselementer fra dokumenter, evalueringsbrugeren ikke har læseadgang til (inkl. `read_historical` ved `as_of`) | **0** | Én læk er et brud på `docs/07` §4 og på KRAV-ROL-003. Det kan ikke opvejes af kvalitet | Konfigurationen kan ikke godkendes | Konfigurationen suspenderes automatisk. Al evidens bliver `development` (D-8) |
+| **H2** | **Metadatalæk:** forekomster i det serialiserede EvidenceSet og i retrieval-funktionens rå resultat af id, titel, dokumenttype, version, kilde, sider, afsnit, overskrifter, uddrag, konflikt-id, regel, beskrivelse eller note fra et utilgængeligt dokument. Den neutrale konfliktindikator er den eneste tilladte spor (B-20) | **0** | Eksistensen af et dokument eller en konflikt er i sig selv information (`docs/07` §14, §15 "Konfliktlæk") | Som H1 | Som H1 |
+| **H3** | **Gyldighedsbrud:** i `current` en ikke-gældende, fremtidig, upubliceret, deaktiveret eller tilbagetrukket version; i `as_of` en anden version end den gyldige på datoen; en historisk version uden historisk markering; to versioner af samme dokument i ét resultat | **0** | Et historisk svar uden markering er et forkert svar (`docs/03` §12). Versioner blandes aldrig (`docs/07` §8.2) | Som H1 | Som H1 |
+| **H4** | **Filterbrud:** elementer uden for de anmodede produkter, dokumenter eller dokumenttyper | **0** | Filtre må kun snævre ind (`docs/07` §8.2). Et brud er en logikfejl, der også kan blive en adgangsfejl | Som H1 | Som H1 |
+| **H5** | **Skjult konflikt:** et returneret element i en åben konflikt uden konfliktmarkering, eller hvor brugeren har adgang til begge parter, men kun får den ene | **0** | En bruger, der kun ser den ene side af en konflikt, handler på et ufuldstændigt grundlag (`docs/03` §16, B-20) | Som H1 | Som H1 |
+| **H6** | **Udviklingsevidens:** kørslen bruger en udviklingsimplementering (test-embedder, `none`), `devOverride`, et fingeraftryk, der ikke matcher den konfiguration, der evalueres, eller elementer fra en chunker-version uden for konfigurationen | **0** | Rapporten skal dokumentere præcis den konfiguration, der godkendes, og intet andet | Kørslen er ugyldig og kan ikke registreres | Konfigurationen suspenderes automatisk |
+| **H7** | **Isolation og integritet:** kørslen er ikke foretaget i evalueringsmiljøet, bruger andre identiteter end evalueringsbrugerne, eller sættets eller korpussets checksums ændrer sig under kørslen | **0** | Evaluering må aldrig røre produktionsdata, og et resultat skal kunne reproduceres | Kørslen er ugyldig og kan ikke registreres | Kørslen er ugyldig (alarm) |
 
-| # | Gate | Foreslået minimum |
-|---|------|-------------------|
-| Q1 | Source Recall@8 | ≥ 0,95 |
-| Q2 | Passage Recall@8 | ≥ 0,85 |
-| Q3 | MRR@8 (passage) | ≥ 0,70 |
-| Q4 | Korrekt afvisning (ubesvarbare) | ≥ 0,80 |
-| Q5 | Falsk afvisning (besvarbare) | ≤ 0,10 |
-| Q6 | Distraktor-indtrængen | ≤ 0,10 |
-| Q7 | Rerankerens forbedring: Passage Recall@8 og MRR må ikke være lavere end uden reranker | Opfyldt |
+#### Kvalitetsgates — statistiske tærskler
 
-**Tærsklen (`minScore`)** vælges på evalueringssættets dev-del (§5.6). Den er en del af
-konfigurationen og gemmes i fingeraftrykket. Den kontrolleres på holdout-delen, når sættet er
-stort nok.
+Tallene er foreløbige. De bekræftes efter baseline-kørslen og kan kun ændres ved en ny,
+registreret beslutning.
+
+| # | Metric | Tærskel | Hvorfor | Ved fejl ved godkendelse | Ved fejl i regression |
+|---|--------|---------|---------|--------------------------|-----------------------|
+| **Q1** | **Source Recall@8** (besvarbare spørgsmål) | **≥ 0,95** | Det rigtige dokument skal næsten altid findes. Hvad retrieval ikke finder, kan ingen model bruge. Ved ca. 35 besvarbare spørgsmål tillader det én fejl | Kan ikke godkendes | Alarm og faglig/teknisk vurdering (D-8) |
+| **Q2** | **Passage Recall@8** (grad 3-passagen dækket) | **≥ 0,85** | Det rigtige dokument er ikke nok. Undtagelsen skal med. Lavere end Q1, fordi chunk-grænser kan splitte en passage | Kan ikke godkendes | Alarm og vurdering |
+| **Q3** | **MRR@8** (første grad 3-passage) | **≥ 0,70** | Det bedste skal i gennemsnit stå på plads 1–2. Det er det, modellen i 8C læser først | Kan ikke godkendes | Alarm og vurdering |
+| **Q4** | **Korrekt afvisning** (ubesvarbare og adgangsspørgsmål giver tomt resultat). Komplementet er falsk-positiv retrieval | **≥ 0,80** | "Der findes ikke tilstrækkelig dokumentation" skal faktisk komme, når grundlaget mangler (KRAV-AI-004, B-008). Ved ca. 6 ubesvarbare tillader det én fejl | Kan ikke godkendes | Alarm og vurdering |
+| **Q5** | **Falsk afvisning** (besvarbare giver tomt resultat) | **≤ 0,10** | En for høj tærskel gør systemet ubrugeligt. Q4 og Q5 balancerer `minScore` | Kan ikke godkendes | Alarm og vurdering |
+| **Q6** | **Distraktor-indtrængen:** andel af returnerede elementer over tærsklen i distraktor-spørgsmål, der stammer fra distraktor-dokumentet | **≤ 0,10** | Et dokument, der ligner, men gælder et andet produkt eller emne, er den mest sandsynlige kilde til et forkert, velbegrundet udseende svar | Kan ikke godkendes | Alarm og vurdering |
+| **Q7** | **Rerankerens bidrag:** Passage Recall@8 og MRR@8 med reranker sammenlignet med den samme kørsel uden reranker | **Ikke lavere** | Reranking er et obligatorisk trin (`docs/03` §7). Det skal betale for sin latency og pris | Kan ikke godkendes | Alarm og vurdering |
+
+nDCG@8 og Recall@1/@3 rapporteres, men gates ikke (D-5).
+
+#### Små stikprøver uden falsk sikkerhed (pilot-evaluering)
+
+Det første sæt på 30–50 spørgsmål er en **pilot-evaluering**. Det bruges sådan:
+
+1. **Hårde gates kræver ingen statistik.** Ét brud er ét brud. De gælder fuldt ud fra første
+   spørgsmål, og de er derfor også testet deterministisk i pgTAP og integrationstests.
+2. **Minimum pr. type.** En kørsel er kun gyldig med mindst 20 besvarbare (`direct` og
+   `multi_chunk`), 5 ubesvarbare, 3 historiske, 2 konflikt-, 3 distraktor- og 3 adgangs- eller
+   filterspørgsmål. Ellers er der ikke noget at måle på.
+3. **Hver fejl forklares.** Ethvert spørgsmål, der fejler et kvalitetsgate, får en skriftlig
+   årsagsnote i rapporten, før konfigurationen kan godkendes. Fejlene læses én for én. De
+   gennemsnitliggøres ikke væk.
+4. **Usikkerheden vises.** Rapporten viser Wilson 95 %-intervallet for hver andel. Gatet
+   afgøres på punktestimatet, men et nedre interval under tærsklen markeres som "usikker" i
+   rapporten.
+5. **Godkendelsen er en pilot-godkendelse.** Under 100 spørgsmål (`tier: pilot`) står det i
+   konfigurationen og i Admin. Den gælder det korpus, der blev evalueret (offentlige
+   betingelser). Når korpusset udvides med nye dokumenttyper (fx acceptregler), kræves en ny
+   kørsel med spørgsmål til dem.
+6. **Ingen tilpasning til sættet.** Tærsklen kalibreres efter en fast procedure, der skrives i
+   evalueringens README før baseline. Fra ca. 100 spørgsmål bruges holdout (§5.6).
+7. **Sættet skal vokse.** Målet er mindst 100 spørgsmål med holdout, før masterfase 18
+   (Pilotversion), og nye spørgsmål fra hvert videnshul og hver fejlrapport.
 
 ### 4.5 Infrastruktur (udledt)
 
-- **Kørsel:** et Node-script i repoet (`npm run eval`) kalder den rigtige `runRetrieval` med de
-  rigtige implementeringer fra registret, som hver evalueringsbruger. Der er ingen særlig
-  evalueringskode i retrieval.
-- **Miljø:** et separat evalueringsmiljø (eget Supabase-projekt med samme migrationer, de
-  rigtige udbydere og evalueringskorpusset). Evalueringsdokumenter må aldrig blandes ind i
+- **Kørsel:** et Node-script i repoet (`npm run eval:retrieval`). Det kalder den rigtige
+  `runRetrieval` med implementeringerne fra registret, som hver evalueringsbruger. Der findes
+  ingen særlig evalueringskode i retrieval.
+- **Miljø:** et separat evalueringsmiljø, dvs. et eget Supabase-projekt med samme migrationer,
+  de rigtige udbydere og evalueringskorpusset. Evalueringsdokumenter blandes aldrig ind i
   produktionsviden. Det løser også testisolationen fra `docs/07` §20.5.
-- **Resultater:** hver kørsel skrives til `knowledge.evaluation_runs` i evalueringsmiljøet og som
-  JSON-rapport med checksum. Rapporten indeholder metrics, gates, CI, konfigurationens
-  fingeraftryk, sættets version og korpussets checksum.
-- **Godkendelse i produktion (§10.3):** konfigurationen registreres i produktionsdatabasen med
-  rapportens checksum og metrics. Databasen kontrollerer, at alle gates i rapporten er bestået,
-  før den kan godkendes. Det er beslutning **D-7**.
-- **Regression:** evalueringen køres igen ved hver ændring af model, reranker, chunker,
-  retrieval-algoritme eller parametre, og planmæssigt hver uge. En kørsel, der falder under et
-  gate, giver en alarm (§14). Hvad der derefter sker med den godkendte konfiguration, er
-  beslutning **D-8**.
+- **Flere kandidater:** én kørsel kan evaluere flere konfigurationer mod samme sæt og korpus,
+  fx Embed v4 med 1024 og 1536 dimensioner, v3 og andre rerankere. Hver kandidatmodel har sin
+  egen række i `embedding_models` og sit eget indeks i evalueringsmiljøet. Rapporterne
+  sammenlignes side om side. Udbyder og model er data (`embedding_models`, konfigurationen) og
+  aldrig en fast værdi i domænemodellen. Registret oversætter et udbyder-id til en
+  implementering.
+- **Rapport:** hver kørsel giver en JSON-rapport med checksum. Den indeholder metrics, gates,
+  konfidensintervaller, minimum pr. type, årsagsnoter, konfigurationens fingeraftryk, sættets
+  version og korpussets checksum.
+- **Registrering i produktion — adskilte identiteter (D-7, D-18):** rapporten skrives til
+  produktionsdatabasen af en særskilt identitet, `evaluation_publisher`. Det er en LOGIN-rolle,
+  der kun bruges af evalueringskørslen i CI, og som kun må kalde
+  `knowledge.record_evaluation_run`. Funktionen genberegner gate-resultaterne fra rapportens
+  metrics og afviser en rapport, der ikke stemmer. **En administrator kan ikke indsætte eller
+  rette en evalueringskørsel.** En administrator kan kun godkende en konfiguration, der
+  henviser til en kørsel, som publisheren har registreret, og som har bestået. En forfalsket
+  rapport kræver derfor, at publisherens credential kompromitteres. Det er ikke nok at være
+  administrator.
+- **Regression:** evalueringen køres ved hver ændring af model, reranker, chunker,
+  retrieval-algoritme eller parametre, og planmæssigt hver uge. Udfaldet følger tabellerne i
+  §4.4.
 
 ---
 
 ## 5. Evalueringssættet
 
-### 5.1 Placering og vækst
+### 5.1 Placering og struktur (D-16)
 
-- **Spørgsmål og facit ligger i repoet** som tekst under `evaluation/sets/<sæt-id>/`. De kan
-  gennemgås i review og versioneres i git. **(udledt)**
-- **Dokumenterne ligger ikke i repoet.** Manifestet peger på dem med checksum, og de indlæses i
-  evalueringsmiljøet. Offentlige betingelser kan være ophavsretligt beskyttede, og store
-  PDF'er hører ikke i git.
-- **Formatet er JSON Lines:** ét spørgsmål pr. linje, så tusindvis af spørgsmål kan diffes,
-  flettes og filtreres uden en stor fil.
+Evalueringssættet ligger versionsstyret i repoet:
 
 ```
-evaluation/sets/terms-v1/
-  manifest.json        sæt-id, version, skemaversion, dokumenter (nøgle, titel, version, gyldighed, checksum),
-                       evalueringsbrugere og deres tildelinger
-  questions.jsonl      ét spørgsmål pr. linje
-  README.md            hvordan sættet er lavet, og hvem der vedligeholder det
+evals/retrieval/
+  README.md                       metode: metrics, gates, kalibreringsprocedure, hvordan sættet laves
+  schema/case.schema.json         JSON Schema for ét spørgsmål (skema v1, §5.2)
+  schema/manifest.schema.json     JSON Schema for et manifest
+  manifests/terms-v1.json         sæt-id, version, dokumenter (nøgle, titel, version, gyldighed,
+                                  kilde-URL, checksum, licens/tilladelse), evalueringsbrugere
+                                  og tildelinger
+  cases/terms-v1.jsonl            ét spørgsmål pr. linje
+  fixtures/                       kun materiale, vi må have i repoet: fiktive tillæg og versioner
+                                  til konflikt-, historik- og adgangsspørgsmål
 ```
+
+- **JSON Lines:** ét spørgsmål pr. linje, så tusindvis af spørgsmål kan diffes, flettes og
+  filtreres.
+- **Offentlige betingelser** ligger kun i repoet, hvis licensen tillader det. Ellers peger
+  manifestet på kilde-URL og checksum, og dokumentet indlæses kun i evalueringsmiljøet.
+- **Ingen fortrolige kundedata.** Tilladt er offentlige forsikringsbetingelser,
+  syntetiske/fiktive tilfælde og godkendt testmateriale. En CI-kontrol kører 8A's
+  redaction-detektorer (CPR, CVR med kontekst, e-mail, telefon og konto) over `cases/` og
+  `fixtures/` og fejler ved fund. Kun syntetiske værdier i en eksplicit tilladelsesliste
+  undtages.
+- Skemaerne valideres i en enhedstest, så et ugyldigt spørgsmål ikke kan committes.
 
 ### 5.2 Spørgsmål (skema v1)
 
@@ -445,37 +502,85 @@ der ikke har adgang.
 Development-løsningen fra fase 7, hvor workeren bruger service-role-nøglen, bliver **ikke**
 produktionsløsningen (`docs/07` §14.1, B-16).
 
-### 6.1 Anbefalet arkitektur
+### 6.1 Anbefalet arkitektur (D-9, D-10)
 
 ```
-                       AWS eu-central-1 (Frankfurt)
-┌───────────────────────────────────────────────────────────┐
-│ ECS Fargate-task (1 stk., kan skaleres)                   │
-│  ┌──────────────────────┐   ┌───────────────────────────┐ │
-│  │ ingestion-worker     │──▶│ clamd (ClamAV, sidecar)   │ │
-│  │ Node 22, ikke-root   │   │ signaturer opdateres      │ │
-│  └──────┬───────┬───────┘   └───────────────────────────┘ │
-│         │       │ IAM-taskrolle (ingen nøgler)            │
-│         │       └────────────▶ Bedrock (embeddings)       │
-└─────────┼─────────────────────────────────────────────────┘
-          │ HTTPS: PostgREST + Storage med rollen ingestion_worker
-          ▼
-   Supabase (EU): knowledge.ingestion_jobs · worker_*-funktioner · Storage
+                           AWS eu-central-1 (Frankfurt)
+┌──────────────────────────────────────────────────────────────────┐
+│ ECS Fargate-task (privat subnet, udgående via NAT med fast IP)  │
+│  ┌──────────────────────┐   ┌───────────────────────────┐        │
+│  │ ingestion-worker     │──▶│ clamd (ClamAV, sidecar)   │        │
+│  │ Node 22, ikke-root   │   └───────────────────────────┘        │
+│  └──┬────────┬──────────┘                                        │
+│     │        │ IAM-taskrolle (ingen nøgler) ──▶ Bedrock          │
+│     │        └── Secrets Manager: DB-password for worker-rollen  │
+└─────┼────────────────────────────────────────────────────────────┘
+      │ (1) Postgres/TLS via Supavisor, bruger ingestion_worker_login.<projekt>
+      │     må kun: EXECUTE på knowledge.worker_*            ┌──────────────────────┐
+      │ (2) HTTPS med engangsbillet ────────────────────────▶│ Edge Function        │
+      ▼                                                      │ worker-storage       │
+ Supabase (EU): ingestion_jobs · worker_*-funktioner          │ (service-rolle bliver│
+               · Storage (originaler, karantæne)  ◀──────────│  inde i Supabase)    │
+                                                             └──────────────────────┘
 ```
 
 | Emne | Anbefaling | Begrundelse |
 |------|------------|-------------|
-| **Kørselsmiljø** | En container på **AWS ECS Fargate i eu-central-1**, langtlevende poll-løkke som i dag | Samme region og aftale som Bedrock. IAM-rollen giver Bedrock-adgang uden statiske nøgler. Ingen tidsgrænse pr. job |
-| Fravalgt | Supabase Edge Functions (tids- og hukommelsesgrænser passer ikke til PDF-parsing), Vercel (`docs/03` §1 pkt. 3: ingestion må ikke afhænge af en requests levetid), en anden container-host i EU (muligt, men kræver statiske AWS-nøgler til Bedrock) | |
+| **Kørselsmiljø** | En container på **AWS ECS Fargate i eu-central-1** med en langtlevende poll-løkke som i dag og ClamAV som sidecar (D-9) | Samme region og aftale som Bedrock. IAM-rollen giver adgang til Bedrock uden statiske nøgler. Ingen tidsgrænse pr. job |
 | **Kø** | Den eksisterende Postgres-kø (`knowledge.ingestion_jobs`, `FOR UPDATE SKIP LOCKED`, lease og heartbeat). Ingen ny kø-tjeneste | Virker og er testet. Volumen er lav |
-| **Databaseadgang** | En dedikeret Postgres-rolle `ingestion_worker`, der kun må køre `worker_*`-funktionerne. Den bruges gennem PostgREST og Storage med et JWT, der bærer rollen. Service-role-nøglen forlader ikke Supabase | Mindste rettigheder. Rollen kan spærres øjeblikkeligt (`revoke ingestion_worker from authenticator`) |
-| **Storage** | Læsning kun i `knowledge-originals` og skrivning kun i en ny `knowledge-quarantine` (§7) via politikker for rollen | |
-| **Hemmeligheder** | JWT'et i AWS Secrets Manager med udløb efter 90 dage og en rotationsprocedure. Ingen hemmeligheder i image eller repo | |
+| **Databaseidentitet (D-10)** | Se §6.1.1 | |
 
-**[AFKLARES] D-10:** Det skal verificeres, at Supabase-projektet kan udstede et JWT med en
-egen rolle under de aktuelle signeringsnøgler. Ellers er alternativet en direkte
-Postgres-forbindelse med en LOGIN-rolle. Det kræver en ny dependency (en Postgres-klient) og en
-anden vej til originalfilerne.
+#### 6.1.1 Workerens databaseidentitet (D-10)
+
+**Muligheder:**
+
+| | Mulighed | Mindste rettigheder | Blast radius ved kompromittering | Rotation | Vurdering |
+|---|---|---|---|---|---|
+| A | Service-rolle i workeren (fase 7) | Nej | Hele databasen og al Storage | Kun ved projektrotation | **Udelukket** af kravet |
+| B | JWT med egen rolle via PostgREST og Storage | Rollen selv, ja | **Den, der kan signere, kan også udstede `service_role`.** Signerer workeren eller en KMS-nøgle, den har adgang til, er blast radius hele projektet | Nøglerotation påvirker alle | **Fravalgt.** Supabase har desuden åbne fejlrapporter om egne roller med egne nøgler (#38611, #38911) |
+| C | Hele workeren bag en Edge Function, der bruger service-rollen | Kun de operationer, funktionen udstiller | Begrænset til funktionens operationer | Funktionens nøgle kan roteres | Mulig, men store payloads (chunks og vektorer) gennem en funktion med tids- og størrelsesgrænser. Mere kode i et miljø med færre tests |
+| **D** | **Direkte Postgres-forbindelse med en LOGIN-rolle via Supavisor + en lille Edge Function kun til filer** | **Databasen håndhæver det: kun `EXECUTE` på `worker_*`** | Kun ingestion-operationer på jobs, der kan tages. Ingen tabeladgang, ingen publicering, ingen filer uden billet | Password i Secrets Manager. Rotation med `alter role … password`. Øjeblikkelig spærring med `alter role … nologin` | **Anbefales** |
+
+**Anbefaling: D.**
+
+1. **Roller:**
+   - `ingestion_worker` (NOLOGIN, gruppe) ejer ingen objekter og har kun `EXECUTE` på
+     funktionerne `knowledge.worker_*` og `knowledge.worker_issue_storage_ticket`.
+   - Ingen tabelrettigheder. Ingen medlemskab i `authenticated`, `service_role` eller
+     `postgres`.
+   - `ingestion_worker_login` (LOGIN, medlem af `ingestion_worker`)
+     har password, `connection limit` 5 og `statement_timeout`.
+   - `worker_*`-funktionerne (security definer) kontrollerer selv lease og versionsstatus og kan
+     aldrig publicere (fase 7). 8B tilføjer, at de kun kan kaldes af medlemmer af
+     `ingestion_worker` (`pg_has_role`), så service-rollens kald fra fase 7 kun virker lokalt.
+2. **Forbindelse:** gennem Supavisor (`ingestion_worker_login.<projekt-ref>`) med TLS. Supabases
+   netværksbegrænsning tillader kun NAT-gatewayens faste IP. Det begrænser blast radius, hvis
+   passwordet lækker.
+3. **Filer (originaler og karantæne):** workeren kalder `knowledge.worker_issue_storage_ticket(job,
+   formål)`. Funktionen kontrollerer, at workeren har leasen, og at formålet passer til
+   versionens tilstand. Den udsteder en engangsbillet: tilfældig værdi, gemt som hash, bundet til
+   job, version, sti og formål, og gyldig i 60 sekunder.
+   - Edge Function `worker-storage` indløser billetten gennem en definer-funktion og bruger
+     derefter service-rollen inde i Supabase til præcis én operation: download af originalen
+     eller flytning til karantæne.
+   - Service-rollen forlader aldrig Supabase.
+   - En kompromitteret worker kan kun hente originaler til versioner, der står i kø eller er
+     under behandling.
+4. **Hemmeligheder:** DB-passwordet ligger i AWS Secrets Manager og læses af taskrollen. Det
+   roteres hver 90. dag efter en runbook: nyt password sættes i Supabase og i Secrets Manager,
+   og tasken genstartes. Automatisk rotation kan komme senere, men det kræver en
+   administrativ databaseidentitet i AWS og fravælges derfor nu. Ingen hemmeligheder i image,
+   repo eller miljøvariabler i task-definitionen.
+5. **Ny dependency (D-19):** en Postgres-klient til workeren. Anbefaling: **`postgres`**
+   (postgres.js).
+   - Ingen transitive dependencies.
+   - TLS.
+   - Kan slå prepared statements fra (`prepare: false`), som Supavisors transaktionstilstand
+     kræver.
+   - Kun i `workers/`, aldrig i `src/` (guardrail-test). Alternativet `pg` har flere moduler.
+6. **Lokalt og i test** bruger workeren fortsat service-rollen (fase 7, development-only), men
+   kun med `IPA_RUNTIME_ENV=local/test`. Et production-image nægter at starte med en
+   service-rolle-nøgle i miljøet.
 
 ### 6.2 Job-model og statusmaskine
 
@@ -593,67 +698,118 @@ Regler:
 
 ---
 
-## 8. Redaction og kundedata
+## 8. Redaction og kundedata (D-13)
 
 ### 8.1 Udgangspunkt
 
-Roadmappen kræver, at kundedata ikke kan godkendes til modelbrug, før enten (A) redaction kan
-finde navne i fri tekst målt mod et testsæt, eller (B) gatewayen teknisk forhindrer, at fri
-tekst fra kundesager sendes til modellen. **8B åbner ikke for kundedata.** 8B sørger for, at det
-ikke kan ske ved en fejl.
+**8B åbner ikke for kundedata til ekstern AI.** Roadmappen kræver, at kundedata ikke kan
+godkendes til modelbrug, før enten:
 
-### 8.2 Hvad 8B gør
+- (A) redaction kan finde navne i fri tekst målt mod et testsæt, eller
+- (B) gatewayen teknisk forhindrer, at fri tekst fra kundesager sendes til modellen.
 
-1. **Hård spærre i databasen.** Matricen får samme type constraint som `audit_access`:
-   `customer_identifiable` kan kun være `deny`. I dag er det et standardvalg, der kan ændres
-   med en funktion. Med constraint kræver det en migration, altså en kodeændring med review og
-   en eksplicit beslutning. Det er beslutning **D-13**. Det strammer 8A uden at ændre
-   arkitekturen. Se §18 K-6.
-2. **Profilerne.** Ingen profil må have `customer_identifiable` i sine kategorier. Det er allerede
-   en test (8A). Testen udvides til at fejle, hvis kategorien tilføjes i kode.
-3. **Spærren dokumenteres der, hvor den ophæves:** i migrationen og i `docs/08` §5.2. Den, der
-   ophæver den, skal pege på dokumentationen for forudsætning A eller B.
-4. **Forberedelse af forudsætning A uden at bygge den:** formatet for et testsæt til
-   navnegenkendelse (fiktive tekster med markerede navne og adresser i JSONL, som §5) og de
-   metrics, en fremtidig løsning skal måles på (recall på personnavne og virksomhedsnavne).
-   Ingen NER-model og ingen ny redaction i 8B.
+Indtil en senere eksplicit beslutning og en valideret redaction findes, håndhæver platformen
+fire egenskaber:
 
-### 8.3 Tests og gates
+1. Fri tekst fra kundesager sendes ikke til en ekstern model.
+2. Bruger- eller administratorkonfiguration alene kan ikke omgå spærren.
+3. Et fejlende eller manglende redaction-trin fører aldrig til et modelkald.
+4. Tests beviser egenskaberne.
+
+**Begreber:**
+- **Ekstern model:** enhver model, hvis grad ikke er præcis `development`. Det svarer til
+  parringsreglen (B-012, fail-closed). Stub-modellen kører kun lokalt og i test og er ikke
+  ekstern.
+- **Fri tekst fra en kundesag:** alt brugerinput og al kontekst i et kald med kundesags-reference
+  (`caseId`), og ethvert felt fra en kundesag.
+
+### 8.2 Hvor guardrailen håndhæves — fem uafhængige lag
+
+Spærren hviler ikke på én kontrol i brugerfladen eller én boolean, der kan ændres. Hvert lag
+alene stopper kaldet:
+
+| Lag | Hvor | Hvad | Kan ændres af |
+|-----|------|------|---------------|
+| **L1 — Proveniens** | Gatewayens konstruktører af `SentPart` (8A) | Hver del bærer uforanderlig proveniens: `caseBound` (sat, når kaldet har en kundesags-reference) og `redacted` (sat kun af redactoren, når den har kørt uden fejl). Delene er frosne | Kun kode |
+| **L2 — Invariant i `invokeModel`** | Det eneste sted, der kalder en model (B-012) | Er modellen ekstern, afvises kaldet, hvis (a) en del er `caseBound`, eller (b) en fritekstdel (`question`, `context`) mangler `redacted`. Modellen kaldes ikke. Der er ingen parameter, konfiguration eller miljøvariabel, der slår kontrollen fra | Kun kode (med review og mutationstest) |
+| **L3 — Klassificering** | Gatewayens pipeline | Er kaldet sagsbundet, klassificeres brugerens tekst og kontekst som `customer_identifiable`, ikke `user_question`. Matricen afviser kategorien (L4) | Kun kode |
+| **L4 — Matricen** | Databasen: constraint på `ai.data_category_policy` | `customer_identifiable` kan kun være `deny`, som `audit_access`. Hverken funktionen, administratoren eller service-rollen kan ændre det. Kun en migration kan | Kun migration (review og eksplicit beslutning) |
+| **L5 — Profilerne** | Repoet | Ingen profil har `customer_identifiable` i sine kategorier. Enhedstest | Kun kode |
+
+**Fejl i redaction:** kaster redactoren en fejl, afbrydes kaldet før retrieval og model, og
+udfaldet er `unavailable`. Det er allerede 8A-adfærd. Mangler redaction-markeringen på en
+fritekstdel, afviser L2 kaldet til en ekstern model. Et manglende eller fejlende trin kan
+derfor ikke føre til et modelkald.
+
+**Udfald for brugeren:** `blocked_policy` med "Oplysninger fra en kundesag sendes ikke til
+AI-modellen". Det er en klar tilstand og ikke en systemfejl.
+
+**Konsekvens:** med en ekstern model (8C) kan Copilot ikke bruges med kundesags-kontekst, før
+spærren ophæves ved en senere beslutning. Uden sags-kontekst fungerer Copilot. Med
+stub-modellen lokalt og i test virker sagsbundne kald som i 8A, så mekanikken fortsat kan
+testes.
+
+### 8.3 Ophævelse kræver en dokumenteret beslutning
+
+Spærren kan kun ophæves ved en migration (L4) og en kodeændring (L2 og L3), begge med
+henvisning til en beslutning i `docs/decisions.md`, der dokumenterer forudsætning A (målt
+navnegenkendelse) eller B (fri tekst fra sager sendes aldrig). 8B forbereder A uden at bygge
+den: formatet for et testsæt til navnegenkendelse (fiktive tekster med markerede navne og
+adresser, JSONL som §5) og de metrics, en løsning skal måles på (recall på person- og
+virksomhedsnavne). Ingen NER-model og ingen ny redaction i 8B.
+
+### 8.4 Tests
 
 | Test | Forventet |
 |------|-----------|
-| `set_data_category_rule(..., 'customer_identifiable', 'allow')` | Afvist af constraint, også for administrator og service-rolle |
-| Direkte `update`/`insert` af matricen med `allow`/`allow_redacted` for kundedata | Afvist |
-| En profil med `customer_identifiable` (mutationstest) | Enhedstesten fejler |
-| Mutationstest: constraint fjernet | pgTAP-testen fejler |
+| Ekstern model (test-double med grad `production`) og sagsbundet kald | `blocked_policy`. Modellen kaldes ikke |
+| Ekstern model og fritekstdel uden `redacted` (konstrueret direkte) | `invokeModel` kaster. Modellen kaldes ikke |
+| Redactoren kaster | `unavailable`. Hverken retrieval eller model kaldes |
+| Ukendt grad (fx `"Production"`, `""`) behandles som ekstern | Som første række |
+| `set_data_category_rule(…, 'customer_identifiable', 'allow')` som administrator | Afvist af constraint |
+| Direkte `insert`/`update` med `allow`/`allow_redacted`, også som service-rolle | Afvist af constraint |
+| En profil med `customer_identifiable` | Enhedstesten fejler |
+| Stub-model og sagsbundet kald | Virker som i 8A (regressionstest) |
+| **Mutationer:** L2(a) fjernet, L2(b) fjernet, L3 fjernet, constraint fjernet, fail-open ved ukendt grad | Hver fanges af mindst én test |
 
 ---
 
-## 9. ProductionEvidenceSet — betingelser
+## 9. ProductionEvidenceSet — endelig logik
 
-Et EvidenceSet får `grade = production`, **kun hvis alle** betingelser er opfyldt. Mangler én,
-er graden `development` (fail-closed):
+**`grade = production` er aldrig et manuelt flag.** Graden afledes ved hvert retrieval-kald i
+`issueEvidenceSet`. Den kan ikke sættes i requesten, i brugerfladen, i databasen eller af en
+administrator. Der findes ingen kolonne, indstilling eller UI-kontakt for den. En
+administrator kan kun godkende en konfiguration, der har bestået en registreret evaluering.
+Selv da afgøres graden for hvert enkelt sæt af betingelserne nedenfor.
 
-| # | Betingelse | Hvordan det kontrolleres |
-|---|------------|--------------------------|
-| P1 | Forespørgslen er embedded med en production-embedder, og modellen er den aktive | Registret og `retrieval.embeddingModel.grade` (fase 7) |
-| P2 | Rerankeren er production og ikke `none` | Registret og `requireProductionEvidence` (fase 7) |
-| P3 | Der findes en **aktiv, godkendt retrieval-konfiguration** (§10), og runtime-fingeraftrykket matcher den præcist | Ny kontrol i `issueEvidenceSet` |
-| P4 | Alle elementer stammer fra publicerede, ikke-tilbagetrukne versioner | Retrieval-funktionen (fase 7). Kontrolleres igen i evidensen |
-| P5 | Adgangsfiltret er anvendt som den kaldende bruger | `security invoker`-søgning (fase 7). Ingen service-rolle i retrieval |
-| P6 | Hvert elements `chunker_version` er dækket af konfigurationens evaluering | Ny kontrol. Et element fra en uevalueret chunker gør hele sættet `development` |
-| P7 | Sættet er ikke fremtvunget af et udviklingsværktøj | `devOverride` (fase 7) |
-| P8 | Sættet er udstedt af retrieval-laget og frosset | WeakSet og frysning (fase 7) |
-| P9 | Sættet bærer konfigurationens id og fingeraftryk (§11) | Feltet sættes af retrieval-laget |
+```
+grade = production  ⇔  P1 ∧ P2 ∧ P3 ∧ P4 ∧ P5 ∧ P6 ∧ P7 ∧ P8 ∧ P9
+ellers               development   (fail-closed: en betingelse, der ikke kan afgøres, er falsk)
+```
 
-**Granularitet: pr. retrieval-konfiguration**, ikke globalt, ikke pr. model og ikke pr. indeks.
+| # | Betingelse | Hvordan det afgøres |
+|---|------------|---------------------|
+| **P1** | Forespørgslen er embedded med en production-embedder, hvis model er den aktive model | Registret (implementeringens grad) og `embedding_models.status = active` |
+| **P2** | Rerankeren er production og ikke `none` | Registret og `requireProductionEvidence` (fase 7) |
+| **P3** | Der findes præcis én retrieval-konfiguration med status `active`. Dens evaluering er bestået og registreret af `evaluation_publisher`, og den er ikke suspenderet af en hård gate i en senere regressionskørsel | Opslag i `knowledge.retrieval_configurations` ved retrieval. Status `suspended` sættes automatisk af `record_evaluation_run` ved en fejlet hård gate (D-8) |
+| **P4** | Runtime-fingeraftrykket er identisk med den aktive konfigurations fingeraftryk: model, reranker, algoritmeversion og parametre | Beregnes fra de faktisk konstruerede implementeringer og den faktiske konfiguration. Kan ikke angives |
+| **P5** | Alle elementer stammer fra publicerede, ikke-tilbagetrukne versioner, gyldige for tilstanden | Retrieval-funktionen (fase 7). Kontrolleres igen i evidensen |
+| **P6** | Søgningen er udført som den kaldende bruger med adgangsfiltret | `security invoker`, RLS og adgangsfilter før søgning (fase 7). Ingen service-rolle i retrieval (guardrail-test) |
+| **P7** | Hvert elements `chunker_version` er blandt konfigurationens evaluerede chunker-versioner | Ny kontrol. Ét element uden for gør hele sættet `development` |
+| **P8** | Sættet er ikke fremtvunget af et udviklingsværktøj, og det er udstedt af retrieval-laget og frosset | `devOverride`, WeakSet og frysning (fase 7) |
+| **P9** | Sættet bærer konfigurationens id, fingeraftryk og algoritmeversion (`retrieval.configuration`, schemaVersion 2) | Sættes af retrieval-laget |
+
+`requireProductionEvidence` kontrollerer desuden P2, P8 og P9 igen og afviser et sæt uden
+`retrieval.configuration`.
+
+**Granularitet:** pr. retrieval-konfiguration, ikke globalt, ikke pr. model og ikke pr. indeks.
 
 - Kvaliteten er en egenskab ved kombinationen af model, reranker, algoritme, parametre og
   chunker.
 - Et globalt flag ville overleve et modelskifte.
 - Kvalitet pr. model ville ignorere, at en anden reranker eller tærskel ændrer resultatet.
-- Nye dokumenter i korpusset kræver ingen ny godkendelse, men fanges af den planlagte
-  regressionskørsel (§4.5).
+- Nye dokumenter kræver ingen ny godkendelse, men fanges af regressionen (§4.5). Nye
+  dokumenttyper kræver en ny kørsel (§4.4, pilot-evaluering pkt. 5).
 
 ---
 
@@ -666,33 +822,45 @@ er graden `development` (fail-closed):
 | Felt | Indhold |
 |------|---------|
 | `id` | |
-| `fingerprint` | SHA-256 over de øvrige felter i kanonisk form |
-| `embedding_model_id` | Til `knowledge.embedding_models` |
-| `reranker_id`, `reranker_version` | Fx `bedrock:cohere.rerank-v3-5`, `0` |
+| `fingerprint` | SHA-256 over de øvrige definerende felter i kanonisk form |
+| `embedding_model_id` | Til `knowledge.embedding_models`. Udbyder og model er data, ikke kode |
+| `reranker_id`, `reranker_version` | Fx `bedrock:cohere.rerank-v3-5` og `0` |
 | `algorithm_version` | Retrieval-algoritmens version (fx `hybrid-rrf-1`). Hæves, når kode i retrieval-kæden ændres |
 | `params` | `candidateK`, `rerankN`, `topK`, `maxPerVersion`, `minScore`, `rrfK` |
 | `chunker_versions` | De chunker-versioner, evalueringen dækkede |
-| `status` | `candidate`, `approved`, `active` eller `retired`. Højst én `active` |
-| `evaluation` | Rapportens checksum, sæt-id og -version, metrics og gate-resultater |
+| `status` | `candidate`, `approved`, `active`, `suspended` eller `retired`. Højst én `active` |
+| `tier` | `pilot` (under 100 spørgsmål) eller `standard` |
 | `approved_by`, `approved_at` | Kræver `system.settings.manage`. Auditeres |
+
+`knowledge.evaluation_runs` (kun skrevet af `evaluation_publisher` via
+`record_evaluation_run`): konfiguration, sæt-id og -version, korpus-checksum, rapport-checksum,
+metrics, gate-resultater, antal pr. type, `passed`, start og slut.
 
 ### 10.2 Regler
 
-- Konfigurationen kan kun godkendes, hvis alle hårde gates og alle godkendte kvalitetsgates er
-  bestået i den vedlagte rapport (constraint og funktion), og den ikke indeholder
-  udviklingsimplementeringer.
-- Runtime beregner sit fingeraftryk fra de faktisk konstruerede implementeringer og den
-  faktiske konfiguration. Matcher det ikke den aktive konfiguration, er al evidens
-  `development`. Retrieval-tilstanden (B-007) viser det i Admin som "Konfigurationen er ikke
-  godkendt".
-- Konfigurationer ændres aldrig. En ændring er en ny konfiguration.
+- **Ingen kan skrive direkte i tabellerne.** Ændringer sker kun gennem funktioner.
+- **Godkendelse** (`approve_retrieval_configuration`) kræver `system.settings.manage` og en
+  registreret kørsel for netop den konfiguration, der har bestået alle hårde gates og alle
+  godkendte kvalitetsgates, har opfyldt minimum pr. type og har årsagsnoter for alle fejl.
+  Funktionen afviser `none` og test-udbydere.
+- **Aktivering** sker i én transaktion: den nye bliver `active`, og den forrige `retired`. Ved et
+  modelskifte sker det sammen med skiftet af embedding-model (§2.5).
+- **Suspendering:** en registreret regressionskørsel med en fejlet hård gate sætter den aktive
+  konfiguration til `suspended` i samme transaktion. Al evidens bliver straks `development`
+  (P3). Genaktivering kræver en ny bestået kørsel og en ny godkendelse.
+- **Konfigurationer ændres aldrig.** En ændring er en ny konfiguration.
+- Matcher runtime-fingeraftrykket ikke den aktive konfiguration, viser retrieval-tilstanden
+  (B-007) i Admin "Konfigurationen er ikke godkendt", og evidensen er `development`.
 
 ### 10.3 Flow
 
 ```
-ny model/reranker/parametre → evalueringskørsel i evalueringsmiljøet → rapport (JSON + checksum)
- → registrering i produktion som candidate → godkendelse (menneske, system.settings.manage)
- → aktivering i én transaktion (sammen med modelskiftet, hvis modellen er ny)
+ny model/reranker/parametre
+ → evalueringskørsel i evalueringsmiljøet (flere kandidater muligt)
+ → rapport (JSON + checksum)
+ → evaluation_publisher registrerer kørslen og konfigurationen i produktion (candidate)
+ → godkendelse af et menneske med system.settings.manage
+ → aktivering i én transaktion
 ```
 
 ---
@@ -788,9 +956,22 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 | Kvalitetsregression | Planlagt evalueringskørsel | Ethvert gate fejler |
 | Uoverensstemmelse i konfigurationen | Runtime-fingeraftryk ≠ aktiv konfiguration | Enhver |
 
-- **Hvor:** et lille "Systemstatus"-afsnit i Admin læser kø, fejl, status og retrieval-tilstand
-  fra databasen. Logs ligger hos hostingudbyderen (CloudWatch for workeren, Vercel for appen).
-  Ingen ny observability-leverandør. Alarmkanal (e-mail eller andet) er beslutning **D-15**.
+- **Alarmer (D-15):** signalerne vurderes af en lille, planlagt kontrol (hvert 5. minut i
+  workeren og efter hver evalueringskørsel). Alarmer sendes gennem et abstrakt interface:
+
+  ```ts
+  interface AlertSink {
+    send(alert: { code: string; severity: "warning" | "critical"; summary: string;
+                  details: Record<string, string | number>; occurredAt: string }): Promise<void>;
+  }
+  ```
+
+  Alarmer indeholder aldrig dokumentindhold, forespørgsler eller persondata. Implementeringen
+  vælges med konfiguration (fx `IPA_ALERT_SINK`), og den første kanal vælges ved
+  implementeringen (Å-5). `log` findes altid som standard, så en alarm aldrig forsvinder.
+  Domænemodellen kender kun interfacet. **Hvor:** et lille "Systemstatus"-afsnit i Admin læser
+  kø, fejl, status og retrieval-tilstand fra databasen. Logs ligger hos hostingudbyderen
+  (CloudWatch for workeren, Vercel for appen). Ingen ny observability-leverandør.
 - **Hører senere til:** bruger- og AI-analytics (brug, videnshuller, kvalitet af svar) hører til
   masterfase 15 og til 8C (B-014).
 
@@ -803,11 +984,14 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 | **Ondsindet PDF** | Kodeudførelse i workeren, nedbrud eller ressourceudtømning | Virusscanning før parsing (§7.2); afvisning af aktivt indhold (§7.1); parser i børneproces med tids- og hukommelsesgrænse; ikke-root, skrivebeskyttet container uden indgående porte; ingen eksekvering af PDF-indhold |
 | **Uautoriseret retrieval** | Brugeren ser dokumenter uden tildeling | Søgning som brugeren (`security invoker`, RLS, adgangsfilter før søgning). Hård gate H1. Integrationstests fra fase 7 |
 | **Lækage af metadata** | Titler, ids eller konflikter afslører dokumenter | Neutral konfliktindikator (B-20); "findes ikke" frem for "ingen adgang"; gate H1 omfatter metadata; evalueringsrapporter indeholder ingen produktionsdata |
-| **Privilegieeskalering** | Workeren publicerer eller læser mere end nødvendigt | Rollen `ingestion_worker` må kun køre `worker_*`-funktioner. Funktionerne kan ikke publicere (fase 7). Ingen service-rolle i workeren |
-| **Kompromitteret worker-credential** | En angriber kan skrive behandlingsresultater | Rollen kan ikke publicere: alt kræver en menneskelig godkendelse (`docs/03` §1 pkt. 4). Øjeblikkelig spærring. Rotation hver 90. dag. IAM-rolle til Bedrock (ingen nøgle at stjæle) |
+| **Privilegieeskalering** | Workeren publicerer eller læser mere end nødvendigt | Rollen `ingestion_worker` må kun køre `worker_*`-funktioner og kun som medlem af rollen (`pg_has_role`). Funktionerne kan ikke publicere (fase 7). Ingen service-rolle i workeren. Service-rollen bruges kun inde i Edge Function `worker-storage` og kun til én operation pr. billet |
+| **Kompromitteret worker-credential** | En angriber kan skrive behandlingsresultater | Rollen har kun `EXECUTE` på `worker_*` og ingen tabeladgang. Den kan ikke publicere: alt kræver en menneskelig godkendelse (`docs/03` §1 pkt. 4). Filer kun via billet for jobs, workeren har lease på. Netværksbegrænsning til fast IP. Øjeblikkelig spærring (`nologin`). Rotation hver 90. dag. IAM-rolle til Bedrock (ingen nøgle at stjæle) |
 | **Forgiftet videnskilde** | Forkert eller manipuleret indhold bliver "autoritativt" | Kun mennesker med `knowledge.version.publish` aktiverer viden (fase 7); kvalitetsrapport og review; konfliktdetektion; audit af upload og godkendelse; checksum på originalen |
 | **Replay og dobbeltbehandling** | Dubletter eller to workers på samme version | Lease, unikt aktivt job pr. (version, type), idempotente trin, (chunk, model) som nøgle, checksum |
 | **Utilsigtet brug af udviklingsevidens** | Svag evidens når en bruger, der handler på den | Fail-closed register, `ProductionEvidenceSet` og parringsreglen (B-012); P3/P6 (godkendt konfiguration); gates H6; mutationstests |
+| **Forfalsket evalueringsrapport** | En konfiguration bliver production uden at have bestået | Kun `evaluation_publisher` kan registrere kørsler. Funktionen genberegner gates fra metrics. En administrator kan kun godkende en bestået, registreret kørsel (D-18) |
+| **Kompromitteret publisher-credential** | Forfalskede kørsler | Credentialen findes kun i CI's secret-håndtering. Rollen kan kun kalde én funktion. En godkendelse kræver stadig et menneske. Rotation og spærring som workeren |
+| **Kundedata sendes til en ekstern model** | Brud på D-13 og kundens fortrolighed | De fem lag i §8.2. Ingen konfiguration kan omgå dem |
 | **Udbyderen ændrer modellen bag samme id** | Stille kvalitetsfald | Kontrolsæt af vektorer (§2.5) og planlagt regression (§4.5) |
 | **Data forlader EU** | Brud på kravet | Udbydere og regioner låses i konfigurationen. Endpoint og region kontrolleres ved opstart. Kun EU-endpoints er tilladt |
 
@@ -818,13 +1002,13 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 | Lag | Hvad |
 |-----|------|
 | **Enhed** | Bedrock-embedder og -reranker med optagne svar (ingen netværk): batch, genforsøg, 429, for langt input, inputtype. Fingeraftryk (kanonisk og stabilt). P1–P9 i `issueEvidenceSet`. Metrics-beregning med kendte tal. Valideringen af sættets skema og ankre. Klassifikation af workerfejl som (ikke) genforsøgbare |
-| **DB/RLS (pgTAP)** | `retrieval_configurations`: kan ikke godkendes med fejlede gates eller `none`; højst én aktiv; uforanderlig; godkendelse kræver `system.settings.manage` og auditeres. Rollen `ingestion_worker` kan kun køre `worker_*` og kun læse originaler. Karantæne: kan ikke læses, ikke genbehandles, ikke godkendes. Kundedataspærren (§8.3) |
+| **DB/RLS (pgTAP)** | `retrieval_configurations`: kan ikke godkendes med fejlede gates, manglende minimum pr. type eller `none`; højst én aktiv; uforanderlig; godkendelse kræver `system.settings.manage` og auditeres; en fejlet hård gate suspenderer. `evaluation_runs` kan kun skrives af `evaluation_publisher`, og administratoren kan hverken indsætte eller rette. Rollen `ingestion_worker` kan kun køre `worker_*`, ingen tabeller, og billetter kun med lease, engangsbrug og 60 sekunder. Karantæne: kan ikke læses, ikke genbehandles, ikke godkendes. Kundedataspærren (§8.4) |
 | **Integration** | Hele kæden mod den lokale database med optagne udbydersvar. Workeren som `ingestion_worker` uden service-rolle. Production-grad opnås kun med en aktiv godkendt konfiguration og falder til `development` ved et andet fingeraftryk |
 | **Worker** | Afbrudt job genoptages. Dobbelt claim afvises. Genforsøg ved 429. Endelig fejl giver `processing_failed`. Timeout pr. trin. Stor PDF inden for hukommelsesgrænsen |
 | **Security** | EICAR-testfilen sættes i karantæne. PDF'er med JavaScript, Launch-handling, indlejrede filer, ødelagt struktur, dekomprimeringsbombe, krypteret, uden tekstlag. Scanner utilgængelig giver ingen behandling |
 | **Evaluering** | Evalueringsmotoren testes med et lille fiktivt sæt, hvor facit er kendt. Hver metric og hvert gate har en test, der får det til at fejle |
 | **Kontrakttest mod udbyderen** | Planlagt kørsel mod den rigtige Bedrock i evalueringsmiljøet. Ikke i CI |
-| **Mutation og adversariel** | Svækket P3, P6 eller H1–H7, fjernet karantænepolitik, fjernet scanning, fail-open ved forældede signaturer, kundedataspærren fjernet, fallback til `none`. Hver skal fanges. Samme standard som fase 7 og 8A |
+| **Mutation og adversariel** | Hver af P1–P9 svækket; H1–H7 svækket; suspendering fjernet; publisher-kontrollen fjernet; billetkontrollen (lease, engangsbrug, udløb) svækket; karantænepolitik fjernet; scanning fjernet; fail-open ved forældede signaturer; hvert af lagene L2–L4 i §8.2 fjernet; fallback til `none`. Hver skal fanges. Samme standard som fase 7 og 8A |
 | **Browser** | Upload i browseren med Playwright mod riggen (`docs/07` §20.5) |
 
 ---
@@ -838,22 +1022,27 @@ færre kandidater (`rerankN`), men det er en kvalitetsbeslutning, der skal evalu
 3. Der findes en evalueringsrapport for den anbefalede konfiguration på evalueringssættet (30–50
    spørgsmål, alle typer i §5.3) med alle hårde gates bestået og alle godkendte kvalitetsgates
    bestået.
-4. Konfigurationen er registreret, godkendt og aktiv i et miljø med de rigtige udbydere.
+4. Kørslen er registreret af `evaluation_publisher`, og konfigurationen er godkendt og aktiv i et
+   miljø med de rigtige udbydere.
    `retrieveEvidence` udsteder dér et `ProductionEvidenceSet`, som `requireProductionEvidence`
    accepterer.
 5. Med et andet fingeraftryk, `none`, test-embedderen eller en uevalueret chunker-version er
    evidensen påviseligt `development`.
-6. Workeren kører i det valgte produktionsmiljø uden service-rolle og behandler en rigtig PDF
-   fra upload til `processed` inden for målet i §12.
+6. Workeren kører i det valgte produktionsmiljø som `ingestion_worker_login` uden service-rolle,
+   henter filer via billet og behandler en rigtig PDF fra upload til `processed` inden for målet
+   i §12. En test bekræfter, at rollen ikke kan læse tabeller, publicere eller hente en fil uden
+   gyldig billet.
 7. Virusscanning med EICAR giver karantæne. Scanner nede eller forældede signaturer giver ingen
    behandling.
-8. Kundedataspærren kan ikke omgås uden en migration.
+8. Kundedataspærren holder i alle fem lag (§8.2), og testene i §8.4 og deres mutationer består.
 9. Signalerne i §14 kan ses, og mindst alarmerne for dead-letter, retrieval utilgængelig og
    kvalitetsregression er afprøvet.
 10. Performance-målene i §12 er målt og dokumenteret, eller afvigelser er godkendt.
 11. Databehandleraftaler for de valgte udbydere er bekræftet (af dig. Det er ikke en teknisk
     opgave).
-12. Dette dokument har en implementeringsstatus (§21, oprettes ved implementering), og roadmap,
+12. En administrator kan påviseligt ikke gøre evidens `production` ad andre veje end en bestået,
+    registreret kørsel og en godkendelse (P1–P9, D-18).
+13. Dette dokument har en implementeringsstatus (§21, oprettes ved implementering), og roadmap,
     CLAUDE.md og README er opdateret.
 
 ---
@@ -869,43 +1058,52 @@ stramninger, der kræver din godkendelse, fordi de rører tekst i låste dokumen
 | K-2 | `docs/07` §7 | `Embedder`-interfacet beskrives som `embed(texts, {model})`. 8B tilføjer `inputType` (dokument eller forespørgsel) | Udbygning |
 | K-3 | `docs/07` §6 | Chunkstørrelsen er konfiguration, højst ca. 800 tokens. Vælges v3 (D-1), skal maksimum sænkes til ca. 400 tokens inklusive overskrift og `lead_in`. Med Embed v4 ændres intet | Kun ved valg af v3 |
 | K-4 | `docs/07` §10 | Evidensmodellen får `retrieval.configuration` (additivt). Forslag: `schemaVersion` hæves til 2 | Udbygning (D-14) |
-| K-5 | `docs/07` §14.1, B-16 | Workerens produktionsadgang fastlægges. Det var planlagt | Planlagt |
+| K-5 | `docs/07` §14.1, B-16 | Workerens produktionsadgang fastlægges (D-10). `worker_*`-funktionerne begrænses til medlemmer af `ingestion_worker`. Det var planlagt | Planlagt |
 | K-6 | `docs/08` §5.2 | Kundedata spærres med constraint i stedet for standardværdi. Strammer 8A | Stramning (D-13) |
 | K-7 | `docs/03` §2 og §14 | AWS bliver en ny leverandør (Bedrock og Fargate) ud over Vercel og Supabase. Embedding, reranker og worker-leverandør er bevidst ikke låst (`docs/03` §17 pkt. 1–3), så det er inden for arkitekturen | Ny leverandør (D-2, D-9) |
 | K-8 | `docs/07` §7 ("forespørgselsembedding laves server-side i appen") | Appen på Vercel skal kalde Bedrock. Anbefaling: Vercels OIDC-federering til en AWS IAM-rolle (ingen statiske nøgler), og appens funktioner i Vercels EU-region | Udbygning (D-11) |
+| K-9 | `docs/08` §5, §7 og §6 (8A-kode) | D-13 som præciseret af dig: lagene L1–L3 i §8.2. Proveniens på `SentPart`, en invariant i `invokeModel` og klassificering af sagsbunden tekst som `customer_identifiable`. Med en ekstern model blokeres sagsbundne kald. Med stub-modellen er adfærden uændret | Stramning (D-13) |
 
 ---
 
-## 19. Beslutninger til godkendelse
+## 19. Beslutninger
 
-| # | Beslutning | Anbefaling |
-|---|------------|------------|
-| **D-1** | Embedding-model | Cohere Embed v4 på Bedrock med EU-profil og 1024 dimensioner. v3 i Frankfurt evalueres som kandidat. **Afviger fra roadmappens anbefaling (v3 in-region):** EU-geografi frem for kun Frankfurt, men intet indgreb i chunkingen |
-| **D-2** | Leverandør til embedding og reranking | AWS Bedrock i eu-central-1 (ny leverandør, K-7) |
-| **D-3** | Reranker | Cohere Rerank 3.5 på Bedrock i Frankfurt. Rerank 4 (Microsoft Foundry) som næste kandidat |
-| **D-4** | Ingen fallback til `none` eller fusion i produktion; reranker-fejl er "utilgængelig" | Ja |
-| **D-5** | Metrics: Source/Passage Recall@K, MRR, korrekt og falsk afvisning, distraktor-indtrængen, temporale og adgangsmæssige gates; nDCG rapporteres, men gates ikke | Ja |
-| **D-6** | Gates: hårde H1–H7 og foreløbige kvalitetsgates Q1–Q7 (§4.4), som kalibreres på baseline og godkendes af dig | Ja, tallene som foreslået |
-| **D-7** | Evaluering i et separat evalueringsmiljø; godkendelse i produktion via rapport med checksum, som databasen kontrollerer | Ja |
-| **D-8** | Når en planlagt regressionskørsel fejler et gate | Hårde gates: konfigurationen deaktiveres automatisk, og evidensen bliver `development` (fail-closed). Kvalitetsgates: alarm, og du afgør inden for en aftalt frist |
-| **D-9** | Workerens kørselsmiljø | AWS ECS Fargate i eu-central-1 med ClamAV som sidecar. Postgres-køen bevares |
-| **D-10** | Workerens databaseadgang | Rollen `ingestion_worker` via PostgREST og Storage med et JWT med rollen. **[AFKLARES]** om Supabase understøtter det med de aktuelle signeringsnøgler. Alternativt en direkte Postgres-forbindelse (ny dependency) |
-| **D-11** | Appens adgang til Bedrock | Vercels OIDC-federering til en AWS IAM-rolle og funktioner i Vercels EU-region (K-8) |
-| **D-12** | PDF'er med aktivt indhold (JavaScript, Launch, OpenAction med handlinger, indlejrede filer) | Afvis |
-| **D-13** | Kundedata spærres med constraint (K-6) | Ja |
-| **D-14** | Evidensmodellen udvides med `retrieval.configuration`, og `schemaVersion` hæves til 2 (K-4) | Ja |
-| **D-15** | Alarmkanal for tekniske signaler | E-mail til en driftsansvarlig. Kanal og modtager **[AFKLARES]** |
-| **D-16** | Evalueringssættets placering: spørgsmål i repoet (JSONL), dokumenter kun i evalueringsmiljøet med checksum | Ja |
-| **D-17** | Tilladelse til de tekstændringer i låste dokumenter, som K-1, K-2, K-4 og K-6 kræver, når 8B implementeres | Ja |
+**Status:** "Principielt godkendt 2026-10-03" betyder godkendt af dig og indarbejdet. Fasen låses
+først ved din endelige godkendelse.
 
-**Åbne spørgsmål, der ikke blokerer specifikationen:**
+| # | Beslutning | Status |
+|---|------------|--------|
+| **D-1** | Cohere Embed v4 via Bedrocks **EU-geografiske** inferensprofil, 1024 dimensioner som udgangspunkt. Behandlingen er EU-geografisk og ikke kun Frankfurt (§2.3). Alternative modeller kan evalueres mod samme sæt (§4.5) | Principielt godkendt |
+| **D-2** | AWS Bedrock som udbyder af production-embeddings og -reranking | Principielt godkendt |
+| **D-3** | Cohere Rerank 3.5 in-region i eu-central-1 (Frankfurt) | Principielt godkendt |
+| **D-4** | Ingen fallback til `none` i produktion. En reranker-fejl er fail-closed, og production-retrieval er utilgængelig | Principielt godkendt |
+| **D-5** | Metric-familien i §4.2 og §4.3 | Principielt godkendt |
+| **D-6** | Gates: hårde H1–H7 med nul tolerance, kvalitetsgates Q1–Q7 med tærsklerne i §4.4, og reglerne for pilot-evaluering | **Afventer din godkendelse** (konkretiseret i §4.4) |
+| **D-7** | Separat evalueringsmiljø og en versions- og checksumbaseret godkendelsesrapport | Principielt godkendt (udmøntet med D-18) |
+| **D-8** | En fejlet hård gate i regression fjerner automatisk production-grad (suspendering). En kvalitetsregression giver alarm og kræver faglig/teknisk vurdering | Principielt godkendt |
+| **D-9** | AWS ECS Fargate som production worker og ClamAV som ét lag i upload-sikkerheden | Principielt godkendt |
+| **D-10** | Workerens identitet: direkte Postgres-forbindelse via Supavisor med LOGIN-rollen `ingestion_worker_login` (kun `EXECUTE` på `worker_*`), password i AWS Secrets Manager, netværksbegrænsning til fast IP, og filer via en engangsbillet og Edge Function `worker-storage`, så service-rollen bliver i Supabase (§6.1.1) | **Afventer din godkendelse** |
+| **D-11** | OIDC-federering mellem Vercel og AWS frem for statiske AWS-nøgler | Principielt godkendt |
+| **D-12** | PDF'er med aktivt indhold afvises | Principielt godkendt |
+| **D-13** | Kundedata og fri tekst fra kundesager er teknisk spærret for eksterne modeller, med de fem lag i §8.2 | Principielt godkendt. **Lag L1–L3 strammer 8A-kode (K-9) og afventer din bekræftelse** |
+| **D-14** | Evidensmodellens schemaVersion 2 med `retrieval.configuration` | Principielt godkendt |
+| **D-15** | Alarmer via en abstrakt `AlertSink`. Den første kanal vælges ved implementeringen og låses ikke i domænemodellen (§14) | **Afventer din godkendelse** af princippet |
+| **D-16** | Evalueringssættet versionsstyret i `evals/retrieval/` (§5.1), uden fortrolige kundedata og med CI-kontrol | Principielt godkendt (struktur konkretiseret) |
+| **D-17** | Tilladelse til tekstændringerne i K-1, K-2, K-4 og K-6 | Principielt godkendt |
+| **D-18** | Særskilt identitet `evaluation_publisher`, så en administrator ikke kan registrere eller rette en evalueringskørsel (§4.5) | **Ny — afventer din godkendelse** |
+| **D-19** | Ny dependency `postgres` (postgres.js) kun i `workers/` (§6.1.1) | **Ny — afventer din godkendelse** |
+| **D-20** | Rotation af workerens password: manuel runbook hver 90. dag. Automatisk rotation fravælges for nu, fordi den kræver en administrativ databaseidentitet i AWS | **Ny — afventer din godkendelse** |
 
-| # | Spørgsmål |
-|---|-----------|
-| Å-1 | Bedrocks kvoter for de valgte modeller i eu-central-1 (anmodninger og tokens pr. minut) skal afklares før produktion |
-| Å-2 | Databehandleraftalerne skal bekræftes af dig eller juridisk ansvarlig, ikke af koden |
-| Å-3 | Hvem vedligeholder evalueringssættet, og hvor ofte skal der tilføjes spørgsmål? |
-| Å-4 | Retningslinjen for fiktive dokumenter i evalueringssættet (tillæg og versioner til konflikt- og historikspørgsmål) |
+**Åbne spørgsmål — ikke [AFKLARES], og de blokerer ikke implementeringen:**
+
+| # | Spørgsmål | Hvornår |
+|---|-----------|---------|
+| Å-1 | Bedrocks kvoter for modellerne i eu-central-1 og EU-profilen | Trin 1 i implementeringen. Kvoteforhøjelse er en driftshandling |
+| Å-2 | Databehandleraftalerne bekræftes af dig eller juridisk ansvarlig | Før rigtige dokumenter indlæses. Exit-kriterium 11 |
+| Å-3 | Hvem vedligeholder evalueringssættet, og hvor ofte tilføjes spørgsmål | Før baseline |
+| Å-4 | Retningslinjer for fiktive dokumenter i sættet | Skrives i `evals/retrieval/README.md` før baseline |
+| Å-5 | Første alarmkanal (e-mail, webhook eller andet) og modtager | Ved implementeringen af §14 |
+| Å-6 | Om offentlige betingelser må ligge i repoet (licens) eller kun peges på med checksum | Pr. dokument ved indlæsning |
 
 ---
 
@@ -914,12 +1112,12 @@ stramninger, der kræver din godkendelse, fordi de rører tekst i låste dokumen
 1. Udbyderadgang: AWS-konto og -region, databehandleraftale, kvoter og OIDC-federering.
    Kontrakttest mod Bedrock.
 2. Embedder og reranker bag interfacene, registret og optagne svar til tests.
-3. Register over retrieval-konfigurationer, fingeraftryk og P1–P9 i evidensen. pgTAP og
-   mutationstests.
+3. Register over retrieval-konfigurationer og evalueringskørsler, rollen
+   `evaluation_publisher`, fingeraftryk og P1–P9 i evidensen. pgTAP og mutationstests.
 4. Evalueringsmotor, sættets skema, metrics og gates. Evalueringsmiljø.
 5. Baseline-kørsel. Du kalibrerer og godkender kvalitetsgates. Valg af model (v4 eller v3).
-6. Worker: rollen `ingestion_worker`, scanning, karantæne, timeouts og container. Udrulning til
-   Fargate.
-7. Kundedataspærren.
+6. Worker: rollerne `ingestion_worker` og `ingestion_worker_login`, billetter og Edge Function
+   `worker-storage`, scanning, karantæne, timeouts og container. Udrulning til Fargate.
+7. Kundedataspærren (§8.2, alle fem lag).
 8. Observability og alarmer.
 9. Godkendelse og aktivering af konfigurationen. Exit-kriterierne i §17. Dokumentation.
