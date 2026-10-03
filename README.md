@@ -3,9 +3,9 @@
 AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instruktioner står i
 `CLAUDE.md`, specifikationen i `docs/` og faseoversigten i `docs/roadmap.md`.
 
-**Status:** Fase 7 — Knowledge Engine er gennemført og låst (`docs/07-knowledge-engine.md`).
-Fase 8 — AI Gateway er implementeret og afventer godkendelse (`docs/08-ai-gateway.md`).
-Fase 9 er foreslået (`docs/roadmap.md`). Moduler fra senere faser viser stadig fiktive
+**Status:** Fase 1–8 er gennemført og låst, senest fase 8 — AI Gateway
+(`docs/08-ai-gateway.md`). Fase 9 er foreslået, og fase 10 er en foreslået placering
+(`docs/roadmap.md`). Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

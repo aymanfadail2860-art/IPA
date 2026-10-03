@@ -5,6 +5,27 @@ alternativer og begrundelse. Nyeste øverst.
 
 ---
 
+## B-018 — Fase 8 godkendt; rettelsen af retrieveEvidence bekræftet
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/08-ai-gateway.md` §18; `docs/07-knowledge-engine.md` §4.1; `docs/roadmap.md`
+
+**Beslutning:** Fase 8 — AI Gateway er godkendt og låst. Rettelsen i `docs/08` §18.2 pkt. 1 er
+bekræftet som den er: `retrieveEvidence` kræver en aktiv session og ikke rollerettigheden
+`knowledge.document.read`. Databasen afgør adgangen pr. version og kører som den kaldende
+bruger, og inaktive brugere får ingen session. Tre punkter uden for fase 8 skrives ind i
+roadmap: forudsætningen om redaction og kundedata i fase 9, samtalelagring og rate limiting i
+den foreslåede fase 10.
+
+**Overvejede alternativer:**
+- *At beholde rollekravet.* Fravalgt: det ville have afvist alle andre end administratorer,
+  hver gang en AI-funktion søgte på en brugers vegne, i strid med `docs/07` §4.1.
+
+**Begrundelse:** Rettelsen bringer koden i overensstemmelse med den låste specifikation frem
+for at omgå den.
+
+---
+
 ## B-017 — Matricen i databasen, profilerne i repoet
 
 **Dato:** 2. oktober 2026

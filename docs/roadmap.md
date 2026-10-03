@@ -3,10 +3,10 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–7 er gennemført og **låst**. Fase 7 — Knowledge Engine er godkendt
-(2026-10-02). Fase 8 — AI Gateway: **implementeret — afventer godkendelse**
-(`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
-afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
+**Aktuel status:** Fase 1–8 er gennemført og **låst**. Fase 8 — AI Gateway blev godkendt
+2026-10-03 (B-018). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
+afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011). Fase 10 — Copilot i
+produktion er en **foreslået placering**, ikke fastlagt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -26,9 +26,10 @@ afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011).
 | 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
 | 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
-| 8 | AI Gateway | 🔨 Implementeret — afventer godkendelse | `docs/08-ai-gateway.md` |
+| 8 | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
 | 9 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
-| 10+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 10 | Copilot i produktion | 📝 Foreslået placering — ikke fastlagt | — |
+| 11+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
 
 ---
 
@@ -297,11 +298,15 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 
 ## Fase 8 — AI Gateway
 
-**Status:** 🔨 Implementeret — afventer godkendelse. Specifikationen blev godkendt 2026-10-02
-(B-012 til B-017). Lint, typecheck, build, enhedstests (213), pgTAP (302) samt integrations- og
-rutetests (107) består, og mutationstestene fanger 25 af 25 kodemutationer og 14 af 14
-databasemutationer. Status og kendte begrænsninger står i `docs/08` §18. Fasen blev besluttet
+**Status:** 🔒 Gennemført og låst (godkendt 2026-10-03, B-018). Specifikationen blev godkendt
+2026-10-02 (B-012 til B-017). Lint, typecheck, build, enhedstests (213), pgTAP (302) samt
+integrations- og rutetests (107) består, og mutationstestene fanger 25 af 25 kodemutationer og
+14 af 14 databasemutationer. Rettelsen af `retrieveEvidence` (`docs/08` §18.2 pkt. 1) er
+bekræftet. Status og kendte begrænsninger står i `docs/08` §18. Fasen blev besluttet
 2026-10-02 (B-011).
+
+**Videreført:** forudsætningen om redaction og kundedata til fase 9, samtalelagring og rate
+limiting til den foreslåede fase 10.
 
 **Formål:** Politiklaget mellem applikationen og AI-modeller (`docs/03` §9). Det skal bygges
 uanset udbyder og kan testes uden en. Det afgør, hvilke kundedata der forlader platformen,
@@ -358,6 +363,17 @@ bygger ingen AI-funktionalitet.
    B-16).
 6. **Eventuelt testisolation:** integrationstests mod en separat database og en
    browserbaseret upload-test (`docs/07` §20.5).
+
+**Forudsætning, før kundedata må tillades (videreført fra fase 8):** Redaction kan ikke finde
+navne i fri tekst (`docs/08` §7.2). I dag er det ufarligt, fordi matricen afviser
+`customer_identifiable` som standard. Beslutningen om at tillade kundedata for en model
+(`docs/03` §17 pkt. 4) **må ikke kunne træffes**, før problemet er løst på én af to måder:
+
+- redaction kan finde navne i fri tekst, målt mod et testsæt, eller
+- fri tekst fra en kundecase sendes aldrig til modellen, og det håndhæves i gatewayen.
+
+Det er en forudsætning for beslutningen, ikke en kendt begrænsning. Fase 9 træffer ikke selv
+beslutningen om kundedata.
 
 **Udenfor:** Claude API, Copilot og andre AI-moduler. AI Gateway er fase 8. Koblingen af Vercel-demoen
 på Supabase (B-003) sker til sidst, når udbydere og en produktionsløsning for workeren er på
@@ -423,3 +439,33 @@ bekræftet. Kontekstvinduet er kun 1.024 tokens pr. tekstudsnit.
 mio. tokens gennem den eksisterende mekanisme (`docs/07` §7) og eventuelt et nyt indeks.
 Rerankeren gemmer ingen tilstand og ligger bag `Reranker`-interfacet. Den reelle binding ligger
 i kontrakt, databehandleraftale og regionsopsætning.
+
+---
+
+## Fase 10 — Copilot i produktion (foreslået placering)
+
+**Status:** 📝 Foreslået placering — ikke fastlagt, ikke specificeret. Intet bygges, før fasen er
+godkendt.
+
+**Begrundelse for placeringen (udledt):** Copilot er det første AI-modul, en rådgiver kan bruge
+i hverdagen. Når fase 9 har skaffet production-evidens, er den næste forudsætning en rigtig
+model bag gatewayen. Samtalelagring og rate limiting hører til her, fordi de først får
+betydning med en rigtig model og rigtige brugere. Rate limiting hører til, når kald koster
+noget. Samtalelagring er en del af Copilot-modulet, og den kræver retentionsbeslutningen.
+
+**Videreført hertil fra fase 8:**
+
+1. **Samtalelagring.** `docs/02` §5 kræver samtalehistorik, som er brugerens egen og knyttet
+   til den kontekst, samtalen blev ført i. En samtale ført inde i en kundecase skal kunne
+   genfindes fra sagen og følger kundecasens adgangs- og sletteregler (`docs/03` §11). Fase 8
+   sender én tur ad gangen og gemmer intet (`docs/08` Q-5).
+2. **Rate limiting.** `docs/03` §9 lægger den i AI Gateway, og `docs/07` §14 siger, at den
+   kommer med gatewayen. Kaldsloggen indeholder allerede det, der skal tælles (`docs/08` §10,
+   Q-3). Omkostningsstyring pr. workflow (`docs/03` §16) hører sammen med den.
+
+**Andre kandidater (udledt, til afklaring, når fasen specificeres):** en production-model bag
+`Model`-interfacet (generering med Claude API, `docs/03` §2), og om EU- og
+databehandleraftale-kravet også gælder den (`docs/08` Q-7). Desuden validerede prompter mod
+evalueringssættet, citations-tabellen, retentionsperioder (`docs/03` §17 pkt. 5) og om
+administratorers læsning af metadata og videnshuller skal slås til (B-014, `docs/08` Q-10).
+

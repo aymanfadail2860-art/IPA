@@ -1,9 +1,9 @@
 # 08 — AI Gateway
 
 **Fase:** 8 — AI Gateway
-**Status:** 🔨 **Implementeret — afventer godkendelse.** Specifikationen blev godkendt
-2026-10-02 med afgørelserne B-012 til B-017. Implementeringsstatus, tests og kendte
-begrænsninger står i §18.
+**Status:** ✅ **Gennemført og låst** (godkendt 2026-10-03, B-018). Specifikationen blev
+godkendt 2026-10-02 med afgørelserne B-012 til B-017. Implementeringsstatus, tests og kendte
+begrænsninger står i §18. Dokumentet ændres kun ved en eksplicit beslutning om at genåbne det.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
 **Bygger på:** `docs/01`–`docs/07` (låst) og `docs/decisions.md` (B-011 til B-017).
 
@@ -606,10 +606,10 @@ Desuden blev henvisningen i `docs/07` §20.6 rettet fra fase 8 til fase 9 (B-012
 
 ---
 
-## 18. Implementeringsstatus — implementeret, afventer godkendelse (2026-10-02)
+## 18. Implementeringsstatus — gennemført og låst (2026-10-03)
 
 Alle otte trin i §17 er bygget. Lint, typecheck, build, enhedstests, pgTAP, integrations- og
-rutetests består. Fasen er **ikke** markeret som gennemført.
+rutetests består. Fasen blev godkendt og låst 2026-10-03 (B-018).
 
 ### 18.1 Hvad der er bygget
 
@@ -622,7 +622,7 @@ rutetests består. Fasen er **ikke** markeret som gennemført.
 | Brugerflade: Copilot (hovedområde og globalt panel) på gatewayen, tilstanden "kan ikke dokumenteres", gatewayens tilstand i Admin | `src/components/copilot/`, `src/components/knowledge/unverifiable-answer.tsx`, `src/components/knowledge-admin/gateway-status.tsx` |
 | Udviklingsværktøjer (kun `local`/`test`) og demoens faste mock-svar | `src/dev/ai/`, `src/dev/demo/copilot-demo.ts`, `src/mocks/copilot.ts` |
 
-### 18.2 Afklaringer under implementeringen (udledt — til bekræftelse)
+### 18.2 Afklaringer under implementeringen (godkendt 2026-10-03)
 
 1. **Rettelse i fase 7-koden: `retrieveEvidence` krævede rollerettigheden
    `knowledge.document.read`.** Rådgivere og ledere har kun adgang gennem dokumenttildelinger
@@ -667,8 +667,10 @@ rutetests består. Fasen er **ikke** markeret som gennemført.
 - **Prompterne er udkast og ikke validerede** (§4.2). Det kræver en rigtig model og
   evalueringssættet (fase 9).
 - **Redaction er regelbaseret** (§7.2): navne og adresser i fri tekst og policenumre findes ikke.
+  Det er en forudsætning, før kundedata kan tillades (`docs/roadmap.md`, fase 9).
 - **Practice-replikker kan ikke kontrolleres maskinelt** for produktfakta (§4.3).
-- **Ingen rate limiting** (Q-3) og ingen samtalelagring (Q-5).
+- **Ingen rate limiting** (Q-3) og ingen samtalelagring (Q-5). Begge er placeret i den foreslåede
+  fase 10 (`docs/roadmap.md`).
 - **Retentionsperioder** er ikke fastlagt. Der slettes intet automatisk (§11.4).
 - **Evidensen er udviklingsgrad.** Copilots svar er stubbens citater af test-embedderens
   nærmeste naboer. De viser mekanikken, ikke svarkvaliteten.
