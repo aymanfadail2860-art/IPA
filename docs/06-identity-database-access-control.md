@@ -99,7 +99,10 @@ En bruger kan have flere roller; lederen har typisk både Rådgiver og Leder.
 
 ## 6. Permissions
 
-Kataloget er præcis de tolv permissions i `docs/03` §10. Der er ikke opfundet nye.
+I fase 6 var kataloget præcis de tolv permissions i `docs/03` §10. Der blev ikke opfundet nye.
+Kataloget udvides efter `docs/03` §17 pkt. 6. Siden er én permission tilføjet: `ai.quality.read`
+(8A, B-014). Den bruges til administratorers læsning af metadata og videnshuller fra AI-loggen
+og giver ingen adgang, så længe læsningen er slået fra (`docs/08` §11.3).
 
 | Permission | Rådgiver | Leder | Administrator |
 |------------|----------|-------|---------------|
@@ -115,6 +118,7 @@ Kataloget er præcis de tolv permissions i `docs/03` §10. Der er ikke opfundet 
 | `knowledge.version.publish` | — | — | all |
 | `identity.user.manage` | — | — | all |
 | `system.settings.manage` | — | — | all |
+| `ai.quality.read` (8A, B-014) | — | — | all |
 
 Hver permission angiver, hvilke scopes den giver mening med (`allowed_scopes`). En trigger
 afviser en rolletildeling med et scope, permissionen ikke understøtter. Kataloget kan

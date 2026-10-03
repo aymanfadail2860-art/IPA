@@ -3,6 +3,55 @@
 Beslutningslog efter `CLAUDE.md` §5. Hvert punkt indeholder dato, beslutning, overvejede
 alternativer og begrundelse. Nyeste øverst.
 
+**Fasehenvisninger før B-019:** Beslutninger fra før 3. oktober 2026 bruger datidens numre. I
+B-011 til B-018 betyder "fase 8" 8A — AI Gateway, "fase 9" betyder 8B — Produktionsgrundlag, og
+"den foreslåede fase 10" betyder 8C — Copilot klar til brug. Teksten i de enkelte beslutninger
+er ikke omskrevet, fordi loggen er historik.
+
+---
+
+## B-019 — Master-roadmappen med 21 faser er låst; fase 8 opdeles i 8A, 8B og 8C
+
+**Dato:** 3. oktober 2026
+**Område:** `docs/roadmap.md`, `CLAUDE.md` §1–§5, `docs/07` §20.6, `docs/08`, `docs/03` §10,
+`docs/06` §6, `README.md`
+
+**Beslutning:**
+- Den oprindelige roadmap med 21 faser er projektets permanente master-roadmap og er låst:
+  1 Produktdefinition, 2 Informationsarkitektur, 3 Teknisk arkitektur, 4 UI/UX-design,
+  5 Grundplatform, 6 Identity, database og adgangskontrol, 7 Knowledge Engine, 8 AI Copilot,
+  9 Learn, 10 Practice, 11 Advise, 12 Assessment, 13 Personlig AI og læringsprofil, 14 Admin,
+  15 Analytics, 16 Kvalitet og guardrails, 17 Test, 18 Pilotversion, 19 Feedback,
+  20 Enterprise-version og 21 Produktion.
+- Masterfase 8 — AI Copilot opdeles i underfaser:
+  - **8A — AI Gateway** (det, der hed fase 8): gennemført og låst.
+  - **8B — Produktionsgrundlag** (det, der hed fase 9): ikke specificeret eller godkendt.
+  - **8C — Copilot klar til brug** (det, der hed den foreslåede fase 10, "Copilot i
+    produktion"): ikke specificeret eller godkendt. Navnet er ændret, så det ikke forveksles
+    med masterfase 21 Produktion.
+- **Roadmap-regel:** underfaser må foreslås under en masterfase, når den tekniske kompleksitet
+  kræver det. Uden eksplicit godkendelse må ingen masterfase fjernes, omnummereres eller
+  erstattes, der må ikke indsættes en ny masterfase mellem de eksisterende, og et oprindeligt
+  hovedområde må ikke flyttes til et andet nummer. Reglen står i `docs/roadmap.md` og
+  `CLAUDE.md` §2.
+- Fasehenvisningerne i de låste `docs/07` og `docs/08` er rettet fra fase 9/10 til 8B/8C. De
+  seks uoverensstemmelser fra roadmap-auditten er rettet. Det genåbner ingen faglige eller
+  tekniske beslutninger i de låste faser.
+
+**Baggrund:** Roadmap-auditten (2026-10-03) viste, at den 21-fasede roadmap aldrig havde
+stået i repoet. Roadmappen viste kun de faser, der var besluttet, og derefter "N+ Ikke
+fastlagt". Faserne 9–21 var derfor fraværende uden en beslutning, og det indsatte
+produktionsgrundlag og Copilot-trin skubbede nummereringen.
+
+**Overvejede alternativer:**
+- *A) Ny nummerering med indsatte faser.* Fravalgt: de oprindelige faser 8–21 ville flytte
+  mindst to pladser og miste forbindelsen til planen.
+- *B) Produktionsgrundlaget som en del af fase 7/8.* Fravalgt: det ville genåbne godkendte og
+  låste faser som ufærdige.
+
+**Begrundelse:** Underfaser bevarer de oprindelige numre og alt låst indhold. De viser, at
+gateway og produktionsgrundlag er forudsætninger for en rigtig Copilot.
+
 ---
 
 ## B-018 — Fase 8 godkendt; rettelsen af retrieveEvidence bekræftet
@@ -23,6 +72,8 @@ den foreslåede fase 10.
 
 **Begrundelse:** Rettelsen bringer koden i overensstemmelse med den låste specifikation frem
 for at omgå den.
+
+**Bemærkning (B-019):** "Fase 8" er nu 8A, "fase 9" er 8B, og "den foreslåede fase 10" er 8C.
 
 ---
 
@@ -159,6 +210,9 @@ fase 8 til fase 9. Resten af `docs/07` er urørt.
 bruger, der handler på det. Det er parringen production-model og udviklingsevidens, der er
 farlig. Udviklingsmodel og udviklingsevidens ser ingen bruger.
 
+
+**Bemærkning (B-019):** "Fase 8" i denne beslutning er nu 8A, og "fase 9" er 8B.
+
 ---
 
 ## B-011 — Fase 8 bliver AI Gateway; udbydervalget udskydes til fase 9
@@ -181,6 +235,7 @@ implementering.
 ligge fast og være testet, før en ekstern model kobles på.
 
 **Bemærkning:** Henvisningen til "fase 8" i `docs/07` §20.6 er rettet til fase 9 ved B-012.
+Ved B-019 blev fase 8 til 8A og fase 9 til 8B, og henvisningen peger nu på 8B.
 
 ---
 

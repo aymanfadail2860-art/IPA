@@ -1,13 +1,13 @@
 # 08 — AI Gateway
 
-**Fase:** 8 — AI Gateway
+**Fase:** 8A — AI Gateway (underfase af masterfase 8 — AI Copilot, B-019)
 **Status:** ✅ **Gennemført og låst** (godkendt 2026-10-03, B-018). Specifikationen blev
 godkendt 2026-10-02 med afgørelserne B-012 til B-017. Implementeringsstatus, tests og kendte
 begrænsninger står i §18. Dokumentet ændres kun ved en eksplicit beslutning om at genåbne det.
 **Sprog:** Dansk (kode på engelsk, brugerflade på dansk)
-**Bygger på:** `docs/01`–`docs/07` (låst) og `docs/decisions.md` (B-011 til B-017).
+**Bygger på:** `docs/01`–`docs/07` (låst) og `docs/decisions.md` (B-011 til B-019).
 
-Dokumentet er implementeringsspecifikationen for fase 8. Det konkretiserer `docs/03` §9 (AI
+Dokumentet er implementeringsspecifikationen for underfase 8A. Det konkretiserer `docs/03` §9 (AI
 Gateway), §5 flow A og C, §7 (retrieval-profiler), §11 (privacy) og §13 (observability).
 Arkitekturen fra `docs/03` ændres ikke. Hvor specifikationen fortolker eller udbygger et låst
 dokument, er det markeret **(udledt)**. Modstriden med låste dokumenter og afgørelserne står i
@@ -20,26 +20,26 @@ specifikationen godkendt, før der blev implementeret.
 
 ## 0. Formål og afgrænsning
 
-Fase 8 bygger politiklaget mellem applikationen og AI-modeller (`docs/03` §1 pkt. 7, §9).
+8A bygger politiklaget mellem applikationen og AI-modeller (`docs/03` §1 pkt. 7, §9).
 Laget skal bygges uanset hvilken udbyder der vælges senere. Det testes uden en udbyder.
 
-**Der kaldes ingen rigtig AI-model i fase 8.** Den eneste model er en stub-model (§3) efter
+**Der kaldes ingen rigtig AI-model i 8A.** Den eneste model er en stub-model (§3) efter
 samme mønster som test-embedderen fra fase 7: udviklingsgrad, fail-closed, og den kan ikke
 konstrueres uden for `local` og `test`.
 
-| Bygges i fase 8 | Bygges ikke i fase 8 |
+| Bygges i 8A | Bygges ikke i 8A |
 |-----------------|----------------------|
 | Gatewayens ene indgang og dens trin (§1) | Adapter til Claude API eller anden ekstern model |
 | Minimale tilstandstabeller til gating (§9.2, B-013) | Assessment- og Practice-indhold: prøver, spørgsmål, besvarelser, bedømmelse |
-| Stub-model og fail-closed modelregister (§3) | Valg af embedding- og reranking-udbyder (fase 9) |
+| Stub-model og fail-closed modelregister (§3) | Valg af embedding- og reranking-udbyder (8B) |
 | Fem workflow-profiler med prompt, handlinger og output-kontrakt (§4) | Learn AI, Practice AI, Advise AI og Assessment AI som moduler med brugerflade |
-| Datakategori-matricen som data (§5) | Samtalelagring og -historik (`ai.conversations`, `messages`), se §16 Q-5 |
+| Datakategori-matricen som data (§5) | Samtalelagring og -historik (`ai.conversations`, `messages`), se §16 Q-5. Placeret i 8C |
 | Dataminimering (§6) og redaction (§7) | Citations-tabellen og en Admin-visning af videnshuller (læsningen er slået fra, B-014) |
 | Permission-tjek i gatewayen (§8) | Endelig compliancebeslutning om kundedata (`docs/03` §17 pkt. 4) |
 | Server-side gating under Assessment og AI-rollespil (§9) | Assessment og Practice som moduler |
-| Logning af kald, kilder og indhold (§11) | Retentionsperioder (`docs/03` §17 pkt. 5) — kun mekanismen |
+| Logning af kald, kilder og indhold (§11) | Retention: hverken politik pr. datakategori, perioder eller sletningsjob (§11.4, 8C) |
 | Copilot-brugerfladen koblet på gatewayen lokalt, mock-svar i demoen (§13) | Omkostningsstyring (ingen omkostning med stub) |
-| Opdelt log: indhold og metadata, administratorlæsning slået fra (§11, B-014) | Rate limiting (§10, Q-3 er ikke afgjort) |
+| Opdelt log: indhold og metadata, administratorlæsning slået fra (§11, B-014) | Rate limiting (§10, Q-3). Placeret i 8C |
 
 ---
 
@@ -139,7 +139,7 @@ type ModelInput = {
 ```
 
 Modelversioner er konfiguration (`docs/03` §2). Generering sker med Claude API
-(`docs/03` §2, låst). Adapteren til den bygges ikke i fase 8.
+(`docs/03` §2, låst). Adapteren til den bygges ikke i 8A.
 
 ### 3.2 Stub-modellen
 
@@ -203,20 +203,21 @@ hvert kald. **(udledt)**
 
 ### 4.2 De fem profiler
 
-| Profil | Handlinger i fase 8 | Retrieval | Evidens kræves | Særligt |
+| Profil | Handlinger i 8A | Retrieval | Evidens kræves | Særligt |
 |--------|---------------------|-----------|----------------|---------|
 | **Copilot** | `answer_question` | Præcis; alle tilladte typer; gældende, historisk på anmodning | Ja | Strengest grounding. Låst under Assessment og AI-rollespil |
 | **Learn** | `explain` | Bred; produktbeskrivelser, vejledninger, materiale; gældende | Ja | Eksempler må være opdigtede og markeres som det. Produktfakta i dem kræver citation |
 | **Practice** | `roleplay_turn`, `feedback` | Scenariebundet; produktdata; gældende | Kun `feedback` | Må opfinde en fiktiv kunde, ikke produktfakta. Ingen Copilot-adgang under rollespil |
-| **Advise** | `suggest` | Case-bundet; betingelser, acceptregler, forretningsgange; gældende på casens dato | Ja | Alt fagligt bærer citation. Svar har status **AI-genereret forslag** og skrives ikke ind i sagen i fase 8 |
-| **Assessment** | `evaluate` | Facitgrundlag; gældende | Ja | Systemets egen brug. Kan ikke kaldes af en bruger under et aktivt forsøg. Kaldes ikke fra brugerfladen i fase 8 |
+| **Advise** | `suggest` | Case-bundet; betingelser, acceptregler, forretningsgange; gældende på casens dato | Ja | Alt fagligt bærer citation. Svar har status **AI-genereret forslag** og skrives ikke ind i sagen i 8A |
+| **Assessment** | `evaluate` | Facitgrundlag; gældende | Ja | Systemets egen brug. Kan ikke kaldes af en bruger under et aktivt forsøg. Kaldes ikke fra brugerfladen i 8A |
 
-Kun Copilot får en brugerflade i fase 8 (§13). De øvrige fire profiler bygges og testes
+Kun Copilot får en brugerflade i 8A (§13). De øvrige fire profiler bygges og testes
 gennem gatewayen alene, så politikken er på plads, før modulerne bygges. Det er ikke
 modulfunktionalitet.
 
-**Prompterne er udkast.** De kan ikke valideres uden en rigtig model og et evalueringssæt
-(fase 9). De markeres i koden som ikke-validerede, og profilversionen hæves, når en prompt
+**Prompterne er udkast.** De kan ikke valideres uden et evalueringssæt med tilhørende
+infrastruktur (8B) og en rigtig model. Selve valideringen af Copilot-prompterne mod en rigtig
+model hører til 8C. De markeres i koden som ikke-validerede, og profilversionen hæves, når en prompt
 ændres.
 
 ### 4.3 Output-kontrakter
@@ -233,7 +234,7 @@ kaldet"):
 | Assessment | Vurdering pr. kriterium med henvisning til facitgrundlaget | Strukturen |
 
 **Ved brud vises svaret aldrig**, heller ikke med en advarsel (B-016). `docs/03` §9 siger
-"afvises eller markeres". Fase 8 afviser.
+"afvises eller markeres". 8A afviser.
 
 ### 4.4 Tilstanden "kan ikke dokumenteres" (B-016)
 
@@ -292,7 +293,7 @@ Matricen er data, ikke kode (`docs/03` §9). Den ligger i databasen i
 - **Mangler en række, gælder `deny`.** Matricen er fail-closed.
 - **`customer_identifiable` er `deny` for alle modeller som standard** (`docs/03` §9, §11).
   Ændringen kræver en eksplicit politikbeslutning (`docs/03` §17 pkt. 4) og hører ikke til i
-  fase 8.
+  8A.
 - **`audit_access` er `deny` uden undtagelse.** Databasen afviser en række med en anden
   regel (check-constraint).
 - Startværdier for stub-modellen: `knowledge` allow, `user_question` allow_redacted,
@@ -302,7 +303,7 @@ Matricen er data, ikke kode (`docs/03` §9). Den ligger i databasen i
   `system.settings.manage`. Hver ændring auditeres i `audit.audit_log` med hvem
   (`actor_id`), hvad (model, kategori, regel før og efter) og hvornår (B-017). Ingen kan skrive
   direkte i tabellen, heller ikke administratoren. Der bygges ingen Admin-brugerflade til
-  matricen i fase 8.
+  matricen i 8A.
 - Matricen ligger i databasen, fordi den er politik, der kan skulle ændres uden en udrulning,
   og skal kunne revideres. Profilerne ligger i repoet, fordi de er prompts og
   output-kontrakter, der hører til koden og gennemgås som kode (B-017).
@@ -329,7 +330,7 @@ Kun det nødvendige sendes med (`docs/03` §9, §11):
 - **Kontekst hentes af gatewayen selv** ud fra en reference (fx produkt-id eller sags-id), med
   brugerens egen adgang. Kontekst, som klienten sender i fritekst, behandles som brugerens
   input og ikke som kontekst. **(udledt)**
-- **Kundecase-kontekst:** Advise-profilens allowlist er **tom** i fase 8. Hvilke sagsfelter der
+- **Kundecase-kontekst:** Advise-profilens allowlist er **tom** i 8A. Hvilke sagsfelter der
   er nødvendige, afgøres med Advise-modulet. Uanset det er de `customer_identifiable` og
   dermed `deny` (§5.2).
 - **Én tur ad gangen.** Uden samtalelagring sendes ingen tidligere ture med (§16 Q-5).
@@ -385,12 +386,12 @@ det (`docs/03` §9). Kontrollen sker mod databasen med **brugerens egen identite
 | Dokumentadgang | `retrieveEvidence` kører som brugeren (security invoker, grants fra `docs/07` §4). Gatewayen kan ikke udvide adgangen. Rådgivere og ledere har adgang gennem dokumenttildelinger, ikke gennem rollen (`docs/07` §4.1). Derfor kræver `retrieveEvidence` en aktiv session og ikke rollerettigheden `knowledge.document.read`. Se §18 om rettelsen |
 | Kundecase | Kun med `advise.case.read` og `advise.is_case_participant(case_id)`. En sag, man ikke har adgang til, svarer som "findes ikke" |
 | Lærings- og træningskontekst | `learning.progress.read` og `practice.session.write`, scope `own` |
-| Assessment-profilen | Kan ikke kaldes som brugerhandling i fase 8 |
+| Assessment-profilen | Kan ikke kaldes som brugerhandling i 8A |
 
 At bruge Copilot kræver ingen særskilt permission: Copilot er tilgængelig for alle roller
 (`docs/02` §10), og adgangen til indholdet styres af dokumentadgangen. Den eneste nye
 permission er `ai.quality.read` til administratorers læsning af metadata (§11.3, B-014). Den
-er slået fra i fase 8.
+er slået fra i 8A.
 
 ---
 
@@ -418,9 +419,9 @@ arbejdsopgave. Det er AI'en i dem, der låses, fordi den svarer for brugeren.
 ### 9.2 Tilstanden — bevidst minimum (B-013)
 
 `docs/03` §4 lægger sessionstilstanden i `assessment.assessment_attempts` og
-`practice.roleplay_sessions` ("Session-tilstand afgør AI-gating"). Fase 8 opretter de to
+`practice.roleplay_sessions` ("Session-tilstand afgør AI-gating"). 8A opretter de to
 tabeller i deres rigtige domæner, **med kun de felter, gatingen har brug for**. Det er at bygge
-det, fase 8 kræver, ikke at bygge forud.
+det, 8A kræver, ikke at bygge forud.
 
 | Tabel | Felter | Aktiv når |
 |-------|--------|-----------|
@@ -436,13 +437,13 @@ betydninger af `active` og tidsgrænsen ændres ikke, fordi gatingen hviler på 
   `assessment.start_attempt(ends_at)`, `assessment.submit_attempt(id)`,
   `practice.start_roleplay()` og `practice.end_roleplay(id)`. Højst ét aktivt forsøg og ét
   aktivt rollespil pr. bruger. Ingen kan skrive direkte i tabellerne.
-- **Læsning:** brugeren læser egne rækker. Hverken leder eller administrator får adgang i fase 8.
+- **Læsning:** brugeren læser egne rækker. Hverken leder eller administrator får adgang i 8A.
 - **Gatewayen** læser tilstanden gennem `ai.my_gating_state()`, der kun returnerer den aktuelle
   brugers tilstand (`assessment_active`, `roleplay_session_id`).
 - **Ophør:** et forsøg ophører kun ved aflevering eller ved udløb af tidsgrænsen. En bruger
   kan ikke "afbryde" et forsøg. Et rollespil afsluttes af brugeren. Forladte forsøg uden
   tidsgrænse og forladte rollespil er **[AFKLARES]** (§16 Q-2).
-- I fase 8 bruger kun udviklingsværktøjet (§13) og tests funktionerne. Modulerne kalder dem
+- I 8A bruger kun udviklingsværktøjet (§13) og tests funktionerne. Modulerne kalder dem
   senere.
 
 ---
@@ -450,7 +451,7 @@ betydninger af `active` og tidsgrænsen ændres ikke, fordi gatingen hviler på 
 ## 10. Rate limiting
 
 `docs/03` §9 placerer rate limiting i gatewayen, og `docs/07` §14 siger, at den "kommer med"
-gatewayen. Den er ikke bygget i fase 8, fordi Q-3 ikke er afgjort. Forslaget er en enkel
+gatewayen. Den er ikke bygget i 8A og er placeret i 8C (`docs/roadmap.md`). Forslaget er en enkel
 grænse pr. bruger pr. minut og pr. døgn, talt i kaldsloggen, med tallene som konfiguration.
 Kaldsloggen indeholder allerede det, der skal tælles.
 
@@ -485,7 +486,7 @@ på loggen selv.
 ### 11.3 Administratorers læsning — bygget, men slået fra (B-014)
 
 - Strukturen er på plads, så adgangsbeslutningen kan tages før produktion **uden en
-  migration**. Kontakten `ai.settings.admin_metadata_read_enabled` er `false` i fase 8.
+  migration**. Kontakten `ai.settings.admin_metadata_read_enabled` er `false` i 8A.
 - Kontakten ændres kun med `ai.set_admin_metadata_read(enabled)`, der kræver
   `system.settings.manage` og auditeres (hvem, før og efter, hvornår).
 - Administratorers læsning sker kun gennem de to funktioner. Der findes ingen RLS-politik, der
@@ -505,11 +506,15 @@ på loggen selv.
   redigerede version.
 - **Append-only.** Rækkerne skrives kun gennem én databasefunktion (`ai.record_call`, security
   definer), der kun skriver for den aktuelle bruger og kontrollerer sagsadgangen for et
-  sagsbundet kald. De kan ikke opdateres. Sletning sker kun ved retention og sammen med sagen.
-- **Retention:** indhold og metadata har hver sin politik (`docs/03` §11: "AI-samtaler",
-  "Retrieval-logs"). Perioderne er **[AFKLARES]** og skal fastlægges før produktion
-  (`docs/03` §17 pkt. 5). Der slettes intet automatisk i fase 8. Det er kun forsvarligt, fordi
-  fase 8 kun kører på fiktive data.
+  sagsbundet kald. De kan ikke opdateres.
+- **Retention — hvad der faktisk er implementeret:** indholdet fra et sagsbundet kald slettes
+  sammen med kundesagen (fremmednøgle med `on delete cascade`), og metadata mister da kun
+  sags-id'et. Sletning af en bruger fjerner brugerens rækker. Ud over det slettes intet.
+- **Retention — hvad der ikke er implementeret:** der findes ingen retentionspolitik pr.
+  datakategori, ingen perioder og intet sletningsjob. `docs/03` §11 kræver en politik pr.
+  kategori ("AI-samtaler", "Retrieval-logs"), og perioderne er **[AFKLARES]** (`docs/03` §17
+  pkt. 5). Mekanismen og perioderne hører til 8C (`docs/roadmap.md`). At der intet slettes
+  automatisk, er kun forsvarligt, fordi 8A kun kører på fiktive data.
 - "Afprøv retrieval" fra fase 7 går ikke gennem gatewayen og logger fortsat intet.
 
 ---
@@ -527,7 +532,7 @@ Admin-oversigten viser tilstanden. En utilgængelig gateway vises altid som syst
 
 ---
 
-## 13. Copilot-brugerfladen i fase 8
+## 13. Copilot-brugerfladen i 8A
 
 | Miljø | Hvad sker der |
 |-------|---------------|
@@ -535,7 +540,7 @@ Admin-oversigten viser tilstanden. En utilgængelig gateway vises altid som syst
 | **Vercel-demoen uden database** | Gatewayen kan ikke køre: ingen database, og stubben nægtes uden for `local`/`test`. Copilot viser i stedet realistiske mock-svar med kildekomponenter fra `src/mocks/`, tydeligt markeret som mock, så brugerfladen kan vurderes. Et nyt spørgsmål besvares med et fast mock-svar, ikke af en model. Eksempelsamtalerne dækker også "kan ikke dokumenteres". Se §16 Q-6 |
 
 Mock-svar og stub-svar blandes aldrig: i et miljø med database vises ingen mock-samtaler.
-Historiklisten viser en tom tilstand, fordi samtaler ikke gemmes i fase 8 (§16 Q-5).
+Historiklisten viser en tom tilstand, fordi samtaler ikke gemmes i 8A (§16 Q-5).
 
 ---
 
@@ -568,11 +573,11 @@ rutetests består.
 
 | # | Modstrid | Afgørelse |
 |---|----------|-----------|
-| K-1 | `docs/07` §9.1 pkt. 4: "AI Gateway må kun tage imod `ProductionEvidenceSet`" ville forhindre enhver kørsel i fase 8 | **B-012.** Præciseret til "en production-model må kun tage imod `ProductionEvidenceSet`". `docs/07` §9.1 er genåbnet for netop den sætning. Håndhæves i koden med test og mutationstest (§3.3) |
+| K-1 | `docs/07` §9.1 pkt. 4: "AI Gateway må kun tage imod `ProductionEvidenceSet`" ville forhindre enhver kørsel i 8A | **B-012.** Præciseret til "en production-model må kun tage imod `ProductionEvidenceSet`". `docs/07` §9.1 er genåbnet for netop den sætning. Håndhæves i koden med test og mutationstest (§3.3) |
 | K-2 | Gatingen skal læse tilstand i domæner, der ikke findes endnu (`docs/03` §4, CLAUDE.md §2 regel 2) | **B-013.** De to tabeller oprettes nu i deres rigtige domæner med kun gating-felterne, dokumenteret som bevidst minimum (§9.2) |
-| K-3 | `docs/03` §11 ("AI-samtaledata: Egen") mod §13 (kvalitetsanalyse) | **B-014.** Indhold og metadata adskilles. Indhold: kun brugeren selv, eller kundecasens regler. Metadata og videnshuller: administratorer til kvalitetsarbejde, men slået fra i fase 8. Al administratorlæsning auditeres (§11) |
+| K-3 | `docs/03` §11 ("AI-samtaledata: Egen") mod §13 (kvalitetsanalyse) | **B-014.** Indhold og metadata adskilles. Indhold: kun brugeren selv, eller kundecasens regler. Metadata og videnshuller: administratorer til kvalitetsarbejde, men slået fra i 8A. Al administratorlæsning auditeres (§11) |
 
-Desuden blev henvisningen i `docs/07` §20.6 rettet fra fase 8 til fase 9 (B-012).
+Desuden er henvisningen i `docs/07` §20.6 rettet, så udbyderne er videreført til 8B (B-012, B-019).
 
 ---
 
@@ -581,15 +586,15 @@ Desuden blev henvisningen i `docs/07` §20.6 rettet fra fase 8 til fase 9 (B-012
 | # | Spørgsmål | Blokerer |
 |---|-----------|----------|
 | Q-1 | ~~Låses Learn og Advise under et AI-rollespil?~~ **Afgjort (B-015):** al brugerrettet AI undtagen rollespillet selv låses. Modulerne gør ikke | — |
-| Q-2 | Hvornår ophører et forladt Assessment-forsøg uden tidsgrænse og et forladt rollespil? Forslag: et rollespil udløber efter en konfigurerbar inaktivitet. Et forsøg uden tidsgrænse forbliver aktivt, til det afleveres eller afbrydes af en administrator | Nej, kan afgøres med modulerne. Fase 8 kræver eksplicit afslutning |
-| Q-3 | Skal rate limiting med i fase 8 (§10)? Ikke bygget, indtil det er afgjort | Nej |
+| Q-2 | Hvornår ophører et forladt Assessment-forsøg uden tidsgrænse og et forladt rollespil? Forslag: et rollespil udløber efter en konfigurerbar inaktivitet. Et forsøg uden tidsgrænse forbliver aktivt, til det afleveres eller afbrydes af en administrator | Nej, kan afgøres med modulerne. 8A kræver eksplicit afslutning |
+| Q-3 | Skal rate limiting med i 8A (§10)? Ikke bygget. Placeret i 8C | Nej |
 | Q-4 | ~~Hvordan vises et svar, der bryder kontrakten?~~ **Afgjort (B-016):** aldrig. En fjerde tilstand med egen formulering, eget udseende og de fundne kilder (§4.4) | — |
-| Q-5 | Gemmes Copilot-samtaler i fase 8 (`ai.conversations`, `messages`)? Forslag: nej. Samtalelagring arver kundecasens regler (`docs/03` §11) og hører til Copilot-modulet. Fase 8 er én tur ad gangen | Nej |
+| Q-5 | Gemmes Copilot-samtaler i 8A (`ai.conversations`, `messages`)? Forslag: nej. Samtalelagring arver kundecasens regler (`docs/03` §11) og hører til Copilot-modulet. 8A er én tur ad gangen. Samtalelagring er placeret i 8C | Nej |
 | Q-6 | Er faste mock-svar i Vercel-demoen nok til at vurdere Copilot, eller skal flere svartyper (konflikt, historisk, utilstrækkeligt, låst) kunne vælges direkte i demoen? | Nej |
-| Q-7 | Skal kravet om EU-region og databehandleraftale (fase 9) også gælde for generering med Claude API? Det påvirker ikke fase 8, men det bør stå i fase 9 | Nej |
+| Q-7 | Skal kravet om EU-region og databehandleraftale (8B) også gælde for generering med Claude API? Det påvirker ikke 8A. Spørgsmålet hører til 8C, hvor en rigtig model kobles på | Nej |
 | Q-8 | Har policenumre et kendt format, der kan genkendes? | Nej. Restrisiko indtil da |
 | Q-9 | ~~Matrice i databasen, profiler i repoet?~~ **Afgjort (B-017):** ja. Matriceændringer auditeres med hvem, hvad og hvornår, og matricen er fail-closed | — |
-| Q-10 | Skal administratorers læsning af metadata og videnshuller slås til før produktion (B-014)? Det kræver ingen migration | Produktion, ikke fase 8 |
+| Q-10 | Skal administratorers læsning af metadata og videnshuller slås til før produktion (B-014)? Det kræver ingen migration | Produktion, ikke 8A |
 
 ---
 
@@ -664,14 +669,15 @@ rutetests består. Fasen blev godkendt og låst 2026-10-03 (B-018).
 
 ### 18.4 Kendte begrænsninger
 
-- **Prompterne er udkast og ikke validerede** (§4.2). Det kræver en rigtig model og
-  evalueringssættet (fase 9).
+- **Prompterne er udkast og ikke validerede** (§4.2). Evalueringssættet og -infrastrukturen
+  hører til 8B. Valideringen af Copilot-prompterne mod en rigtig model hører til 8C.
 - **Redaction er regelbaseret** (§7.2): navne og adresser i fri tekst og policenumre findes ikke.
-  Det er en forudsætning, før kundedata kan tillades (`docs/roadmap.md`, fase 9).
+  Det er en forudsætning, før kundedata kan tillades (`docs/roadmap.md`, 8B).
 - **Practice-replikker kan ikke kontrolleres maskinelt** for produktfakta (§4.3).
-- **Ingen rate limiting** (Q-3) og ingen samtalelagring (Q-5). Begge er placeret i den foreslåede
-  fase 10 (`docs/roadmap.md`).
-- **Retentionsperioder** er ikke fastlagt. Der slettes intet automatisk (§11.4).
+- **Ingen rate limiting** (Q-3) og ingen samtalelagring (Q-5). Begge er placeret i 8C
+  (`docs/roadmap.md`).
+- **Ingen retentionsmekanisme:** hverken politik pr. datakategori, perioder eller sletningsjob.
+  Kun sletning sammen med kundesagen (§11.4). Placeret i 8C.
 - **Evidensen er udviklingsgrad.** Copilots svar er stubbens citater af test-embedderens
   nærmeste naboer. De viser mekanikken, ikke svarkvaliteten.
 - **Demoen** svarer kun på eksempelspørgsmålene med faste mock-svar.

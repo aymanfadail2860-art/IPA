@@ -3,9 +3,9 @@
 AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instruktioner står i
 `CLAUDE.md`, specifikationen i `docs/` og faseoversigten i `docs/roadmap.md`.
 
-**Status:** Fase 1–8 er gennemført og låst, senest fase 8 — AI Gateway
-(`docs/08-ai-gateway.md`). Fase 9 er foreslået, og fase 10 er en foreslået placering
-(`docs/roadmap.md`). Moduler fra senere faser viser stadig fiktive
+**Status:** Fase 1–7 og underfase 8A — AI Gateway er gennemført og låst
+(`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B og 8C, som ikke er
+specificeret endnu. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
@@ -39,7 +39,7 @@ Log ind som `admin@ipa.test` med adgangskoden fra `IPA_DEV_SEED_PASSWORD`. Gå d
    overlappende gyldighed, og godkend det. Konflikten står i **Knowledge Base → Konfliktkø**.
 6. **Knowledge Base → Afprøv retrieval** viser evidensen for den indloggede bruger.
 
-### Copilot på AI Gateway (lokalt, fase 8)
+### Copilot på AI Gateway (lokalt, 8A)
 
 Med en database går hvert spørgsmål i **Copilot** gennem AI Gateway (`docs/08`). Svaret dannes
 af en stub-model uden AI ud fra det godkendte vidensgrundlag og er markeret "Udviklingssvar —

@@ -1303,7 +1303,7 @@ brugerfladen for tilstanden kan ses og bygges. Værktøjet:
   `project_id` og egne porte), eller nulstil databasen før hver testkørsel i CI. Det er ikke
   gennemført i fase 7.
 
-### 20.6 Ikke afgjort (videreført til fase 9)
+### 20.6 Ikke afgjort (videreført til 8B — Produktionsgrundlag)
 
 - Virusscanning af uploads **[AFKLARES]** (B-26).
 - Workerens adgang er development-only (§14.1, B-16).

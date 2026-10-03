@@ -750,6 +750,9 @@ En permission har tre dele: **ressource**, **handling** og **scope**.
 | `identity.user.manage` | — | — | all |
 | `system.settings.manage` | — | — | all |
 
+Tabellen er eksempler. Det fulde katalog udbygges under implementeringen (§17 pkt. 6), og det
+aktuelle katalog står i `docs/06` §6.
+
 Lederen har altså ikke en bredere version af administratorens rettigheder, men en anden
 akse: **lederen ser mennesker, administratoren forvalter indhold.** Ingen af dem arver den
 andens adgang.

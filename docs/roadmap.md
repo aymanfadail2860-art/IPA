@@ -3,33 +3,60 @@
 Oversigt over projektets faser og deres status. Filen opdateres, når en fase skifter
 status. En fase markeres først som gennemført efter eksplicit besked.
 
-**Aktuel status:** Fase 1–8 er gennemført og **låst**. Fase 8 — AI Gateway blev godkendt
-2026-10-03 (B-018). Fase 9 — Produktionsgrundlag for Knowledge Engine er **foreslået —
-afventer godkendelse**. Udbydervalget er udskudt til fase 9 (B-011). Fase 10 — Copilot i
-produktion er en **foreslået placering**, ikke fastlagt.
+**Aktuel status:** Fase 1–7 og underfase 8A er gennemført og **låst**. 8A — AI Gateway blev
+godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag og 8C — Copilot klar til brug er ikke
+specificeret eller godkendt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
 > Supabase (EU), og demo-tilstanden skal fjernes. Fremgangsmåden står i `docs/decisions.md`
-> B-003.
+> B-003. Det hører til masterfase 21 Produktion.
 
 ---
 
-## Faseoversigt
+## Master-roadmap — låst (B-019)
+
+De 21 masterfaser er projektets overordnede roadmap og er **låst**. Denne fil er source of truth
+for faserne. `CLAUDE.md` §2 og §3 henviser hertil.
+
+**Regel:** Underfaser (fx 8A, 8B, 8C) må foreslås under en masterfase, når den tekniske
+kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
+
+- fjerne en masterfase
+- omnummerere en masterfase
+- erstatte en masterfase
+- indsætte en ny masterfase mellem de eksisterende
+- flytte et oprindeligt hovedområde til et andet nummer
 
 | Fase | Navn | Status | Leverance |
 |------|------|--------|-----------|
-| 1 | Produktdefinition | 🔒 Gennemført og låst | `docs/01-product-definition.md` |
-| 2 | Informationsarkitektur | 🔒 Gennemført og låst | `docs/02-information-architecture.md` |
-| 3 | Teknisk arkitektur | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
-| 4 | UI/UX-design | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
-| 5 | Grundplatform | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
-| 6 | Identity, database og adgangskontrol | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
+| 1 | Produktdefinition (Product Definition) | 🔒 Gennemført og låst | `docs/01-product-definition.md` |
+| 2 | Informationsarkitektur (Information Architecture) | 🔒 Gennemført og låst | `docs/02-information-architecture.md` |
+| 3 | Teknisk arkitektur (Technical Architecture) | 🔒 Gennemført og låst | `docs/03-technical-architecture.md` |
+| 4 | UI/UX-design (UI/UX Design) | 🔒 Gennemført og låst | `docs/04-ui-ux-design.md` |
+| 5 | Grundplatform (Foundation Platform) | 🔒 Gennemført og låst | `docs/05-foundation-implementation.md` |
+| 6 | Identity, database og adgangskontrol (Identity, Database & Access Control) | 🔒 Gennemført og låst | `docs/06-identity-database-access-control.md` |
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
-| 8 | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 9 | Produktionsgrundlag for Knowledge Engine | 📝 Foreslået — afventer godkendelse | — |
-| 10 | Copilot i produktion | 📝 Foreslået placering — ikke fastlagt | — |
-| 11+ | Ikke fastlagt | ⬜ Ikke påbegyndt | — |
+| 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
+| 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
+| 8B | Produktionsgrundlag | 📝 Ikke specificeret/godkendt | — |
+| 8C | Copilot klar til brug | 📝 Ikke specificeret/godkendt | — |
+| 9 | Learn | ⬜ Ikke påbegyndt | — |
+| 10 | Practice | ⬜ Ikke påbegyndt | — |
+| 11 | Advise | ⬜ Ikke påbegyndt | — |
+| 12 | Assessment | ⬜ Ikke påbegyndt | — |
+| 13 | Personlig AI og læringsprofil (Personal AI / Learning Profile) | ⬜ Ikke påbegyndt | — |
+| 14 | Admin | ⬜ Ikke påbegyndt | — |
+| 15 | Analytics | ⬜ Ikke påbegyndt | — |
+| 16 | Kvalitet og guardrails (Quality & Guardrails) | ⬜ Ikke påbegyndt | — |
+| 17 | Test (Testing) | ⬜ Ikke påbegyndt | — |
+| 18 | Pilotversion (Pilot Version) | ⬜ Ikke påbegyndt | — |
+| 19 | Feedback | ⬜ Ikke påbegyndt | — |
+| 20 | Enterprise-version (Enterprise Version) | ⬜ Ikke påbegyndt | — |
+| 21 | Produktion (Production) | ⬜ Ikke påbegyndt | — |
+
+"Ikke påbegyndt" betyder, at fasen ikke er specificeret. Dele, som tidligere faser allerede har
+bygget som fundament, er nævnt under fasen. Det rykker ikke fasens status.
 
 ---
 
@@ -291,22 +318,29 @@ Implementeringsstatus, afklaringer, mutationstests og kendte begrænsninger stå
 **Formål:** Platformens autoritative videnslag: dokumenter, versioner, behandling,
 menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens. Ingen AI.
 
-**Videreført til fase 9:** udbydere, validering af retrieval-tallene (B-008), virusscanning
-(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6 (rettet til fase 9 ved B-012).
+**Videreført til 8B:** udbydere, validering af retrieval-tallene (B-008), virusscanning
+(B-26) og workerens produktionsadgang (B-16). Se `docs/07` §20.6.
 
 ---
 
-## Fase 8 — AI Gateway
+## Fase 8 — AI Copilot
 
-**Status:** 🔒 Gennemført og låst (godkendt 2026-10-03, B-018). Specifikationen blev godkendt
+**Status:** 🔨 I gang. Masterfasen er opdelt i tre underfaser (B-019), fordi en rigtig Copilot
+forudsætter et politiklag (8A) og evidens i produktionskvalitet (8B), før den kan tages i brug
+(8C). 8A er gennemført og låst. 8B og 8C er ikke specificeret eller godkendt. 8B påbegyndes
+ikke, før det er godkendt.
+
+### 8A — AI Gateway
+
+**Status:** 🔒 Gennemført og låst (godkendt 2026-10-03, B-018). Leverance: `docs/08-ai-gateway.md`. Specifikationen blev godkendt
 2026-10-02 (B-012 til B-017). Lint, typecheck, build, enhedstests (213), pgTAP (302) samt
 integrations- og rutetests (107) består, og mutationstestene fanger 25 af 25 kodemutationer og
 14 af 14 databasemutationer. Rettelsen af `retrieveEvidence` (`docs/08` §18.2 pkt. 1) er
 bekræftet. Status og kendte begrænsninger står i `docs/08` §18. Fasen blev besluttet
 2026-10-02 (B-011).
 
-**Videreført:** forudsætningen om redaction og kundedata til fase 9, samtalelagring og rate
-limiting til den foreslåede fase 10.
+**Videreført:** forudsætningen om redaction og kundedata til 8B. Samtalelagring, rate limiting,
+retention og validering af prompterne mod en rigtig model til 8C.
 
 **Formål:** Politiklaget mellem applikationen og AI-modeller (`docs/03` §9). Det skal bygges
 uanset udbyder og kan testes uden en. Det afgør, hvilke kundedata der forlader platformen,
@@ -331,20 +365,21 @@ fail-closed, kun `local`/`test`). Copilot-brugerfladen viser mock-svar med kilde
 og Q-9 (B-017). Se `docs/08` §15 og §16.
 
 **Uden for omfang:** ekstern AI-udbyder, Claude API-adapter, valg af embedding- og
-reranking-udbyder (fase 9), samtalelagring, Learn/Practice/Advise/Assessment som moduler.
+reranking-udbyder (8B), samtalelagring (8C), Learn/Practice/Advise/Assessment som moduler
+(masterfase 9–12).
 
----
+### 8B — Produktionsgrundlag
 
-## Fase 9 — Produktionsgrundlag for Knowledge Engine
-
-**Status:** 📝 Foreslået — afventer godkendelse. Intet er specificeret eller implementeret.
-Forslaget blev oprindelig stillet som fase 8 og er flyttet uændret til fase 9 (B-011).
+**Status:** 📝 Ikke specificeret og ikke godkendt. Intet er implementeret. Indholdet blev
+foreslået ved afslutningen af fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B
+(B-019). Der må ikke specificeres eller implementeres noget i 8B, før det er godkendt.
 
 **Udgangspunkt:** Fase 7 kører på en test-embedder og `none`-rerankeren. Guardrailen
-(`docs/07` §9.1) forhindrer AI-moduler i at bruge udviklingsevidens. Der kan derfor ikke
-bygges AI-moduler (Copilot, Learn AI, Practice AI, Advise AI), før rigtige udbydere er valgt
-og retrieval-kvaliteten kan måles (`docs/07` §20.4, B-008). Fase 9 skaffer det grundlag. Den
-bygger ingen AI-funktionalitet.
+(`docs/07` §9.1, B-012) forhindrer, at udviklingsevidens når en production-model. AI-moduler kan
+godt bygges og testes mod stub- og testimplementeringer, sådan som Copilot er i 8A. Det, der er
+blokeret, er **produktionsklar anvendelse**: der kan ikke dannes production-evidens, før rigtige
+udbydere er valgt, og retrieval-kvaliteten kan måles (`docs/07` §20.4, B-008). 8B skaffer det
+grundlag. Den bygger ingen AI-funktionalitet.
 
 **Foreslået indhold:**
 
@@ -353,10 +388,11 @@ bygger ingen AI-funktionalitet.
    (`docs/07` §7) med sit eget indeks.
 2. **Reranking-udbyder.** En rigtig reranker bag `Reranker`-interfacet (`docs/07` §9) med
    grad `production`.
-3. **Evalueringssæt.** Rigtige spørgsmål med kendte svar og kilder, også spørgsmål uden
-   dokumentation. Måling af træfsikkerhed og af tærsklen for "utilstrækkeligt grundlag".
-   Tallene i `docs/07` §20.4 valideres eller erstattes. Først derefter må production-evidens
-   udstedes.
+3. **Evalueringssæt og evalueringsinfrastruktur.** Rigtige spørgsmål med kendte svar og
+   kilder, også spørgsmål uden dokumentation, og en gentagelig kørsel af dem. Måling af
+   træfsikkerhed og af tærsklen for "utilstrækkeligt grundlag". Tallene i `docs/07` §20.4
+   valideres eller erstattes. Først derefter må production-evidens udstedes. Sættet og
+   infrastrukturen bruges i 8C til at validere Copilot-prompterne mod en rigtig model.
 4. **Virusscanning af uploads** (`docs/07` B-26, i dag [AFKLARES]).
 5. **Workerens placering og adgang i produktion.** Hvor workeren kører, og en dedikeret
    adgang med mindst mulige rettigheder i stedet for service-role-nøglen (`docs/07` §14.1,
@@ -364,7 +400,7 @@ bygger ingen AI-funktionalitet.
 6. **Eventuelt testisolation:** integrationstests mod en separat database og en
    browserbaseret upload-test (`docs/07` §20.5).
 
-**Forudsætning, før kundedata må tillades (videreført fra fase 8):** Redaction kan ikke finde
+**Forudsætning, før kundedata må tillades (videreført fra 8A):** Redaction kan ikke finde
 navne i fri tekst (`docs/08` §7.2). I dag er det ufarligt, fordi matricen afviser
 `customer_identifiable` som standard. Beslutningen om at tillade kundedata for en model
 (`docs/03` §17 pkt. 4) **må ikke kunne træffes**, før problemet er løst på én af to måder:
@@ -372,16 +408,16 @@ navne i fri tekst (`docs/08` §7.2). I dag er det ufarligt, fordi matricen afvis
 - redaction kan finde navne i fri tekst, målt mod et testsæt, eller
 - fri tekst fra en kundecase sendes aldrig til modellen, og det håndhæves i gatewayen.
 
-Det er en forudsætning for beslutningen, ikke en kendt begrænsning. Fase 9 træffer ikke selv
-beslutningen om kundedata.
+Det er en forudsætning for beslutningen, ikke en kendt begrænsning. 8B træffer ikke selv
+beslutningen om kundedata, og den har betydning for Advise (masterfase 11).
 
-**Udenfor:** Claude API, Copilot og andre AI-moduler. AI Gateway er fase 8. Koblingen af Vercel-demoen
-på Supabase (B-003) sker til sidst, når udbydere og en produktionsløsning for workeren er på
-plads.
+**Udenfor:** generering med Claude API og Copilot klar til brug (8C) og de øvrige AI-moduler
+(masterfase 9–12). Koblingen af Vercel-demoen på Supabase (B-003) sker til sidst
+(masterfase 21).
 
-### Grundlag for udbydervalget (indsamlet 2026-10-02)
+#### Grundlag for udbydervalget (indsamlet 2026-10-02)
 
-Analysen er lavet før fase 8 blev omlagt. Den gemmes her, så den kan bruges, når fase 9
+Analysen er lavet, før fase 8 blev opdelt. Den gemmes her, så den kan bruges, når 8B
 specificeres. Oplysningerne er fra 2026-10-02 og skal efterprøves, før der vælges. Flere af
 dem kunne kun bekræftes gennem søgeresultater, fordi udbydernes egen dokumentation ikke kunne
 hentes.
@@ -440,32 +476,157 @@ mio. tokens gennem den eksisterende mekanisme (`docs/07` §7) og eventuelt et ny
 Rerankeren gemmer ingen tilstand og ligger bag `Reranker`-interfacet. Den reelle binding ligger
 i kontrakt, databehandleraftale og regionsopsætning.
 
----
+### 8C — Copilot klar til brug
 
-## Fase 10 — Copilot i produktion (foreslået placering)
-
-**Status:** 📝 Foreslået placering — ikke fastlagt, ikke specificeret. Intet bygges, før fasen er
-godkendt.
+**Status:** 📝 Ikke specificeret og ikke godkendt. Intet bygges, før det er godkendt. Indholdet
+hed tidligere den foreslåede "fase 10 — Copilot i produktion". Navnet er ændret, så det ikke
+forveksles med masterfase 21 Production (B-019).
 
 **Begrundelse for placeringen (udledt):** Copilot er det første AI-modul, en rådgiver kan bruge
-i hverdagen. Når fase 9 har skaffet production-evidens, er den næste forudsætning en rigtig
+i hverdagen. Når 8B har skaffet production-evidens, er den næste forudsætning en rigtig
 model bag gatewayen. Samtalelagring og rate limiting hører til her, fordi de først får
 betydning med en rigtig model og rigtige brugere. Rate limiting hører til, når kald koster
 noget. Samtalelagring er en del af Copilot-modulet, og den kræver retentionsbeslutningen.
 
-**Videreført hertil fra fase 8:**
+**Videreført hertil fra 8A:**
 
 1. **Samtalelagring.** `docs/02` §5 kræver samtalehistorik, som er brugerens egen og knyttet
    til den kontekst, samtalen blev ført i. En samtale ført inde i en kundecase skal kunne
-   genfindes fra sagen og følger kundecasens adgangs- og sletteregler (`docs/03` §11). Fase 8
+   genfindes fra sagen og følger kundecasens adgangs- og sletteregler (`docs/03` §11). 8A
    sender én tur ad gangen og gemmer intet (`docs/08` Q-5).
 2. **Rate limiting.** `docs/03` §9 lægger den i AI Gateway, og `docs/07` §14 siger, at den
    kommer med gatewayen. Kaldsloggen indeholder allerede det, der skal tælles (`docs/08` §10,
    Q-3). Omkostningsstyring pr. workflow (`docs/03` §16) hører sammen med den.
 
-**Andre kandidater (udledt, til afklaring, når fasen specificeres):** en production-model bag
-`Model`-interfacet (generering med Claude API, `docs/03` §2), og om EU- og
-databehandleraftale-kravet også gælder den (`docs/08` Q-7). Desuden validerede prompter mod
-evalueringssættet, citations-tabellen, retentionsperioder (`docs/03` §17 pkt. 5) og om
+3. **Retention.** I dag er kun to ting bygget: kundesagens indhold i AI-loggen slettes sammen
+   med sagen, og loggen kan ikke rettes (`docs/08` §11.4). Der findes ingen retentionspolitik
+   pr. datakategori og intet sletningsjob. Mekanismen og perioderne (`docs/03` §11, §17 pkt.
+   5) hører hertil.
+4. **Validering af Copilot-prompterne mod en rigtig model** med evalueringssættet og
+   -infrastrukturen fra 8B (`docs/08` §4.2).
+5. **Generering med en rigtig model:** en production-model bag `Model`-interfacet (Claude API,
+   `docs/03` §2), og om EU- og databehandleraftale-kravet også gælder den (`docs/08` Q-7).
+
+**Andre kandidater (udledt, til afklaring, når 8C specificeres):** citations-tabellen og om
 administratorers læsning af metadata og videnshuller skal slås til (B-014, `docs/08` Q-10).
 
+---
+
+## Fase 9 — Learn
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** sider med mock-data (fase 5). En Learn-profil i AI Gateway
+uden brugerflade (8A).
+
+---
+
+## Fase 10 — Practice
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** sider med mock-data (fase 5). En Practice-profil i AI Gateway
+og den minimale tabel `practice.roleplay_sessions` til gating (8A, B-013). Fasen udvider
+tabellen og bygger den ikke om.
+
+---
+
+## Fase 11 — Advise
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** sider med mock-data (fase 5), adgang pr. sag med ejer og
+deltagere (fase 6) og en Advise-profil i AI Gateway (8A). **Kundedata må ikke tillades til en
+model, før forudsætningen i 8B er opfyldt.**
+
+---
+
+## Fase 12 — Assessment
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** sider med mock-data (fase 5). Den minimale tabel
+`assessment.assessment_attempts` og server-side gating af AI under en aktiv prøve (8A, B-013,
+B-015). Fasen udvider tabellen og bygger den ikke om.
+
+---
+
+## Fase 13 — Personlig AI og læringsprofil
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** Min profil med mock-data (fase 5) og synlighedsfanen på
+rigtige data (`my_visibility`, fase 6).
+
+---
+
+## Fase 14 — Admin
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** Knowledge Engine-administrationen (fase 7) og AI Gatewayens
+tilstand (8A). Brugeradministration i brugerfladen og nulstilling af adgangskode blev henlagt i
+fase 6.
+
+---
+
+## Fase 15 — Analytics
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** sider med mock-data (fase 5). Lederscopes og audit af
+lederens individadgang (fase 6).
+
+---
+
+## Fase 16 — Kvalitet og guardrails
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** guardrailen for evidensgrad (fase 7), gatewayens politiklag,
+output-kontrakter og parringsreglen (8A, B-012) samt mutationstests i fase 7 og 8A.
+Evalueringssættet hører til 8B.
+
+---
+
+## Fase 17 — Test
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** hver fase har sine egne tests (enhed, pgTAP, integration,
+rute og mutation). Testisolation og en browserbaseret upload-test er foreslået i 8B
+(`docs/07` §20.5).
+
+---
+
+## Fase 18 — Pilotversion
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret. Intet bygget.
+
+---
+
+## Fase 19 — Feedback
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** knapperne til tommel op og ned under Copilot-svar er kun
+brugerflade. Intet gemmes.
+
+---
+
+## Fase 20 — Enterprise-version
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Fundament fra tidligere faser:** MFA og SSO blev henlagt i fase 6. Connectors er beskrevet i
+`docs/03` §15.
+
+---
+
+## Fase 21 — Produktion
+
+**Status:** ⬜ Ikke påbegyndt — ikke specificeret.
+
+**Hører hertil:** Supabase i produktion i EU (henlagt i fase 6) og koblingen af Vercel-demoen på
+Supabase med fjernelse af demo-tilstanden (B-003). Workerens placering og adgang i produktion
+hører til 8B, fordi production-evidens forudsætter den.

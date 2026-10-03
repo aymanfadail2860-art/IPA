@@ -8,19 +8,20 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 ## 1. Status
 
-**Fase 1–8 er gennemført og låst.** Fase 8 — AI Gateway blev godkendt 2026-10-03
-(`docs/08-ai-gateway.md`). Fase 9 — Produktionsgrundlag for Knowledge Engine er foreslået, og
-fase 10 — Copilot i produktion er en foreslået placering (`docs/roadmap.md`). Der
-implementeres intet i fase 9, før den er godkendt.
+**Fase 1–7 og underfase 8A er gennemført og låst.** 8A — AI Gateway blev godkendt 2026-10-03
+(`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot er opdelt i 8A, 8B — Produktionsgrundlag og
+8C — Copilot klar til brug (B-019). 8B og 8C er ikke specificeret eller godkendt, og der
+påbegyndes intet i 8B, før det er godkendt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
 B-003).
 
-Låst betyder, at dokumenterne fra fase 1–8 er projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
+Låst betyder, at dokumenterne fra fase 1–7 og 8A er projektets autoritative specifikation. De ændres ikke som led i implementeringen, men kun
 ved en eksplicit beslutning om at genåbne dem.
 
-Se `docs/roadmap.md` for den aktuelle status. Produktdefinitionen ligger i
+Se `docs/roadmap.md` for den aktuelle status. Den er source of truth for master-roadmappen med
+de 21 låste masterfaser (B-019). Produktdefinitionen ligger i
 `docs/01-product-definition.md` og informationsarkitekturen i
 `docs/02-information-architecture.md`.
 
@@ -36,8 +37,8 @@ fase, der ophæver dem, er nået.
    genåbne dokumentet. Modelversioner, embedding-model og reranker er bevidst
    ikke låst og behandles som konfiguration.
 2. **Implementering er tilladt fra fase 5.** Insurance Partners må implementeres inden for
-   rammerne af de låste dokumenter fra fase 1–4. Hver fase implementerer kun det, fasen
-   omfatter; senere fasers funktionalitet bygges ikke forud.
+   rammerne af de låste dokumenter (fase 1–7 og 8A, se §1). Hver fase implementerer kun det,
+   fasen omfatter; senere fasers funktionalitet bygges ikke forud.
 3. **Ingen opfundne krav.** Er en produktdetalje ikke oplyst, er den ukendt. Marker den,
    udfyld den ikke.
 4. **Teknologineutral formulering i fase 1 og 2.** Produktdefinitionen og
@@ -49,6 +50,11 @@ fase, der ophæver dem, er nået.
    produktkrav, informationsarkitektur, teknisk arkitektur eller design: **stop ved den
    konkrete konflikt og forklar den.** Et låst krav ændres ikke stiltiende for at få koden
    til at virke.
+7. **Master-roadmappen er låst (B-019).** De 21 masterfaser i `docs/roadmap.md` er projektets
+   overordnede roadmap. Underfaser (fx 8A, 8B, 8C) må foreslås under en masterfase, når den
+   tekniske kompleksitet kræver det. Uden eksplicit godkendelse må ingen masterfase fjernes,
+   omnummereres eller erstattes, der må ikke indsættes en ny masterfase mellem de eksisterende,
+   og et oprindeligt hovedområde må ikke flyttes til et andet nummer.
 
 ### Konventioner for implementering
 
@@ -76,10 +82,25 @@ fase, der ophæver dem, er nået.
 | 5 | Grundplatform | **Gennemført og låst** |
 | 6 | Identity, database og adgangskontrol | **Gennemført og låst** |
 | 7 | Knowledge Engine | **Gennemført og låst** |
-| 8 | AI Gateway | **Gennemført og låst** |
-| 9 | Produktionsgrundlag for Knowledge Engine | **Foreslået — afventer godkendelse** |
-| 10 | Copilot i produktion | **Foreslået placering — ikke fastlagt** |
-| 11+ | *Ikke fastlagt* | Ikke påbegyndt |
+| 8 | AI Copilot | **I gang** — opdelt i underfaser |
+| 8A | AI Gateway | **Gennemført og låst** |
+| 8B | Produktionsgrundlag | Ikke specificeret/godkendt |
+| 8C | Copilot klar til brug | Ikke specificeret/godkendt |
+| 9 | Learn | Ikke påbegyndt |
+| 10 | Practice | Ikke påbegyndt |
+| 11 | Advise | Ikke påbegyndt |
+| 12 | Assessment | Ikke påbegyndt |
+| 13 | Personlig AI og læringsprofil | Ikke påbegyndt |
+| 14 | Admin | Ikke påbegyndt |
+| 15 | Analytics | Ikke påbegyndt |
+| 16 | Kvalitet og guardrails | Ikke påbegyndt |
+| 17 | Test | Ikke påbegyndt |
+| 18 | Pilotversion | Ikke påbegyndt |
+| 19 | Feedback | Ikke påbegyndt |
+| 20 | Enterprise-version | Ikke påbegyndt |
+| 21 | Produktion | Ikke påbegyndt |
+
+Tabellen gengiver master-roadmappen. `docs/roadmap.md` er source of truth (§2 regel 7).
 
 En fase skifter kun, når det siges eksplicit. At et dokument bliver færdigt, rykker ikke
 fasen, og der arbejdes ikke forud på senere faser.
@@ -101,9 +122,8 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/05-foundation-implementation.md` | 5 | Oprettet |
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
 | `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
-| `docs/08-ai-gateway.md` | 8 | Oprettet — gennemført og låst |
+| `docs/08-ai-gateway.md` | 8A | Oprettet — gennemført og låst |
 | `docs/decisions.md` | Løbende | Oprettet |
-| `docs/open-questions.md` | Løbende | Ikke oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i
 `docs/roadmap.md`. Der oprettes ikke en separat fil til åbne spørgsmål.
@@ -118,8 +138,9 @@ dansk. Sig til, hvis navnene også skal være danske.
 **Sproget er dansk.** Al dokumentation skrives på dansk. Hvor et engelsk fagudtryk er
 det, der reelt bruges i branchen, angives det i parentes første gang i ordlisten.
 
-**Det ukendte markeres, det gættes ikke.** Brug `[AFKLARES]` inline, og opret samtidig et
-punkt i `docs/open-questions.md`. Et dokument med synlige huller er mere brugbart end et,
+**Det ukendte markeres, det gættes ikke.** Brug `[AFKLARES]` inline i det dokument, punktet
+vedrører, og gentag punktet i `docs/roadmap.md` under den fase, det hører til (§4). Der findes
+ingen separat fil til åbne spørgsmål. Et dokument med synlige huller er mere brugbart end et,
 der fremstår færdigt, men delvist er opdigtet.
 
 **Krav nummereres og holdes atomare.** Formatet er `KRAV-<område>-<nnn>`, én testbar
