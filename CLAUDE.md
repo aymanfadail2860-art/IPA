@@ -38,8 +38,10 @@ fase, der ophæver dem, er nået.
    genåbne dokumentet. Modelversioner, embedding-model og reranker er bevidst
    ikke låst og behandles som konfiguration.
 2. **Implementering er tilladt fra fase 5.** Insurance Partners må implementeres inden for
-   rammerne af de låste dokumenter (fase 1–7 og 8A, se §1). Hver fase implementerer kun det,
-   fasen omfatter; senere fasers funktionalitet bygges ikke forud.
+   rammerne af de låste dokumenter: fase 1–7, fase 8A og fase 8B-specifikationen (se §1).
+   8B er kun låst som specifikation. Implementeringen af 8B er ikke gennemført, er derfor ikke
+   låst som implementering og påbegyndes først efter særskilt, eksplicit godkendelse. Hver fase
+   implementerer kun det, fasen omfatter; senere fasers funktionalitet bygges ikke forud.
 3. **Ingen opfundne krav.** Er en produktdetalje ikke oplyst, er den ukendt. Marker den,
    udfyld den ikke.
 4. **Teknologineutral formulering i fase 1 og 2.** Produktdefinitionen og
