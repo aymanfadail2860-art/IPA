@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://insurance-partners.invalid/evals/retrieval/gates.schema.json",
+  "title": "Gate-sæt med kvalitetsgates Q1–Q7 (docs/08b §4.4, D-6)",
+  "description": "Kun tærsklerne er data. Metrik og retning er låst (evals/engine/schema.ts, LOCKED_QUALITY_GATES). De hårde gates H1–H7 er invarianter med nul tolerance og må ikke stå i et gate-sæt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "decision", "k", "quality"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "decision": { "type": "string", "pattern": "^B-\\d{3}$" },
+    "description": { "type": "string", "minLength": 1 },
+    "k": { "const": 8 },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7"],
+      "properties": {
+        "Q1": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "source_recall_at_k" }, "comparator": { "const": ">=" } } },
+        "Q2": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "passage_recall_at_k" }, "comparator": { "const": ">=" } } },
+        "Q3": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "mrr_at_k" }, "comparator": { "const": ">=" } } },
+        "Q4": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "correct_abstention" }, "comparator": { "const": ">=" } } },
+        "Q5": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "false_abstention" }, "comparator": { "const": "<=" } } },
+        "Q6": { "$ref": "#/$defs/threshold", "properties": { "metric": { "const": "distractor_intrusion" }, "comparator": { "const": "<=" } } },
+        "Q7": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric", "comparator"],
+          "properties": { "metric": { "const": "reranker_uplift" }, "comparator": { "const": "not_lower" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "threshold": {
+      "type": "object",
+      "required": ["metric", "comparator", "threshold"],
+      "properties": { "metric": { "type": "string" }, "comparator": { "type": "string" }, "threshold": { "type": "number", "minimum": 0, "maximum": 1 } }
+    }
+  }
+}

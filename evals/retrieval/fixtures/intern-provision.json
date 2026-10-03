@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "document": "intern-provision",
+  "fictional": true,
+  "notice": "FIKTIVT TESTMATERIALE. Teksten er skrevet til evalueringen af retrieval og beskriver ingen rigtig forsikring, virksomhed eller person.",
+  "versions": {
+    "1": {
+      "sections": [
+        { "heading": "Provision ved nytegning", "text": "Provisionssatsen for nytegning af erhvervsansvar i testporteføljen er 7 procent af første års præmie." }
+      ]
+    }
+  }
+}

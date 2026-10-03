@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "document": "ansvar-accept-notat",
+  "fictional": true,
+  "notice": "FIKTIVT TESTMATERIALE. Teksten er skrevet til evalueringen af retrieval og beskriver ingen rigtig forsikring, virksomhed eller person.",
+  "versions": {
+    "1": {
+      "sections": [
+        { "heading": "Notat om acceptgrænser", "text": "Grænsen for individuel vurdering af omsætning er hævet til 75 mio. kr. for virksomheder i håndværksbranchen." }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "document": "ansvar-accept",
+  "fictional": true,
+  "notice": "FIKTIVT TESTMATERIALE. Teksten er skrevet til evalueringen af retrieval og beskriver ingen rigtig forsikring, virksomhed eller person.",
+  "versions": {
+    "1": {
+      "sections": [
+        { "heading": "Acceptgrænser for omsætning", "text": "Virksomheder med en årlig omsætning over 50 mio. kr. kræver individuel vurdering af en underwriter, før der kan gives tilbud." }
+      ]
+    }
+  }
+}

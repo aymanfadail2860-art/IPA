@@ -1,0 +1,16 @@
+{
+  "id": "gates",
+  "version": 1,
+  "decision": "B-020",
+  "description": "De initiale kvalitetsgates Q1–Q7 for 8B (docs/08b §4.4, D-6). Kun tærsklerne er data. Metrik og retning er låst i koden, og de hårde gates H1–H7 er invarianter med nul tolerance, som aldrig står her. Rekalibrering kræver en ny version af filen, en ny versionsstyret baseline og en godkendt beslutning.",
+  "k": 8,
+  "quality": {
+    "Q1": { "metric": "source_recall_at_k", "comparator": ">=", "threshold": 0.95 },
+    "Q2": { "metric": "passage_recall_at_k", "comparator": ">=", "threshold": 0.85 },
+    "Q3": { "metric": "mrr_at_k", "comparator": ">=", "threshold": 0.70 },
+    "Q4": { "metric": "correct_abstention", "comparator": ">=", "threshold": 0.80 },
+    "Q5": { "metric": "false_abstention", "comparator": "<=", "threshold": 0.10 },
+    "Q6": { "metric": "distractor_intrusion", "comparator": "<=", "threshold": 0.10 },
+    "Q7": { "metric": "reranker_uplift", "comparator": "not_lower" }
+  }
+}

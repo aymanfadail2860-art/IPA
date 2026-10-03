@@ -1176,3 +1176,97 @@ produktionsbrug:**
 7. Kundedataspærren (§8.2, alle fem lag).
 8. Observability og alarmer.
 9. Godkendelse og aktivering af konfigurationen. Exit-kriterierne i §17. Dokumentation.
+
+---
+
+## 21. Implementeringsstatus
+
+Specifikationen ovenfor er låst (B-020). Afsnittet her registrerer, hvad der er implementeret.
+8B implementeres i deltrin, og hvert deltrin kræver din godkendelse. **8B er ikke fuldt
+implementeret.**
+
+| Deltrin | Indhold | Status |
+|---------|---------|--------|
+| **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Implementeret 2026-10-03 |
+| Øvrige | Udbydere, register og `evaluation_publisher`, evalueringsmiljø, baseline, worker, kundedataspærre, observability, aktivering | Ikke påbegyndt |
+
+### 21.1 8B-I1 — Evalueringsframework og gates
+
+**Leveret:**
+
+- **Motoren** ligger i `evals/engine/`, uden for applikationen. Den importeres aldrig af `src/`
+  (guardrail-test). Den skriver aldrig til en database og udsteder eller opgraderer aldrig
+  evidens. Modulerne er:
+  - `schema.ts`: skema v1 for spørgsmål, manifest, gate-sæt og erklæret konfiguration.
+  - `checksum.ts`: kanonisk JSON, checksums og fingeraftryk.
+  - `observe.ts`: facit med ankre og H1–H6 pr. spørgsmål.
+  - `metrics.ts`: metrikker og Wilson-intervaller.
+  - `gates.ts`: H1–H7, Q1–Q7, minimum pr. type, tier og afgørelse.
+  - `runner.ts`: selve kørslen, H6/H7 på kørselsniveau og rapporten.
+  - `report.ts`: rapporten i Markdown.
+  - `publication.ts`: kontrakten for publicering og genberegningen.
+  - `fixture-retrieval.ts`: retrieval over det fiktive korpus.
+  - `loader.ts` og `cli.ts`: indlæsning og kommandolinjen.
+- **Data** ligger i `evals/retrieval/`:
+  - README med metoden
+  - JSON Schemas for spørgsmål, manifest og gate-sæt
+  - `gates/gates-v1.json` med Q1–Q7 (B-020)
+  - konfigurationen `fixture-development`
+  - det syntetiske eksempelsæt `example-v1`
+  - fiktive fixtures
+- **Kørsel:** `IPA_RUNTIME_ENV=test npm run eval:retrieval`. Fixture-retrieval kører den
+  rigtige `runRetrieval` (fusion, reranking, udvælgelse, konflikter og EvidenceSet) med
+  udviklingsimplementeringerne fra registret over en emuleret database.
+  - Emuleringen anvender manifestets tildelinger, gyldighed og filtre, som SQL-funktionerne
+    gør.
+  - En fixture-kørsel består aldrig: evidensen er `development` (H6), og miljøet er ikke
+    evalueringsmiljøet (H7).
+- **Tests:** 122 nye enhedstests i `src/tests/eval-retrieval-*.test.ts`. En mutationskørsel
+  over motoren gav 45/45 fangede mutationer.
+
+**Udledt (fortolkninger af den låste tekst):**
+
+1. **Passage Recall:** den *primære* passage er den første passage med grad 3 i facit.
+2. **"Usikker":** for "≤"-gates (Q5, Q6) afgøres usikkerheden af den *øvre* grænse. Et ellers
+   bestået resultat med et usikkert gate får den samlede afgørelse `uncertain`.
+3. **Distraktor-indtrængen** uden returnerede elementer er 0. Et tomt resultat fanges af Q5.
+4. **En retrieval-fejl** tæller som det værst mulige udfald og gør kørslen ugyldig.
+5. **`mustNotInclude`** dækker versioner, der er ugyldige for spørgsmålet, og et fund er et brud
+   på H3. Distraktorer har deres eget felt (`distractors`, Q6).
+6. **Tier:** fra 100 aktive spørgsmål er tier `standard` (§10.1). Det er kun en betegnelse i
+   rapporten, ikke en certificering.
+7. **Redaction-kontrollen (§5.1)** er en Vitest-test, så den kører i `npm test` og
+   `npm run check`.
+8. **Udvidet struktur:** `schema/gates.schema.json` og `configurations/` er tilføjet til
+   strukturen i §5.1. Begge er additive.
+
+**Udskudt (hører til senere deltrin, §20):**
+
+- **`evaluation_publisher`** (D-18): databaserollen, `knowledge.evaluation_runs`,
+  `knowledge.record_evaluation_run` og registrering og godkendelse af gate-sæt hører til
+  registret (§10, §20 trin 3).
+  - 8B-I1 leverer kontrakten (`EvaluationPublisher`) og genberegningen (`verifyReport`), som
+    SQL-funktionen skal spejle.
+  - Den eneste publisher, `unavailablePublisher`, afviser alt.
+  - Der findes ingen vej til et `PublishedEvaluationRun`.
+- **Evalueringsmiljøet** (§4.5): et separat Supabase-projekt med en adapter, der kører
+  `runRetrieval` mod rigtige data og identiteter. Indtil da erklærer adapteren selv sit miljø,
+  og kun "evaluation" opfylder H7.
+- **Chunker-version i evidensen (P7):** `EvidenceItem` bærer ikke `chunker_version`.
+  Fixture-adapteren leverer den pr. chunk. Retrieval-laget skal levere den sammen med P1–P9.
+- **Algoritmeversionen** (`hybrid-rrf-1`) står som konstant i fixture-adapteren, indtil den
+  flytter ind i retrieval-laget med registret (§10.1, P9).
+- **Pilot-evalueringssættet** `terms-v1` med 30–50 rigtige spørgsmål tilføjes af dig.
+  Kalibreringsproceduren og retningslinjerne for fiktive dokumenter skal skrives i README før
+  baseline (Å-3, Å-4).
+
+**Afvigelser fra den låste specifikation:** ingen i indhold.
+
+- **Rækkefølgen** følger din opdeling i deltrin og ikke §20.
+- **Ingen dependencies, migrationer eller produktionskode:** I1 tilføjer ingen dependency og
+  ingen migration og ændrer ingen kode i `src/` eller `workers/`.
+- **Alias-hook:** CLI'en bruger et lille Node-modul-hook (`evals/engine/node-hooks.mjs`) til
+  stialiasset `@/`.
+
+**Ingen production-grad:** en rapport fra 8B-I1 har altid `production.eligible: false`. Den kan
+hverken godkende, registrere eller aktivere en konfiguration, og P1–P9 er ikke implementeret.

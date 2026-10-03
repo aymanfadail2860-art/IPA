@@ -5,8 +5,9 @@ status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–7 og underfase 8A er gennemført og **låst**. 8A — AI Gateway blev
 godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikationen er godkendt og låst** 2026-10-03 (B-020,
-`docs/08b-production-foundation.md`). **Implementeringen af 8B er det næste arbejde** og kræver
-en særskilt godkendelse. 8C — Copilot klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
+`docs/08b-production-foundation.md`). **Deltrin 8B-I1 (evalueringsframework og gates) er
+implementeret.** Resten af 8B implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
+klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -40,7 +41,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔒 Specifikation godkendt og låst (B-020) — implementering er næste skridt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). Deltrin 8B-I1 implementeret, resten afventer godkendelse | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -372,8 +373,15 @@ reranking-udbyder (8B), samtalelagring (8C), Learn/Practice/Advise/Assessment so
 ### 8B — Produktionsgrundlag
 
 **Status:** 🔒 Specifikationen er godkendt og låst 2026-10-03 (B-020,
-`docs/08b-production-foundation.md`). **Intet er implementeret.** Implementeringen er det næste
-arbejde og kræver en særskilt, eksplicit godkendelse. Indholdet blev foreslået ved afslutningen af
+`docs/08b-production-foundation.md`). Implementeringen sker i deltrin, og hvert deltrin kræver
+godkendelse.
+
+- **8B-I1 — evalueringsframework og gates: ✅ implementeret 2026-10-03.** Indholdet er
+  `evals/engine/` og `evals/retrieval/`, og status, udledninger og udskudte dele står i
+  `docs/08b` §21.1.
+- En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
+  evidens kan ikke blive production.
+- Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af
 fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B (B-019). Beslutningerne D-1–D-20 står
 i specifikationens §19, og implementeringsrækkefølgen i §20.
 

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "document": "ansvar-betingelser",
+  "fictional": true,
+  "notice": "FIKTIVT TESTMATERIALE. Teksten er skrevet til evalueringen af retrieval og beskriver ingen rigtig forsikring, virksomhed eller person.",
+  "versions": {
+    "1": {
+      "sections": [
+        { "heading": "§ 1 Hvad forsikringen dækker", "text": "Forsikringen dækker sikredes erstatningsansvar for skade på personer og ting, som sikrede forvolder i forbindelse med den forsikrede virksomhed." },
+        { "heading": "§ 2 Behandlingsskade", "text": "Forsikringen dækker ikke skade på ting, som sikrede har til bearbejdning, reparation eller anden behandling." },
+        { "heading": "§ 3 Selvrisiko", "text": "Selvrisikoen er 5.000 kr. for hver skade, der er omfattet af forsikringen." }
+      ]
+    },
+    "2": {
+      "sections": [
+        { "heading": "§ 1 Hvad forsikringen dækker", "text": "Forsikringen dækker sikredes erstatningsansvar for skade på personer og ting, som sikrede forvolder i forbindelse med den forsikrede virksomhed." },
+        { "heading": "§ 2 Behandlingsskade", "text": "Forsikringen dækker ikke skade på ting, som sikrede har til bearbejdning, reparation eller anden behandling, medmindre der er tegnet tillæg om behandlingsskade." },
+        { "heading": "§ 3 Selvrisiko", "text": "Selvrisikoen er 10.000 kr. for hver skade, der er omfattet af forsikringen." },
+        { "heading": "§ 4 Forurening", "text": "Forsikringen dækker ikke skade som følge af gradvis forurening af jord, luft eller vand." }
+      ]
+    }
+  }
+}

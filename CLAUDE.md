@@ -11,8 +11,9 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 **Fase 1–7 og underfase 8A er gennemført og låst.** 8A — AI Gateway blev godkendt 2026-10-03
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot er opdelt i 8A, 8B — Produktionsgrundlag og
 8C — Copilot klar til brug (B-019). Specifikationen for 8B er godkendt og låst 2026-10-03
-(`docs/08b-production-foundation.md`, B-020). Implementeringen af 8B er det næste arbejde, men
-påbegyndes først efter en særskilt, eksplicit godkendelse. 8C er ikke påbegyndt.
+(`docs/08b-production-foundation.md`, B-020). 8B implementeres i deltrin, som hver kræver
+eksplicit godkendelse. Deltrin 8B-I1 (evalueringsframework og gates) er implementeret. Resten af
+8B er ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -87,7 +88,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — implementering er næste skridt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — deltrin 8B-I1 implementeret, resten afventer godkendelse |
 | 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |

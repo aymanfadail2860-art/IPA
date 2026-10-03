@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://insurance-partners.invalid/evals/retrieval/manifest.schema.json",
+  "title": "Manifest for et evalueringssæt, skema v1 (docs/08b §5.1, §5.5)",
+  "description": "Sæt-id, version, dokumenter (med kilde, licens og gyldighed), evalueringsbrugere og deres tildelinger, og erklærede konflikter. Håndhæves af evals/engine/schema.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "setId", "version", "description", "products", "documents", "actors", "conflicts"],
+  "properties": {
+    "schema": { "const": 1 },
+    "setId": { "$ref": "#/$defs/key" },
+    "version": { "type": "integer", "minimum": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "products": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "object", "additionalProperties": false, "required": ["key", "name"], "properties": { "key": { "$ref": "#/$defs/key" }, "name": { "type": "string", "minLength": 1 } } }
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "title", "type", "product", "language", "fictional", "source", "versions"],
+        "properties": {
+          "key": { "$ref": "#/$defs/key" },
+          "title": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["policy_text", "terms", "product_description", "acceptance_rules", "business_procedure", "guidance", "sales_material", "internal_document"] },
+          "product": { "$ref": "#/$defs/key" },
+          "language": { "type": "string", "pattern": "^[a-z]{2}$" },
+          "fictional": { "type": "boolean" },
+          "source": {
+            "oneOf": [
+              { "type": "object", "additionalProperties": false, "required": ["kind", "path"], "properties": { "kind": { "const": "fixture" }, "path": { "type": "string", "pattern": "^[a-z0-9][a-z0-9/_.-]*\\.json$" } } },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "url", "sha256", "licence"],
+                "properties": { "kind": { "const": "public" }, "url": { "type": "string", "pattern": "^https://" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "licence": { "type": "string", "minLength": 1 } }
+              }
+            ]
+          },
+          "versions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "validFrom", "validTo", "status"],
+              "properties": {
+                "label": { "$ref": "#/$defs/key" },
+                "validFrom": { "type": ["string", "null"], "format": "date" },
+                "validTo": { "type": ["string", "null"], "format": "date", "description": "Eksklusiv: [validFrom, validTo)." },
+                "status": { "enum": ["published", "withdrawn"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "actors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "grants"],
+        "properties": {
+          "id": { "$ref": "#/$defs/key" },
+          "description": { "type": "string", "minLength": 1 },
+          "grants": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": false, "required": ["document", "historical"], "properties": { "document": { "$ref": "#/$defs/key" }, "historical": { "type": "boolean" } } }
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "documents", "status"],
+        "properties": {
+          "id": { "$ref": "#/$defs/key" },
+          "documents": { "type": "array", "items": { "$ref": "#/$defs/key" }, "minItems": 2, "maxItems": 2, "uniqueItems": true },
+          "status": { "enum": ["open", "resolved"] }
+        }
+      }
+    }
+  },
+  "$defs": { "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" } }
+}

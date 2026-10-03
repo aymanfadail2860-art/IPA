@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://insurance-partners.invalid/evals/retrieval/case.schema.json",
+  "title": "Evalueringsspørgsmål til retrieval, skema v1 (docs/08b §5.2)",
+  "description": "Ét spørgsmål pr. linje i cases/*.jsonl. Motoren håndhæver samme regler i evals/engine/schema.ts (inkl. reglerne pr. type og krydstjek mod manifestet); en test holder de to i takt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "schema", "type", "question", "language", "actor", "mode", "expected", "split", "author", "created", "notes"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "description": "Stabilt id. Ændres aldrig." },
+    "schema": { "const": 1 },
+    "type": { "enum": ["direct", "multi_chunk", "historical", "conflict", "unanswerable", "distractor", "permission", "filter"] },
+    "question": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "language": { "type": "string", "pattern": "^[a-z]{2}$" },
+    "actor": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "description": "Evalueringsbruger fra manifestet (§5.5)." },
+    "mode": { "enum": ["current", "as_of"] },
+    "asOf": { "type": "string", "format": "date", "description": "Kun ved mode \"as_of\"." },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "products": { "$ref": "#/$defs/keys" },
+        "documents": { "$ref": "#/$defs/keys" },
+        "documentTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["policy_text", "terms", "product_description", "acceptance_rules", "business_procedure", "guidance", "sales_material", "internal_document"] }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "passages"],
+      "properties": {
+        "outcome": { "enum": ["evidence", "insufficient"] },
+        "passages": {
+          "type": "array",
+          "description": "Facit som ankre: dokument + version + ordret tekst. Aldrig chunk-id'er (§5.4).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["document", "version", "anchor", "grade"],
+            "properties": {
+              "document": { "$ref": "#/$defs/key" },
+              "version": { "$ref": "#/$defs/key" },
+              "anchor": { "type": "string", "minLength": 8, "maxLength": 300 },
+              "grade": { "enum": [1, 2, 3] }
+            }
+          }
+        },
+        "temporalStatus": { "enum": ["current", "historical"] },
+        "mustNotInclude": { "$ref": "#/$defs/refs", "description": "Versioner, der er ugyldige for spørgsmålet. Et fund er et gyldighedsbrud (H3)." },
+        "conflict": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["documents"],
+              "properties": { "documents": { "type": "array", "items": { "$ref": "#/$defs/key" }, "minItems": 2, "maxItems": 2, "uniqueItems": true } }
+            }
+          ]
+        },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forbiddenDocuments"],
+          "properties": { "forbiddenDocuments": { "$ref": "#/$defs/keys" } }
+        },
+        "distractors": { "$ref": "#/$defs/refs", "description": "Dokumenter, der ligner, men ikke gælder (Q6)." }
+      }
+    },
+    "split": { "enum": ["dev", "holdout"] },
+    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "author": { "type": "string", "minLength": 1 },
+    "created": { "type": "string", "format": "date" },
+    "notes": { "type": "string", "minLength": 1, "description": "Hvorfor spørgsmålet findes, og hvad facit bygger på." },
+    "retired": { "type": "boolean" },
+    "retiredReason": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    { "if": { "properties": { "mode": { "const": "as_of" } } }, "then": { "required": ["asOf"] }, "else": { "not": { "required": ["asOf"] } } },
+    { "if": { "properties": { "retired": { "const": true } }, "required": ["retired"] }, "then": { "required": ["retiredReason"] }, "else": { "not": { "required": ["retiredReason"] } } }
+  ],
+  "$defs": {
+    "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "keys": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/key" } },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["document"],
+        "properties": { "document": { "$ref": "#/$defs/key" }, "version": { "$ref": "#/$defs/key" } }
+      }
+    }
+  }
+}

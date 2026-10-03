@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "document": "bygning-betingelser",
+  "fictional": true,
+  "notice": "FIKTIVT TESTMATERIALE. Teksten er skrevet til evalueringen af retrieval og beskriver ingen rigtig forsikring, virksomhed eller person.",
+  "versions": {
+    "1": {
+      "sections": [
+        { "heading": "§ 1 Udstrømning af vand", "text": "Forsikringen dækker skade ved pludselig udstrømning af vand fra skjulte rør i bygningen." },
+        { "heading": "§ 2 Storm", "text": "Stormskade dækkes, når vindhastigheden har været mindst 17,2 meter i sekundet." },
+        { "heading": "§ 3 Selvrisiko ved bygningsskade", "text": "Selvrisikoen for bygningsskade er 2.500 kr. pr. skade." }
+      ]
+    }
+  }
+}

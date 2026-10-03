@@ -42,3 +42,6 @@ next-env.d.ts
 
 # The example env file (placeholders only, no secrets) is committed.
 !.env.example
+
+# retrieval evaluation output (docs/08b §4.5) — reports are registered, not committed
+/evals/retrieval/reports/
