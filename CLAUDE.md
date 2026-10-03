@@ -10,8 +10,9 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 
 **Fase 1–7 og underfase 8A er gennemført og låst.** 8A — AI Gateway blev godkendt 2026-10-03
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot er opdelt i 8A, 8B — Produktionsgrundlag og
-8C — Copilot klar til brug (B-019). 8B og 8C er ikke specificeret eller godkendt, og der
-påbegyndes intet i 8B, før det er godkendt.
+8C — Copilot klar til brug (B-019). Specifikationen for 8B er skrevet og afventer godkendelse
+(`docs/08b-production-foundation.md`). Der implementeres intet i 8B, før den er godkendt. 8C er
+ikke specificeret.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -84,7 +85,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | Ikke specificeret/godkendt |
+| 8B | Produktionsgrundlag | Specifikation — afventer godkendelse |
 | 8C | Copilot klar til brug | Ikke specificeret/godkendt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |
@@ -123,6 +124,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/06-identity-database-access-control.md` | 6 | Oprettet |
 | `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
 | `docs/08-ai-gateway.md` | 8A | Oprettet — gennemført og låst |
+| `docs/08b-production-foundation.md` | 8B | Oprettet — specifikation, afventer godkendelse |
 | `docs/decisions.md` | Løbende | Oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i

@@ -4,8 +4,9 @@ Oversigt over projektets faser og deres status. Filen opdateres, når en fase sk
 status. En fase markeres først som gennemført efter eksplicit besked.
 
 **Aktuel status:** Fase 1–7 og underfase 8A er gennemført og **låst**. 8A — AI Gateway blev
-godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag og 8C — Copilot klar til brug er ikke
-specificeret eller godkendt. Masterfase 9–21 er ikke påbegyndt.
+godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikation skrevet — afventer
+godkendelse** (`docs/08b-production-foundation.md`). 8C — Copilot klar til brug er ikke
+specificeret. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -39,7 +40,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 📝 Ikke specificeret/godkendt | — |
+| 8B | Produktionsgrundlag | 📝 Specifikation — afventer godkendelse | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | 📝 Ikke specificeret/godkendt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -370,9 +371,10 @@ reranking-udbyder (8B), samtalelagring (8C), Learn/Practice/Advise/Assessment so
 
 ### 8B — Produktionsgrundlag
 
-**Status:** 📝 Ikke specificeret og ikke godkendt. Intet er implementeret. Indholdet blev
-foreslået ved afslutningen af fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B
-(B-019). Der må ikke specificeres eller implementeres noget i 8B, før det er godkendt.
+**Status:** 📝 Specifikation skrevet — afventer godkendelse (`docs/08b-production-foundation.md`).
+Intet er implementeret. Indholdet blev foreslået ved afslutningen af fase 7, hed derefter "fase
+9" (B-011) og er nu underfase 8B (B-019). Der implementeres intet i 8B, før specifikationen er
+godkendt. Beslutningerne D-1 til D-17 står i specifikationens §19.
 
 **Udgangspunkt:** Fase 7 kører på en test-embedder og `none`-rerankeren. Guardrailen
 (`docs/07` §9.1, B-012) forhindrer, at udviklingsevidens når en production-model. AI-moduler kan

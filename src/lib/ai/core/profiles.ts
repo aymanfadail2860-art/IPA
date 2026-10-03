@@ -5,8 +5,8 @@ import type { DataCategory, ProfileId } from "./types";
  * Workflow profiles (docs/08 §4, docs/03 §9 and §7). Versioned in the repository and reviewed as
  * code (B-017). A profile can never perform another profile's actions.
  *
- * ⚠ The prompts are DRAFTS and NOT VALIDATED. They cannot be validated without a real model and
- * an evaluation set (phase 9). Raise `version` when a prompt or contract changes.
+ * ⚠ The prompts are DRAFTS and NOT VALIDATED. The evaluation set and its infrastructure come in
+ * 8B; validation against a real model happens in 8C. Raise `version` when a prompt or contract changes.
  */
 
 export interface ActionSpec {
