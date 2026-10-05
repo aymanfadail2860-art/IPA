@@ -1,14 +1,21 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { Chunk } from "./chunker.ts";
-import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, OriginalStore, WorkerDb } from "./pipeline.ts";
+import { handleWorkerStorage, supabaseStorageDeps, type StorageClient } from "../../supabase/functions/worker-storage/handler.ts";
+
+import type { Clearance } from "./gate.ts";
+import { ticketOriginals } from "./originals.ts";
+import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, OriginalStore, RecordedVerdict, WorkerDb } from "./pipeline.ts";
+import type { ScanContext } from "./security/scan.ts";
 
 /**
  * ⚠ DEVELOPMENT-ONLY worker access (phase 7, B-16; docs/08b §6.1.1 pkt. 6).
  *
  * The local worker reaches the same knowledge.worker_* functions through PostgREST with the
  * local service-role key; the database lets service_role in only through the development seed
- * (supabase/seed.sql). Originals are read directly from local Storage.
+ * (supabase/seed.sql). Originals go through the same one-time tickets and the same storage
+ * handler as in production (worker-storage/handler.ts), run in-process with the local
+ * service-role client — so quarantine, release and the checksum confirmation are the real ones.
  *
  * This file is never part of the production worker: main.ts loads it only when the validated
  * configuration is the local/test service-role path, the production image does not contain it
@@ -125,6 +132,15 @@ export function devServiceRoleWorkerDb(client: SupabaseClient, workerId: string)
       if (!row) throw new Error("Ingen billet.");
       return { ticket: row.ticket, expiresAt: new Date(row.expires_at) };
     },
+    async securityScanContext(jobId) {
+      return call<ScanContext>(knowledge.rpc("worker_security_scan_context", { p_job_id: jobId, p_lease_token: lease(jobId) }));
+    },
+    async recordSecurityVerdict(jobId, measurements) {
+      return call<RecordedVerdict>(knowledge.rpc("worker_record_security_verdict", { p_job_id: jobId, p_lease_token: lease(jobId), p_result: measurements }));
+    },
+    async securityClearance(jobId, sha256) {
+      return call<Clearance>(knowledge.rpc("worker_security_clearance", { p_job_id: jobId, p_lease_token: lease(jobId), p_sha256: sha256 }));
+    },
     forget(jobId) {
       leases.delete(jobId);
     },
@@ -140,12 +156,7 @@ export function devServiceRoleWorkerDb(client: SupabaseClient, workerId: string)
   };
 }
 
-export function devServiceRoleOriginals(client: SupabaseClient): OriginalStore {
-  return {
-    async download(job) {
-      const { data, error } = await client.storage.from("knowledge-originals").download(job.storage_path);
-      if (error || !data) throw new Error("Originalen kunne ikke hentes fra Storage.");
-      return new Uint8Array(await data.arrayBuffer());
-    },
-  };
+export function devServiceRoleOriginals(client: SupabaseClient, db: Pick<WorkerDb, "issueStorageTicket">): OriginalStore {
+  const deps = supabaseStorageDeps(client as unknown as StorageClient, () => {});
+  return ticketOriginals({ db, url: "http://worker-storage.local/", fetchImpl: async (_url, init) => handleWorkerStorage(new Request("http://worker-storage.local/", init), deps) });
 }

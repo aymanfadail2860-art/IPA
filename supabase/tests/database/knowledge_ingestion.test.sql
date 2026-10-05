@@ -6,6 +6,24 @@ set search_path = public, extensions;
 
 select plan(23);
 
+-- 8B-I5: en fixture-version består sikkerhedskontrollen (testhjælper, kun i denne session).
+-- Som postgres (tabellens ejer) og efter tilstandsmaskinen: karantæne → scanning → frigivet.
+create function pg_temp.release(p_version uuid) returns void language plpgsql as $release$
+declare v_verdict uuid;
+begin
+  insert into knowledge.security_verdicts (document_version_id, policy_version, checksum_sha256, byte_size, detected_mime,
+    object_bucket, object_path, structural_result, malware_result, scanner_engine, scanner_version, signature_version,
+    signature_time, pdf_security_result, active_content_result, final_verdict, released_at)
+  select v.id, 'pdf-v1', v.checksum_sha256, coalesce(v.byte_size, 0), 'application/pdf', 'knowledge-originals', v.storage_path,
+         'pass', 'clean', 'development-fixture', '0', '0', now(), 'pass', 'pass', 'safe', now()
+  from knowledge.document_versions v where v.id = p_version
+  returning id into v_verdict;
+  update knowledge.document_versions set security_state = 'scanning' where id = p_version;
+  update knowledge.document_versions
+  set security_state = 'released', storage_bucket = 'knowledge-originals', security_verdict_id = v_verdict, security_released_at = now()
+  where id = p_version;
+end $release$;
+
 insert into knowledge.products (id, name) values ('42000000-0000-4000-a000-000000000001', 'pgTAP Workerprodukt');
 insert into knowledge.documents (id, product_id, document_type, source_id, title)
 select '43000000-0000-4000-a000-000000000001', '42000000-0000-4000-a000-000000000001', 'terms', id, 'pgTAP Worker'
@@ -13,6 +31,7 @@ from knowledge.sources where type = 'manual_upload';
 insert into knowledge.document_versions (id, document_id, valid_from, storage_path, checksum_sha256)
 values ('44000000-0000-4000-a000-000000000001', '43000000-0000-4000-a000-000000000001', '2026-01-01', 'w/1.pdf', repeat('1', 64)),
        ('44000000-0000-4000-a000-000000000002', '43000000-0000-4000-a000-000000000001', '2027-01-01', 'w/2.pdf', repeat('2', 64));
+do $$ begin perform pg_temp.release('44000000-0000-4000-a000-000000000001'); perform pg_temp.release('44000000-0000-4000-a000-000000000002'); end $$;
 -- Kun disse to jobs er klar i testen.
 update knowledge.ingestion_jobs set next_attempt_at = now() + interval '1 day' where status = 'queued';
 update knowledge.ingestion_jobs set locked_until = now() + interval '1 day' where status = 'running';

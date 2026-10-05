@@ -7,6 +7,7 @@ import { authorize } from "@/lib/auth/server-session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import {
+  INTAKE_BUCKET,
   isUuid,
   ORIGINALS_BUCKET,
   originalPath,
@@ -15,10 +16,11 @@ import {
 } from "./upload-validation";
 
 /*
- * Upload of an original (docs/07 §5.1): the server checks permission and metadata and
- * issues a signed upload URL; the browser uploads the file directly to the private bucket
- * (large PDFs never pass through a Vercel function); the server then registers the version,
- * and the processing job is created in the same database transaction.
+ * Upload of an original (docs/07 §5.1, docs/08b §21.6): the server checks permission and
+ * metadata and issues a signed upload URL; the browser uploads the file directly to the private
+ * QUARANTINE bucket knowledge-intake (large PDFs never pass through a Vercel function); the
+ * server then registers the version, and the security examination (a scan job) is queued in the
+ * same database transaction. Processing starts only after the file has been released.
  *
  * Every action runs as the signed-in user: the bucket policies and knowledge.register_upload
  * check knowledge.document.write again in the database.
@@ -42,7 +44,7 @@ export async function requestUploadTarget(input: UploadMetadataInput): Promise<U
   const versionId = randomUUID();
   const path = originalPath(documentId, versionId);
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.storage.from(ORIGINALS_BUCKET).createSignedUploadUrl(path);
+  const { data, error } = await supabase.storage.from(INTAKE_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return { ok: false, errors: ["Upload kunne ikke forberedes. Prøv igen."] };
   return { ok: true, documentId, versionId, path, token: data.token };
 }

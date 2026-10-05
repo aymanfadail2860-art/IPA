@@ -1,14 +1,28 @@
 {
   "family": "ipa-ingestion-worker",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "networkMode": "awsvpc",
   "cpu": "1024",
-  "memory": "2048",
-  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "memory": "4096",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
   "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ipa-ingestion-worker-execution",
   "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ipa-ingestion-worker-task",
-  "ephemeralStorage": { "sizeInGiB": 21 },
-  "volumes": [{ "name": "tmp" }],
+  "ephemeralStorage": {
+    "sizeInGiB": 21
+  },
+  "volumes": [
+    {
+      "name": "tmp"
+    },
+    {
+      "name": "clamav-tmp"
+    }
+  ],
   "containerDefinitions": [
     {
       "name": "ingestion-worker",
@@ -17,29 +31,96 @@
       "user": "1000:1000",
       "readonlyRootFilesystem": true,
       "privileged": false,
-      "linuxParameters": { "initProcessEnabled": true, "capabilities": { "drop": ["ALL"] } },
+      "linuxParameters": {
+        "initProcessEnabled": true,
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        }
+      },
       "stopTimeout": 120,
-      "mountPoints": [{ "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false }],
+      "mountPoints": [
+        {
+          "sourceVolume": "tmp",
+          "containerPath": "/tmp",
+          "readOnly": false
+        }
+      ],
       "environment": [
-        { "name": "IPA_RUNTIME_ENV", "value": "production" },
-        { "name": "IPA_WORKER_DB_HOST", "value": "${SUPAVISOR_HOST}" },
-        { "name": "IPA_WORKER_DB_PORT", "value": "6543" },
-        { "name": "IPA_WORKER_DB_NAME", "value": "postgres" },
-        { "name": "IPA_WORKER_DB_SSL", "value": "verify-full" },
-        { "name": "IPA_WORKER_DB_CA_FILE", "value": "/app/certs/supabase-ca.crt" },
-        { "name": "IPA_WORKER_DB_POOL_MAX", "value": "2" },
-        { "name": "IPA_WORKER_STORAGE_URL", "value": "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/worker-storage" },
-        { "name": "IPA_WORKER_LEASE_SECONDS", "value": "300" },
-        { "name": "IPA_WORKER_SHUTDOWN_GRACE_MS", "value": "90000" },
-        { "name": "IPA_WORKER_LIVENESS_FILE", "value": "/tmp/ipa-worker/alive" },
-        { "name": "AWS_REGION", "value": "eu-central-1" }
+        {
+          "name": "IPA_RUNTIME_ENV",
+          "value": "production"
+        },
+        {
+          "name": "IPA_WORKER_DB_HOST",
+          "value": "${SUPAVISOR_HOST}"
+        },
+        {
+          "name": "IPA_WORKER_DB_PORT",
+          "value": "6543"
+        },
+        {
+          "name": "IPA_WORKER_DB_NAME",
+          "value": "postgres"
+        },
+        {
+          "name": "IPA_WORKER_DB_SSL",
+          "value": "verify-full"
+        },
+        {
+          "name": "IPA_WORKER_DB_CA_FILE",
+          "value": "/app/certs/supabase-ca.crt"
+        },
+        {
+          "name": "IPA_WORKER_DB_POOL_MAX",
+          "value": "2"
+        },
+        {
+          "name": "IPA_WORKER_STORAGE_URL",
+          "value": "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/worker-storage"
+        },
+        {
+          "name": "IPA_WORKER_LEASE_SECONDS",
+          "value": "300"
+        },
+        {
+          "name": "IPA_WORKER_SHUTDOWN_GRACE_MS",
+          "value": "90000"
+        },
+        {
+          "name": "IPA_WORKER_LIVENESS_FILE",
+          "value": "/tmp/ipa-worker/alive"
+        },
+        {
+          "name": "IPA_CLAMD_HOST",
+          "value": "127.0.0.1"
+        },
+        {
+          "name": "IPA_CLAMD_PORT",
+          "value": "3310"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "eu-central-1"
+        }
       ],
       "secrets": [
-        { "name": "IPA_WORKER_DB_USER", "valueFrom": "${WORKER_DB_SECRET_ARN}:username::" },
-        { "name": "IPA_WORKER_DB_PASSWORD", "valueFrom": "${WORKER_DB_SECRET_ARN}:password::" }
+        {
+          "name": "IPA_WORKER_DB_USER",
+          "valueFrom": "${WORKER_DB_SECRET_ARN}:username::"
+        },
+        {
+          "name": "IPA_WORKER_DB_PASSWORD",
+          "valueFrom": "${WORKER_DB_SECRET_ARN}:password::"
+        }
       ],
       "healthCheck": {
-        "command": ["CMD", "node", "workers/ingestion/healthcheck.ts"],
+        "command": [
+          "CMD",
+          "node",
+          "workers/ingestion/healthcheck.ts"
+        ],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -53,6 +134,62 @@
           "awslogs-stream-prefix": "worker",
           "mode": "non-blocking",
           "max-buffer-size": "4m"
+        }
+      },
+      "memory": 2048,
+      "dependsOn": [
+        {
+          "containerName": "clamav",
+          "condition": "HEALTHY"
+        }
+      ]
+    },
+    {
+      "name": "clamav",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/ipa-clamav:${CLAMAV_IMAGE_TAG}",
+      "essential": true,
+      "memory": 2048,
+      "user": "10001:10001",
+      "readonlyRootFilesystem": true,
+      "privileged": false,
+      "linuxParameters": {
+        "initProcessEnabled": true,
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        }
+      },
+      "stopTimeout": 30,
+      "mountPoints": [
+        {
+          "sourceVolume": "clamav-tmp",
+          "containerPath": "/tmp",
+          "readOnly": false
+        }
+      ],
+      "environment": [],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "clamdscan",
+          "--config-file=/etc/clamav/clamd.conf",
+          "--ping",
+          "1"
+        ],
+        "interval": 15,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 120
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ipa/ingestion-worker",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "clamav",
+          "mode": "non-blocking",
+          "max-buffer-size": "1m"
         }
       }
     }

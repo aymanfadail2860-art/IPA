@@ -43,6 +43,8 @@ export function demoKnowledgeVersions(): AdminVersionRow[] {
     updatedAt: document.updatedAt,
     errorMessage: document.stage === "failed" ? (document.detail ?? null) : null,
     documentHasGap: false,
+    // Mock: the fictional demo documents are shown as having passed the security examination.
+    security: "released" as const,
   }));
 }
 

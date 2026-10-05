@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-import { processingGateFor } from "../../workers/ingestion/gate.ts";
 
 import { userText } from "@/lib/egress/classification";
 import { embeddingInput } from "@/lib/knowledge/core/embedding";
@@ -19,6 +18,7 @@ import { runEvaluation } from "../../evals/engine/runner.ts";
 import { validateDeclaredConfiguration } from "../../evals/engine/schema.ts";
 import { processJob, type ClaimedJob, type IntegrityRow, type WorkerDb } from "../../workers/ingestion/pipeline.ts";
 import { embedResponse, fakeBedrock, fakeVector, noSleep, type FakeCall } from "./fixtures/bedrock-fake";
+import { releasedGate, staticOriginals } from "./fixtures/worker-fakes";
 
 /**
  * 8B-I2 — datagrænsen mod Bedrock, credentials og bundle, databasens vektormodel og
@@ -44,7 +44,8 @@ const ROW: SearchRow = {
 };
 
 
-const TEST_GATE = processingGateFor("test");
+// The version is released (8B-I5): the release gate itself is tested in worker-gate.test.ts.
+const TEST_GATE = releasedGate();
 describe("the data boundary: exactly what is sent to Bedrock", () => {
   async function retrieve(query: string) {
     const fake = fakeBedrock(bedrockHandler);
@@ -95,7 +96,7 @@ describe("the data boundary: exactly what is sent to Bedrock", () => {
       fail: async () => "failed" as const,
     } as unknown as WorkerDb;
     const job: ClaimedJob = { job_id: "j", version_id: "v", kind: "reembed", attempts: 1, max_attempts: 3, step_state: {}, storage_path: "a/b.pdf", checksum_sha256: "0".repeat(64) };
-    const outcome = await processJob(job, { db, originals: { download: async () => new Uint8Array() }, log: () => {}, gate: TEST_GATE, embedderFor: (model) => createProductionEmbedder(model, { bedrock: fake.transport, retryDeps: noSleep }) });
+    const outcome = await processJob(job, { db, originals: staticOriginals(), log: () => {}, gate: TEST_GATE, embedderFor: (model) => createProductionEmbedder(model, { bedrock: fake.transport, retryDeps: noSleep }) });
     expect(outcome).toBe("succeeded");
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0]!.body.input_type).toBe("search_document");

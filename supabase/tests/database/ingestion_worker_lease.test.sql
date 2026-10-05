@@ -34,6 +34,25 @@ values ('56000000-0000-4000-a000-000000000001', 'pgtap', 'lease-model', '1', 3, 
 create function pg_temp.ready(p_job uuid) returns void language sql as
   $$ update knowledge.ingestion_jobs set next_attempt_at = now() where id = p_job $$;
 
+-- 8B-I5: en fixture-version består sikkerhedskontrollen (testhjælper, kun i denne session).
+-- Som postgres (tabellens ejer) og efter tilstandsmaskinen: karantæne → scanning → frigivet.
+create function pg_temp.release(p_version uuid) returns void language plpgsql as $release$
+declare v_verdict uuid;
+begin
+  insert into knowledge.security_verdicts (document_version_id, policy_version, checksum_sha256, byte_size, detected_mime,
+    object_bucket, object_path, structural_result, malware_result, scanner_engine, scanner_version, signature_version,
+    signature_time, pdf_security_result, active_content_result, final_verdict, released_at)
+  select v.id, 'pdf-v1', v.checksum_sha256, coalesce(v.byte_size, 0), 'application/pdf', 'knowledge-originals', v.storage_path,
+         'pass', 'clean', 'development-fixture', '0', '0', now(), 'pass', 'pass', 'safe', now()
+  from knowledge.document_versions v where v.id = p_version
+  returning id into v_verdict;
+  update knowledge.document_versions set security_state = 'scanning' where id = p_version;
+  update knowledge.document_versions
+  set security_state = 'released', storage_bucket = 'knowledge-originals', security_verdict_id = v_verdict, security_released_at = now()
+  where id = p_version;
+end $release$;
+do $$ begin perform pg_temp.release(id) from knowledge.document_versions where document_id = '53000000-0000-4000-a000-000000000001'; end $$;
+
 -- Rotationstilstand: begge roller aktive. Kun i testen: SET på rollerne og USAGE på extensions.
 select ops.ingestion_worker_prepare('ingestion_worker_login_blue');
 select ops.ingestion_worker_prepare('ingestion_worker_login_green');

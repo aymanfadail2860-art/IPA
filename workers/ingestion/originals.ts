@@ -1,11 +1,17 @@
-import type { OriginalStore, WorkerDb } from "./pipeline.ts";
+import type { MoveOutcome, OriginalStore, StoragePurpose, WorkerDb } from "./pipeline.ts";
 
 /**
- * Originals through a one-time storage ticket (D-10 pkt. 3, docs/08b §21.5).
+ * Originals through a one-time storage ticket (D-10 pkt. 3, docs/08b §21.5–21.6).
  *
  * The worker never holds a Storage credential. Under its lease it asks the database for a
- * ticket (worker_issue_storage_ticket), sends ONLY that ticket to the Edge Function
- * worker-storage, and receives the bytes of exactly the one object the ticket is bound to.
+ * ticket (worker_issue_storage_ticket) for ONE purpose, sends ONLY that ticket to the Edge
+ * Function worker-storage, and gets:
+ *
+ *   * download_original / scan_original: the bytes of exactly the one object the ticket is
+ *     bound to (a released original, or one in quarantine for the security examination);
+ *   * release_original / quarantine_original: the outcome of moving that object out of
+ *     quarantine, as confirmed by the database with the checksum of the bytes actually moved.
+ *
  * The ticket is never logged and never sent anywhere else.
  */
 
@@ -18,6 +24,16 @@ export class OriginalUnavailable extends Error {
   }
 }
 
+/** The object is larger than allowed. `received` holds the first bytes (at most limit + 1). */
+export class OriginalTooLarge extends OriginalUnavailable {
+  readonly received: Uint8Array;
+  constructor(received: Uint8Array) {
+    super(413);
+    this.name = "OriginalTooLarge";
+    this.received = received;
+  }
+}
+
 export interface TicketOriginalsOptions {
   db: Pick<WorkerDb, "issueStorageTicket">;
   url: string;
@@ -27,42 +43,64 @@ export interface TicketOriginalsOptions {
   timeoutMs?: number;
 }
 
+const OUTCOMES: readonly MoveOutcome[] = ["released", "already_released", "invalidated", "quarantined"];
+
+/** Reads a body up to `limit` bytes; one byte more and it stops with OriginalTooLarge. */
+export async function readLimited(body: ReadableStream<Uint8Array>, limit: number): Promise<Uint8Array> {
+  const reader = body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  let tooLarge = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const room = limit + 1 - size;
+    const part = value.byteLength > room ? value.subarray(0, room) : value;
+    parts.push(part);
+    size += part.byteLength;
+    if (size > limit) {
+      tooLarge = true;
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  if (tooLarge) throw new OriginalTooLarge(bytes);
+  return bytes;
+}
+
 export function ticketOriginals(options: TicketOriginalsOptions): OriginalStore {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const maxBytes = options.maxBytes ?? 52_428_800;
+  const bucketLimit = options.maxBytes ?? 52_428_800;
+  const redeem = async (jobId: string, purpose: StoragePurpose): Promise<Response> => {
+    const { ticket } = await options.db.issueStorageTicket(jobId, purpose);
+    return fetchImpl(options.url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticket }),
+      redirect: "error",
+      signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
+    });
+  };
   return {
-    async download(job) {
-      const { ticket } = await options.db.issueStorageTicket(job.job_id, "download_original");
-      const response = await fetchImpl(options.url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ticket }),
-        redirect: "error",
-        signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
-      });
+    async download(job, purpose, maxBytes) {
+      const limit = Math.min(maxBytes ?? bucketLimit, bucketLimit);
+      const response = await redeem(job.job_id, purpose);
       if (!response.ok || !response.body) throw new OriginalUnavailable(response.status);
-      const declared = Number(response.headers.get("content-length") ?? "0");
-      if (declared > maxBytes) throw new OriginalUnavailable(413);
-      const reader = response.body.getReader();
-      const parts: Uint8Array[] = [];
-      let size = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > maxBytes) {
-          await reader.cancel();
-          throw new OriginalUnavailable(413);
-        }
-        parts.push(value);
-      }
-      const bytes = new Uint8Array(size);
-      let offset = 0;
-      for (const part of parts) {
-        bytes.set(part, offset);
-        offset += part.byteLength;
-      }
-      return bytes;
+      return readLimited(response.body, limit);
+    },
+    async move(job, purpose) {
+      const response = await redeem(job.job_id, purpose);
+      if (!response.ok) throw new OriginalUnavailable(response.status);
+      const body = (await response.json().catch(() => null)) as { outcome?: unknown } | null;
+      const outcome = body?.outcome;
+      if (typeof outcome !== "string" || !OUTCOMES.includes(outcome as MoveOutcome)) throw new OriginalUnavailable(502);
+      return outcome as MoveOutcome;
     },
   };
 }

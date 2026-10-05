@@ -1,5 +1,6 @@
 import { getDocument, version as pdfjsVersion } from "pdfjs-dist/legacy/build/pdf.mjs";
 
+import { parserFindings, type ParsedPdf } from "./security/parser-crosscheck.ts";
 import { LIMITS } from "./validate.ts";
 import { FileRejected, type ExtractedLine, type ExtractedPage, type TextRun } from "./types.ts";
 
@@ -7,6 +8,9 @@ import { FileRejected, type ExtractedLine, type ExtractedPage, type TextRun } fr
  * Step 3 — text extraction (docs/07 §5.2): text, position and font traits per page. Pages
  * without a text layer are recorded, never OCR'd (B-14). PDF content is never executed:
  * no font loading, no XFA rendering, no scripts; embedded files are ignored.
+ *
+ * 8B-I5: only bytes with a safe, released verdict get here (the pipeline's security gate).
+ * pdfjs's own view is cross-checked against the V1 policy first (parser-crosscheck.ts).
  */
 
 export const EXTRACTOR_VERSION = `pdfjs-${pdfjsVersion}/1`;
@@ -86,6 +90,9 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPage[]> {
   try {
     if (document.numPages > LIMITS.maxPages) {
       throw new FileRejected("too_many_pages", `PDF'en har flere end ${LIMITS.maxPages} sider.`);
+    }
+    if ((await parserFindings(document as unknown as ParsedPdf)).length > 0) {
+      throw new FileRejected("active_content", "PDF'en indeholder aktivt indhold eller indlejrede filer og kan ikke behandles.");
     }
     const pages: ExtractedPage[] = [];
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {

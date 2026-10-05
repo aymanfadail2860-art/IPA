@@ -10,6 +10,54 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-026 — Upload-sikkerhed: karantæne-bucket, verdict afledt i databasen, checksum-binding og ClamAV som sidecar (8B-I5)
+
+**Dato:** 5. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §7 og §21.6, `supabase/migrations/20261005000100_upload_security.sql`,
+`workers/ingestion/security/`, `workers/ingestion/scan-job.ts`, `supabase/functions/worker-storage/`, `deploy/clamav/`
+
+**Beslutning:**
+- **Tre buckets:** `knowledge-intake` (karantæne, kun upload), `knowledge-originals` (kun
+  frigivne filer) og `knowledge-quarantine` (afviste, ingen politikker). Kun lagerfunktionen
+  flytter, på en engangsbillet.
+- **Tilstandsmaskine i databasen** (`security_state`), håndhævet af en trigger for alle roller.
+  Kun databasens egne funktioner ændrer den. `processed`/`published` kræver `released`.
+- **Workeren måler, databasen afgør.** `safe` afledes i `worker_record_security_verdict` ud fra
+  strengt validerede målinger. Et verdict er uforanderligt og bundet til version, sti, checksum
+  og politikversion.
+- **Checksum-binding hele vejen:** frigivelsen bekræftes med checksummen af de flyttede bytes, og
+  release-gaten spørges med checksummen af de hentede bytes. Afvigelse afløser verdict og sender
+  versionen tilbage i karantæne.
+- **Rækkefølge:** byteniveau-validering → ClamAV → strukturinspektion med egen læser i en isoleret
+  børneproces. pdfjs ser først bytes efter `safe`, og krydstjekker da sit eget syn.
+- **ClamAV som sidecar** med signaturer bygget ind i imaget (ingen netværksafhængighed i
+  containeren). Signaturer ældre end 24 timer giver intet nyt `safe`.
+- **Lokal udvikling** bruger samme gate; en udviklingsscanner accepteres kun via en seed-række.
+- Versioner fra før I5 er `legacy_unscanned` og kan ikke behandles eller re-embeddes uden
+  genscanning.
+
+**Overvejede alternativer:**
+- *Statusfelt sat af workeren.* Fravalgt: en kompromitteret eller fejlbehæftet worker kunne
+  erklære en fil sikker. Databasen afleder nu verdict og kontrollerer målingerne igen.
+- *pdfjs som inspektionslag før verdict.* Fravalgt: strider mod reglen om, at ingen bytes når
+  pdfjs før `safe`.
+- *Én bucket med statusflag.* Fravalgt: en læsepolitik-fejl ville eksponere ufrigivne filer.
+  Separate buckets gør grænsen fysisk.
+- *Signaturopdatering i containeren (freshclam mod internettet).* Fravalgt: kræver udgående
+  trafik fra den komponent, der parser fjendtligt input.
+- *ClamAV som separat ECS-task uden rolle og uden udgående trafik.* Stærkere isolation, men bytes
+  ville gå over VPC-netværket (clamd har ingen TLS), og du angav sidecar. **Åben konflikt:** en
+  ECS-taskrolle gælder hele tasken, så sidecaren deler workerens taskrolle (i dag kun
+  `bedrock:InvokeModel` på Embed v4) og taskens udgående 443. Kravet "ingen unødvendige
+  task-rolle-rettigheder" kan derfor ikke opfyldes fuldt med en sidecar. Afgøres før produktion
+  [AFKLARES].
+
+**Begrundelse:** En fil når kun parser, chunker og embedder, hvis databasen har frigivet netop de
+bytes, der blev scannet, under den aktive politik. Hver beslutning, der kan gøre en fil sikker,
+ligger dér, hvor ingen klient og ingen worker kan ændre den.
+
+---
+
 ## B-025 — Workerens runtime: specifikation uden IaC-framework, streamet billetindløsning og standby bag I5-gaten (8B-I4)
 
 **Dato:** 5. oktober 2026

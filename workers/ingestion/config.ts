@@ -13,6 +13,12 @@ import { runtimeEnv, type RuntimeEnv } from "../../src/lib/knowledge/core/grade.
  *   * Local/test: either the same Postgres path (TLS optional) or the development-only
  *     service-role path of phase 7 (B-16).
  *
+ * Malware scanning (8B-I5): production scans with ClamAV's clamd in the sidecar container of
+ * the same task, on the loopback interface only (IPA_CLAMD_HOST/IPA_CLAMD_PORT, default
+ * 127.0.0.1:3310) — the bytes never cross the network. Local/test use clamd when
+ * IPA_CLAMD_HOST is set, otherwise the development-only fixture scanner, whose verdicts the
+ * database accepts only where the local seed allows it.
+ *
  * Errors name the variable and the rule — never a value.
  */
 
@@ -48,6 +54,8 @@ export interface ServiceRoleDevConfig {
   key: string;
 }
 
+export type ScannerConfig = { kind: "clamd"; host: string; port: number } | { kind: "development-fixture" };
+
 export interface WorkerConfig {
   runtimeEnv: RuntimeEnv;
   workerLabel: string;
@@ -64,6 +72,7 @@ export interface WorkerConfig {
   /** After SIGTERM, how long a running job may continue before it is abandoned. */
   shutdownGraceMs: number;
   livenessFile: string | null;
+  scanner: ScannerConfig;
 }
 
 /** blue/green login role, with the Supavisor tenant suffix (<role>.<project-ref>) in production. */
@@ -152,6 +161,17 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
     }
   }
 
+  let scanner: ScannerConfig;
+  if (production || env.IPA_CLAMD_HOST) {
+    const host = env.IPA_CLAMD_HOST || "127.0.0.1";
+    if (production && host !== "127.0.0.1" && host !== "localhost") {
+      problems.push("IPA_CLAMD_HOST skal være 127.0.0.1 i produktion (ClamAV kører som sidecar i samme task).");
+    }
+    scanner = { kind: "clamd", host, port: int(env, "IPA_CLAMD_PORT", 3310, 1, 65535, problems) };
+  } else {
+    scanner = { kind: "development-fixture" };
+  }
+
   const leaseSeconds = int(env, "IPA_WORKER_LEASE_SECONDS", 300, 60, 900, problems);
   const config: WorkerConfig = {
     runtimeEnv: environment,
@@ -167,6 +187,7 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
     errorBackoff: { initialMs: 1_000, maxMs: 60_000 },
     shutdownGraceMs: int(env, "IPA_WORKER_SHUTDOWN_GRACE_MS", 90_000, 0, 110_000, problems),
     livenessFile: env.IPA_WORKER_LIVENESS_FILE || null,
+    scanner,
   };
   if (config.idle.maxMs < config.idle.initialMs) problems.push("IPA_WORKER_POLL_MAX_MS må ikke være mindre end IPA_WORKER_POLL_MS.");
   if (problems.length > 0) throw new ConfigError(problems);
@@ -187,5 +208,6 @@ export function describeConfig(config: WorkerConfig): Record<string, unknown> {
           prepare: false,
         }
       : { kind: "service-role-dev" };
-  return { runtime_env: config.runtimeEnv, worker: config.workerLabel, db, lease_seconds: config.leaseSeconds, heartbeat_ms: config.heartbeatMs };
+  const scanner = config.scanner.kind === "clamd" ? { kind: "clamd", host: config.scanner.host, port: config.scanner.port } : { kind: "development-fixture" };
+  return { runtime_env: config.runtimeEnv, worker: config.workerLabel, db, scanner, lease_seconds: config.leaseSeconds, heartbeat_ms: config.heartbeatMs };
 }

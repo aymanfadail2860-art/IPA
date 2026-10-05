@@ -11,3 +11,8 @@
 -- ============================================================================
 
 grant ingestion_worker to service_role with inherit true, set false;
+
+-- 8B-I5: lokalt og i test findes der ingen ClamAV-signaturer. Udviklingsscanneren
+-- (workers/ingestion/security/scanner.ts) accepteres derfor KUN, når denne række findes —
+-- aldrig i produktion (ops.ingestion_worker_status() melder "development_scanner_allowed").
+insert into knowledge.security_development_scanners (engine) values ('development-fixture') on conflict do nothing;

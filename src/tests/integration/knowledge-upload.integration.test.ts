@@ -5,14 +5,17 @@ import { describe, expect, it } from "vitest";
 import { sha256, simplePdf } from "../fixtures/knowledge-pdfs";
 
 import { env, integrationConfigured, signedInClient } from "./helpers";
-import { BUCKET, RUN, uploadVersion, versionRow } from "./knowledge-helpers";
+import { INTAKE_BUCKET, ORIGINALS_BUCKET, RUN, runWorkerOnce, securityStatus, uploadVersion, versionRow, workerConfigured } from "./knowledge-helpers";
 
 /**
  * Fase 7, trin 2 — originaler i en privat bucket, upload via signeret URL og registrering
  * af versionen (docs/07 §2.2, §5.1, §14). Kører mod lokal Supabase inkl. Storage.
+ *
+ * 8B-I5: uploads lander i karantæne-bucketten knowledge-intake, som ingen kan læse. Kun en
+ * frigivet fil ligger i knowledge-originals og kan hentes.
  */
 describe.skipIf(!integrationConfigured)("knowledge uploads and originals", () => {
-  it("lets a knowledge manager upload and register a version: status uploaded + a queued job", async () => {
+  it("lets a knowledge manager upload and register a version: status uploaded, in quarantine, a queued security scan", async () => {
     const admin = await signedInClient("admin");
     const bytes = await simplePdf(`upload-${RUN}`);
     const uploaded = await uploadVersion(admin, bytes);
@@ -30,7 +33,18 @@ describe.skipIf(!integrationConfigured)("knowledge uploads and originals", () =>
     });
 
     const { data: jobs } = await admin.schema("knowledge").from("ingestion_jobs").select("status, kind").eq("document_version_id", uploaded.versionId);
-    expect(jobs).toEqual([{ status: "queued", kind: "process" }]);
+    expect(jobs).toEqual([{ status: "queued", kind: "scan" }]);
+    expect(await securityStatus(admin, uploaded.versionId)).toMatchObject({ security_state: "quarantined", failure_code: null });
+  });
+
+  it("nobody can read a file in quarantine — not even a knowledge manager", async () => {
+    const admin = await signedInClient("admin");
+    const uploaded = await uploadVersion(admin, await simplePdf(`karantaene-${RUN}`));
+    expect((await admin.storage.from(INTAKE_BUCKET).download(uploaded.path)).error).not.toBeNull();
+    expect((await admin.storage.from(INTAKE_BUCKET).createSignedUrl(uploaded.path, 60)).error).not.toBeNull();
+    expect((await admin.storage.from(ORIGINALS_BUCKET).download(uploaded.path)).error).not.toBeNull();
+    const { error } = await admin.schema("knowledge").rpc("log_original_download", { p_version_id: uploaded.versionId });
+    expect(error?.code).toBe("P0002");
   });
 
   it("finds duplicates by checksum for managers only", async () => {
@@ -53,13 +67,14 @@ describe.skipIf(!integrationConfigured)("knowledge uploads and originals", () =>
     for (const key of ["advisorA", "leaderNord"] as const) {
       const client = await signedInClient(key);
       const path = `${randomUUID()}/${randomUUID()}/original.pdf`;
-      const signed = await client.storage.from(BUCKET).createSignedUploadUrl(path);
-      expect(signed.error, `${key} sign upload`).not.toBeNull();
-
-      const download = await client.storage.from(BUCKET).download(uploaded.path);
-      expect(download.error, `${key} download`).not.toBeNull();
-      const signedDownload = await client.storage.from(BUCKET).createSignedUrl(uploaded.path, 60);
-      expect(signedDownload.error, `${key} signed download`).not.toBeNull();
+      for (const bucket of [INTAKE_BUCKET, ORIGINALS_BUCKET]) {
+        const signed = await client.storage.from(bucket).createSignedUploadUrl(path);
+        expect(signed.error, `${key} sign upload ${bucket}`).not.toBeNull();
+        const download = await client.storage.from(bucket).download(uploaded.path);
+        expect(download.error, `${key} download ${bucket}`).not.toBeNull();
+        const signedDownload = await client.storage.from(bucket).createSignedUrl(uploaded.path, 60);
+        expect(signedDownload.error, `${key} signed download ${bucket}`).not.toBeNull();
+      }
 
       const { error } = await client.schema("knowledge").rpc("log_original_download", { p_version_id: uploaded.versionId });
       expect(error?.code, `${key} download url`).toBe("42501");
@@ -86,36 +101,43 @@ describe.skipIf(!integrationConfigured)("knowledge uploads and originals", () =>
     const admin = await signedInClient("admin");
     await expect(uploadVersion(admin, new TextEncoder().encode("ikke en pdf"), { contentType: "text/plain" })).rejects.toThrow(/upload/);
 
-    const wrongPath = await admin.storage.from(BUCKET).createSignedUploadUrl(`fritekst/${RUN}.pdf`);
+    const wrongPath = await admin.storage.from(INTAKE_BUCKET).createSignedUploadUrl(`fritekst/${RUN}.pdf`);
     expect(wrongPath.error).not.toBeNull();
+    // 8B-I5: uploads go to quarantine only — no one uploads straight to the released originals.
+    const direct = await admin.storage.from(ORIGINALS_BUCKET).createSignedUploadUrl(`${randomUUID()}/${randomUUID()}/original.pdf`);
+    expect(direct.error).not.toBeNull();
   });
 
   it("never overwrites the original of a registered version", async () => {
     const admin = await signedInClient("admin");
     const uploaded = await uploadVersion(admin, await simplePdf(`immutable-${RUN}`));
-    const again = await admin.storage.from(BUCKET).createSignedUploadUrl(uploaded.path, { upsert: true });
+    const again = await admin.storage.from(INTAKE_BUCKET).createSignedUploadUrl(uploaded.path, { upsert: true });
     const overwritten = again.error
       ? again
-      : await admin.storage.from(BUCKET).uploadToSignedUrl(uploaded.path, again.data.token, await simplePdf("x"), { contentType: "application/pdf" });
+      : await admin.storage.from(INTAKE_BUCKET).uploadToSignedUrl(uploaded.path, again.data.token, await simplePdf("x"), { contentType: "application/pdf" });
     expect(overwritten.error).not.toBeNull();
   });
 
   it("keeps the bucket private: no public URL serves an original", async () => {
     const admin = await signedInClient("admin");
     const uploaded = await uploadVersion(admin, await simplePdf(`private-${RUN}`));
-    const publicUrl = admin.storage.from(BUCKET).getPublicUrl(uploaded.path).data.publicUrl;
-    const response = await fetch(publicUrl);
-    expect(response.ok).toBe(false);
+    for (const bucket of [INTAKE_BUCKET, ORIGINALS_BUCKET, "knowledge-quarantine"]) {
+      const response = await fetch(admin.storage.from(bucket).getPublicUrl(uploaded.path).data.publicUrl);
+      expect(response.ok, bucket).toBe(false);
+    }
+    const publicUrl = admin.storage.from(INTAKE_BUCKET).getPublicUrl(uploaded.path).data.publicUrl;
     expect(publicUrl.startsWith(env.url)).toBe(true);
   });
 
-  it("issues a short-lived signed download URL to a knowledge manager", async () => {
+  it.skipIf(!workerConfigured)("issues a short-lived signed download URL to a knowledge manager — once the file is released", async () => {
     const admin = await signedInClient("admin");
     const bytes = await simplePdf(`download-${RUN}`);
     const uploaded = await uploadVersion(admin, bytes);
+    await runWorkerOnce();
+    expect(await securityStatus(admin, uploaded.versionId)).toMatchObject({ security_state: "released" });
     const { data: path, error } = await admin.schema("knowledge").rpc("log_original_download", { p_version_id: uploaded.versionId });
     expect(error).toBeNull();
-    const signed = await admin.storage.from(BUCKET).createSignedUrl(path as string, 60);
+    const signed = await admin.storage.from(ORIGINALS_BUCKET).createSignedUrl(path as string, 60);
     expect(signed.error).toBeNull();
     const response = await fetch(signed.data!.signedUrl);
     expect(response.ok).toBe(true);

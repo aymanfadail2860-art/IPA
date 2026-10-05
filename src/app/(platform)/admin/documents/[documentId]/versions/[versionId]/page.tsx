@@ -7,7 +7,7 @@ import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
 import { ReviewPanel } from "@/components/knowledge-admin/review-panel";
 import { StructureView } from "@/components/knowledge-admin/structure-view";
-import { VersionStatusBadge } from "@/components/knowledge-admin/version-status";
+import { SecurityStatusBadge, VersionStatusBadge } from "@/components/knowledge-admin/version-status";
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { meetsRequirement } from "@/lib/auth/permissions";
 import { authorize } from "@/lib/auth/server-session";
@@ -41,7 +41,12 @@ export default async function AdminVersionPage(props: PageProps<"/admin/document
         }
         title={version.versionLabel ? `Version ${version.versionLabel}` : "Version uden betegnelse"}
         description={`${version.productName}`}
-        actions={<VersionStatusBadge version={version} today={danishDate(new Date())} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <VersionStatusBadge version={version} today={danishDate(new Date())} />
+            {version.security === "released" ? null : <SecurityStatusBadge security={version.security} />}
+          </div>
+        }
       />
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <section aria-label="Dokument" className="min-w-0">

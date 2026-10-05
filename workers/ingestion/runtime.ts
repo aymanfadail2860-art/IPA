@@ -1,15 +1,19 @@
 import type { EmbeddingModelSpec, Embedder } from "../../src/lib/knowledge/core/embedding.ts";
 
 import type { WorkerConfig } from "./config.ts";
-import type { ProcessingGate } from "./gate.ts";
+import type { SecurityGate } from "./gate.ts";
 import { startLeaseKeeper } from "./lease.ts";
 import { errorClass, type Logger } from "./log.ts";
-import { isIdentityError, JobAborted, processJob, type AbortKind, type ClaimedJob, type JobOutcome, type OriginalStore, type WorkerDb } from "./pipeline.ts";
+import { isIdentityError, JobAborted, processJob, type AbortKind, type ClaimedJob, type JobOutcome, type OriginalStore, type PipelineDeps, type ScanTools, type WorkerDb } from "./pipeline.ts";
+import { runScanJob } from "./scan-job.ts";
 
 /**
  * The worker's long-running loop (docs/08b §21.5):
  *
- *   claim → process (independent heartbeat, checkpoints) → complete/fail → next job
+ *   claim → scan or process (independent heartbeat, checkpoints) → complete/fail → next job
+ *
+ *   * A "scan" job is the security examination of a file in quarantine (scan-job.ts); a
+ *     "process"/"reembed" job passes the release gate first (pipeline.ts, gate.ts).
  *
  *   * Empty queue: exponential backoff with jitter up to the maximum poll interval — never
  *     busy polling.
@@ -27,7 +31,9 @@ export type RuntimeConfig = Pick<WorkerConfig, "once" | "leaseSeconds" | "heartb
 export interface RuntimeDeps {
   db: WorkerDb;
   originals: OriginalStore;
-  gate: ProcessingGate;
+  gate: SecurityGate;
+  /** The malware scanner and the PDF inspector for scan jobs. */
+  scan: ScanTools;
   log: Logger;
   embedderFor?: (model: EmbeddingModelSpec) => Embedder;
   /** Injected in tests. */
@@ -39,6 +45,11 @@ export interface RuntimeDeps {
 }
 
 export type RunResult = { reason: "stopped" | "drained" | "fatal"; jobs: number };
+
+/** Scan jobs to the security examination, everything else to the (gated) pipeline. */
+export function handleJob(job: ClaimedJob, deps: PipelineDeps): Promise<JobOutcome> {
+  return job.kind === "scan" ? runScanJob(job, deps) : processJob(job, deps);
+}
 
 export function backoffMs(attempt: number, range: { initialMs: number; maxMs: number }, random: () => number): number {
   const base = Math.min(range.maxMs, range.initialMs * 2 ** Math.max(0, attempt - 1));
@@ -79,7 +90,7 @@ export function createWorkerRuntime(config: RuntimeConfig, deps: RuntimeDeps) {
   const random = deps.random ?? Math.random;
   const now = deps.now ?? Date.now;
   const liveness = deps.liveness ?? (() => {});
-  const run = deps.process ?? processJob;
+  const run = deps.process ?? handleJob;
   const wake = new AbortController();
   let stopping = false;
   let current: { job: ClaimedJob; controller: AbortController; graceTimer?: ReturnType<typeof setTimeout> } | null = null;
@@ -109,6 +120,7 @@ export function createWorkerRuntime(config: RuntimeConfig, deps: RuntimeDeps) {
         }),
         originals: deps.originals,
         gate: deps.gate,
+        scan: deps.scan,
         embedderFor: deps.embedderFor,
         signal: controller.signal,
         log: (event) => deps.log({ event: "job_step", ...event }),
@@ -199,40 +211,4 @@ export function createWorkerRuntime(config: RuntimeConfig, deps: RuntimeDeps) {
       return { reason: "stopped", jobs };
     },
   };
-}
-
-/**
- * The production worker while the I5 gate is closed: connected and verified, but it claims
- * nothing. It re-checks its database identity periodically (a revoked or rotated-away role
- * exits, so ECS replaces the task) and keeps its liveness fresh until it is told to stop.
- */
-export async function runStandby(deps: {
-  db: Pick<WorkerDb, "embeddingModels">;
-  log: Logger;
-  signal: AbortSignal;
-  liveness?: () => void;
-  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
-  tickMs?: number;
-  checkEveryTicks?: number;
-}): Promise<RunResult> {
-  const sleep = deps.sleep ?? interruptibleSleep;
-  const tickMs = deps.tickMs ?? 30_000;
-  const every = deps.checkEveryTicks ?? 10;
-  deps.log({ event: "worker_standby", reason: "processing_gate_closed_until_8b_i5" });
-  for (let tick = 1; !deps.signal.aborted; tick += 1) {
-    deps.liveness?.();
-    await sleep(tickMs, deps.signal);
-    if (deps.signal.aborted || tick % every !== 0) continue;
-    try {
-      await deps.db.embeddingModels();
-    } catch (error) {
-      if (isIdentityError(error)) {
-        deps.log({ event: "worker_identity_refused", ...errorClass(error) });
-        return { reason: "fatal", jobs: 0 };
-      }
-      deps.log({ event: "standby_check_failed", ...errorClass(error) });
-    }
-  }
-  deps.log({ event: "worker_loop_stopped", jobs: 0 });
-  return { reason: "stopped", jobs: 0 };
 }

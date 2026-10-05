@@ -6,6 +6,24 @@ set search_path = public, extensions;
 
 select plan(21);
 
+-- 8B-I5: en fixture-version består sikkerhedskontrollen (testhjælper, kun i denne session).
+-- Som postgres (tabellens ejer) og efter tilstandsmaskinen: karantæne → scanning → frigivet.
+create function pg_temp.release(p_version uuid) returns void language plpgsql as $release$
+declare v_verdict uuid;
+begin
+  insert into knowledge.security_verdicts (document_version_id, policy_version, checksum_sha256, byte_size, detected_mime,
+    object_bucket, object_path, structural_result, malware_result, scanner_engine, scanner_version, signature_version,
+    signature_time, pdf_security_result, active_content_result, final_verdict, released_at)
+  select v.id, 'pdf-v1', v.checksum_sha256, coalesce(v.byte_size, 0), 'application/pdf', 'knowledge-originals', v.storage_path,
+         'pass', 'clean', 'development-fixture', '0', '0', now(), 'pass', 'pass', 'safe', now()
+  from knowledge.document_versions v where v.id = p_version
+  returning id into v_verdict;
+  update knowledge.document_versions set security_state = 'scanning' where id = p_version;
+  update knowledge.document_versions
+  set security_state = 'released', storage_bucket = 'knowledge-originals', security_verdict_id = v_verdict, security_released_at = now()
+  where id = p_version;
+end $release$;
+
 -- Fiktive data: en administrator, en rådgiver, et dokument med én version og ét chunk.
 insert into auth.users (id, email, aud, role, raw_user_meta_data) values
   ('50000000-0000-4000-a000-000000000001', 'e.admin@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Administrator"}'),
@@ -73,6 +91,7 @@ select is(knowledge.version_has_active_embeddings('54000000-0000-4000-a000-00000
   'uden aktiv model har versionen ikke "aktive" embeddings (godkendelse blokeres)');
 
 -- Behandling færdig; review; publicering.
+do $$ begin perform pg_temp.release('54000000-0000-4000-a000-000000000001'); end $$;
 update knowledge.document_versions set status = 'processed' where id = '54000000-0000-4000-a000-000000000001';
 update knowledge.document_versions set status = 'under_review' where id = '54000000-0000-4000-a000-000000000001';
 update knowledge.document_versions set status = 'published', approved_at = now(), published_at = now()

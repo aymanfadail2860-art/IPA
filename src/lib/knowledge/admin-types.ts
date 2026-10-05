@@ -31,6 +31,55 @@ export const VERSION_STATUS: Record<VersionStatus, { label: string; status: Stat
   discarded: { label: "Kasseret", status: "neutral" },
 };
 
+/**
+ * The security examination of the original (8B-I5, docs/08b §21.6). Only the category is shown —
+ * never the file, the scanner's finding or other details that could help an attacker.
+ */
+export type SecurityStatus =
+  | "quarantined"
+  | "scanning"
+  | "released"
+  | "rejected_invalid"
+  | "rejected_active_content"
+  | "rejected_malware"
+  | "scan_failed"
+  | "not_scanned";
+
+export const SECURITY_STATUS: Record<SecurityStatus, { label: string; status: Status }> = {
+  quarantined: { label: "I karantæne", status: "warning" },
+  scanning: { label: "Scanner", status: "info" },
+  released: { label: "Godkendt sikkerhedskontrol", status: "success" },
+  rejected_invalid: { label: "Afvist: ugyldig PDF", status: "error" },
+  rejected_active_content: { label: "Afvist: aktivt indhold", status: "error" },
+  rejected_malware: { label: "Afvist: malware", status: "error" },
+  scan_failed: { label: "Teknisk scanfejl", status: "error" },
+  // Uploaded before the security examination existed: never released, cannot be processed.
+  not_scanned: { label: "Ikke sikkerhedsscannet", status: "neutral" },
+};
+
+/** The database's security state and failure code → the category the Admin shows. */
+export function securityStatus(state: string | null | undefined, failureCode: string | null | undefined): SecurityStatus {
+  switch (state) {
+    case "quarantined":
+      return "quarantined";
+    case "scanning":
+      return "scanning";
+    case "released":
+      return "released";
+    case "scan_failed":
+      return "scan_failed";
+    case "rejected":
+      if (failureCode === "malware_detected") return "rejected_malware";
+      if (failureCode === "active_content" || failureCode === "embedded_file") return "rejected_active_content";
+      return "rejected_invalid";
+    case "legacy_unscanned":
+      return "not_scanned";
+    default:
+      // Unknown: never shown as passed.
+      return "quarantined";
+  }
+}
+
 /** Document list tabs (docs/07 §12): one tab per status group. */
 export const DOCUMENT_TABS = [
   { id: "processing", label: "Uploadet/Behandles", statuses: ["uploaded", "processing"] },
@@ -70,6 +119,8 @@ export interface AdminVersionRow {
   errorMessage: string | null;
   /** The document has a gap in its validity (B-006). */
   documentHasGap: boolean;
+  /** The security examination of the original (8B-I5). */
+  security: SecurityStatus;
 }
 
 /** Derived state of a published version (docs/07 §3.3), relative to today. */

@@ -4,7 +4,25 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(11);
+select plan(12);
+
+-- 8B-I5: en fixture-version består sikkerhedskontrollen (testhjælper, kun i denne session).
+-- Som postgres (tabellens ejer) og efter tilstandsmaskinen: karantæne → scanning → frigivet.
+create function pg_temp.release(p_version uuid) returns void language plpgsql as $release$
+declare v_verdict uuid;
+begin
+  insert into knowledge.security_verdicts (document_version_id, policy_version, checksum_sha256, byte_size, detected_mime,
+    object_bucket, object_path, structural_result, malware_result, scanner_engine, scanner_version, signature_version,
+    signature_time, pdf_security_result, active_content_result, final_verdict, released_at)
+  select v.id, 'pdf-v1', v.checksum_sha256, coalesce(v.byte_size, 0), 'application/pdf', 'knowledge-originals', v.storage_path,
+         'pass', 'clean', 'development-fixture', '0', '0', now(), 'pass', 'pass', 'safe', now()
+  from knowledge.document_versions v where v.id = p_version
+  returning id into v_verdict;
+  update knowledge.document_versions set security_state = 'scanning' where id = p_version;
+  update knowledge.document_versions
+  set security_state = 'released', storage_bucket = 'knowledge-originals', security_verdict_id = v_verdict, security_released_at = now()
+  where id = p_version;
+end $release$;
 
 insert into auth.users (id, email, aud, role, raw_user_meta_data) values
   ('30000000-0000-4000-a000-000000000001', 's.admin@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Administrator"}'),
@@ -52,9 +70,10 @@ select throws_ok(
 );
 reset role;
 
--- Med filen i Storage oprettes dokument, version (uploaded) og job i én transaktion.
+-- Med filen i Storage (8B-I5: karantæne-bucketten knowledge-intake) oprettes dokument, version
+-- (uploaded) og job i én transaktion.
 insert into storage.objects (bucket_id, name, metadata)
-values ('knowledge-originals',
+values ('knowledge-intake',
         '34000000-0000-4000-a000-000000000001/33000000-0000-4000-a000-000000000001/original.pdf',
         '{"size": 1234, "mimetype": "application/pdf"}');
 select set_config('request.jwt.claims', '{"sub":"30000000-0000-4000-a000-000000000001","role":"authenticated"}', true);
@@ -70,13 +89,20 @@ select is(
   'uploaded/1234', 'versionen starter som uploadet med størrelsen fra Storage'
 );
 select is(
-  (select status from knowledge.ingestion_jobs where document_version_id = '33000000-0000-4000-a000-000000000001'),
-  'queued', 'behandlingsjobbet oprettes i samme transaktion'
+  (select kind || '/' || status from knowledge.ingestion_jobs where document_version_id = '33000000-0000-4000-a000-000000000001'),
+  'scan/queued', 'sikkerhedskontrollen (scan-jobbet) oprettes i samme transaktion — ikke behandlingen'
 );
+select throws_ok(
+  $$ select knowledge.log_original_download('33000000-0000-4000-a000-000000000001') $$,
+  'P0002', null, 'en fil i karantæne kan ikke hentes (8B-I5)'
+);
+reset role;
+do $$ begin perform pg_temp.release('33000000-0000-4000-a000-000000000001'); end $$;
+set local role authenticated;
 select is(
   knowledge.log_original_download('33000000-0000-4000-a000-000000000001'),
   '34000000-0000-4000-a000-000000000001/33000000-0000-4000-a000-000000000001/original.pdf',
-  'en forvalter kan få stien til en signeret download-URL'
+  'en forvalter kan få stien til en signeret download-URL til en frigivet original'
 );
 reset role;
 select ok(

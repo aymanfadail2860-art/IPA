@@ -19,8 +19,11 @@ const json = (file: string) => JSON.parse(read(file)) as Record<string, unknown>
 const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
 const DEPLOY = "deploy/ingestion-worker";
 
-/** Static imports reachable from an entry file (relative files followed, packages collected). */
-function importGraph(entry: string): { files: Set<string>; packages: Set<string>; dynamic: { from: string; spec: string }[] } {
+/**
+ * Static imports reachable from an entry file (relative files followed, packages collected).
+ * With `runtimeOnly`, type-only imports (erased by Node's type stripping) are not followed.
+ */
+function importGraph(entry: string, runtimeOnly = false): { files: Set<string>; packages: Set<string>; dynamic: { from: string; spec: string }[] } {
   const files = new Set<string>();
   const packages = new Set<string>();
   const dynamic: { from: string; spec: string }[] = [];
@@ -28,8 +31,9 @@ function importGraph(entry: string): { files: Set<string>; packages: Set<string>
     if (files.has(file)) return;
     files.add(file);
     const code = stripComments(read(file));
-    for (const match of code.matchAll(/(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+"([^"]+)"/g)) {
-      const spec = match[1]!;
+    for (const match of code.matchAll(/(?:^|\n)\s*((?:import|export)\s[^;]*?)from\s+"([^"]+)"/g)) {
+      if (runtimeOnly && /^(?:import|export) type\s/.test(match[1]!)) continue;
+      const spec = match[2]!;
       if (spec.startsWith(".")) visit(path.relative(root, path.resolve(root, path.dirname(file), spec)));
       else packages.add(spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]!);
     }
@@ -64,7 +68,7 @@ describe("production worker code (8B-I4)", () => {
   it("the database adapter calls only the locked knowledge.worker_* API — no tables, admin or ops functions", () => {
     const code = stripComments(read("workers/ingestion/db.ts"));
     const statements = [...code.matchAll(/sql(?:<[^`]*?>)?`([^`]*)`/g)].map((match) => match[1]!.replace(/\$\{[^}]*\}/g, "$").replace(/\s+/g, " ").trim());
-    expect(statements).toHaveLength(12);
+    expect(statements).toHaveLength(15);
     const api = new Set<string>();
     for (const statement of statements) {
       const match = /^select (?:(?:\*|[a-z_, ()]+) from )?knowledge\.(worker_[a-z_]+)\([^;]*\)(?: as [a-z_]+)?$/.exec(statement);
@@ -74,28 +78,78 @@ describe("production worker code (8B-I4)", () => {
     }
     expect([...api].sort()).toEqual([
       "worker_checkpoint", "worker_chunks_to_embed", "worker_claim_job", "worker_complete_job", "worker_embedding_models", "worker_fail_job",
-      "worker_heartbeat", "worker_issue_storage_ticket", "worker_store_chunks", "worker_store_embeddings", "worker_store_pages", "worker_verify_index",
+      "worker_heartbeat", "worker_issue_storage_ticket", "worker_record_security_verdict", "worker_security_clearance", "worker_security_scan_context",
+      "worker_store_chunks", "worker_store_embeddings", "worker_store_pages", "worker_verify_index",
     ]);
     // No unsafe/raw SQL and no session state.
     expect(code).not.toMatch(/\.unsafe\(|\.begin\(|\.reserve\(|\blisten\(|set_config|SET (ROLE|SESSION)/i);
   });
 
   it("names no admin or ops function anywhere in the worker", () => {
-    for (const file of readdirSync(path.join(root, "workers/ingestion"))) {
-      const code = stripComments(read(`workers/ingestion/${file}`));
-      expect(code, file).not.toMatch(/ops\.ingestion_worker|approve_version|withdraw_version|activate_embedding_model|request_reembedding|redeem_worker_storage_ticket|register_upload/);
+    const files = readdirSync(path.join(root, "workers/ingestion"), { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    expect(files.length).toBeGreaterThan(20);
+    for (const entry of files) {
+      const file = path.relative(root, path.join(entry.parentPath, entry.name));
+      const code = stripComments(read(file));
+      expect(code, file).not.toMatch(
+        /ops\.ingestion_worker|approve_version|withdraw_version|activate_embedding_model|request_reembedding|redeem_worker_storage_ticket|confirm_worker_storage_operation|register_upload|request_security_rescan|security_block_reason|security_verdicts|security_development_scanners/,
+      );
     }
   });
 
-  it("the processing gate cannot be opened from outside: no switch, flag or environment variable", () => {
+  it("the release gate is the database's answer — no switch, flag, environment variable or development bypass (8B-I5)", () => {
     const gate = stripComments(read("workers/ingestion/gate.ts"));
-    expect(gate).toMatch(/return env === "local" \|\| env === "test" \? developmentFixtureGate\(env\) : CLOSED_UNTIL_I5;/);
-    expect(gate).not.toMatch(/process\.env/);
+    expect(gate).not.toMatch(/process\.env|RuntimeEnv|local|development|open\b/);
+    expect([...gate.matchAll(/^export function (\w+)/gm)].map((match) => match[1])).toEqual(["databaseSecurityGate"]);
+    // Only an explicit true with a verdict and no reason passes.
+    expect(gate).toMatch(/clearance\.cleared === true && clearance\.reason === null && typeof clearance\.verdict_id === "string"/);
+    // The checksum is computed from the downloaded bytes, never taken from the job.
+    expect(gate).toMatch(/createHash\("sha256"\)\.update\(bytes\)/);
+    const main = stripComments(read("workers/ingestion/main.ts"));
+    expect(main).toMatch(/const gate = databaseSecurityGate\(db\);/);
+    expect(main).not.toMatch(/runStandby|processingGateFor|releasedGate/);
+    for (const file of ["workers/ingestion/main.ts", "workers/ingestion/runtime.ts", "workers/ingestion/pipeline.ts"]) {
+      expect(read(file), file).not.toMatch(/worker-fakes|releasedGate/);
+    }
     const pipeline = stripComments(read("workers/ingestion/pipeline.ts"));
-    // The gate is checked before the download and again before the first parser call.
-    const order = ["if (!deps.gate.open) throw new ProcessingBlocked()", "deps.originals.download(job)", "deps.gate.inspect(", "extractPdf(bytes)"].map((needle) => pipeline.indexOf(needle));
+    // The gate is asked before the download and again with the bytes before the first parser call.
+    const order = ["deps.gate.admit(job.job_id)", 'deps.originals.download(job, "download_original")', "deps.gate.inspect(", "extractPdf(bytes)"].map((needle) => pipeline.indexOf(needle));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("the security examination cannot reach the parser, the chunker or an embedder (8B-I5)", () => {
+    for (const entry of ["workers/ingestion/scan-job.ts", "workers/ingestion/security/inspect-child.ts"]) {
+      const scan = importGraph(entry, true);
+      expect([...scan.packages].filter((name) => !name.startsWith("node:")), entry).toEqual([]);
+      for (const file of scan.files) {
+        expect(file, entry).not.toMatch(/^workers\/ingestion\/(extract|chunker|normalize|structure|pipeline|quality)\.ts$|^src\/lib\/knowledge\/core\/(embedding|registry)\.ts$/);
+      }
+      expect(scan.dynamic, entry).toEqual([]);
+    }
+    // Not vacuous: the scan job's graph holds the examination itself.
+    expect([...importGraph("workers/ingestion/scan-job.ts", true).files]).toEqual(
+      expect.arrayContaining(["workers/ingestion/security/scan.ts", "workers/ingestion/security/file-checks.ts", "workers/ingestion/originals.ts", "workers/ingestion/job-control.ts"]),
+    );
+    for (const file of readdirSync(path.join(root, "workers/ingestion/security"))) {
+      expect(read(`workers/ingestion/security/${file}`), file).not.toMatch(/pdfjs-dist|getDocument\(/);
+    }
+    // The inspection child gets no environment and writes no file.
+    const inspector = stripComments(read("workers/ingestion/security/inspector.ts"));
+    expect(inspector).toMatch(/env: \{\} as NodeJS\.ProcessEnv/);
+    expect(inspector).toMatch(/--max-old-space-size=/);
+    expect(inspector).toMatch(/child\.kill\("SIGKILL"\)/);
+    for (const file of readdirSync(path.join(root, "workers/ingestion/security"))) {
+      expect(stripComments(read(`workers/ingestion/security/${file}`)), file).not.toMatch(/writeFile|createWriteStream|mkdtemp|tmpdir|openSync/);
+    }
+  });
+
+  it("the development fixture scanner exists only for local/test and is chosen only by configuration (8B-I5)", () => {
+    const scanner = stripComments(read("workers/ingestion/security/scanner.ts"));
+    expect(scanner).toMatch(/if \(env !== "local" && env !== "test"\) throw/);
+    const config = stripComments(read("workers/ingestion/config.ts"));
+    expect(config).toMatch(/if \(production \|\| env\.IPA_CLAMD_HOST\)/);
+    expect(config).toMatch(/if \(production && host !== "127\.0\.0\.1" && host !== "localhost"\)/);
   });
 });
 
@@ -154,14 +208,14 @@ describe("production image (8B-I4)", () => {
 describe("ECS/Fargate specification (8B-I4)", () => {
   const taskDefinition = json(`${DEPLOY}/task-definition.json`) as {
     executionRoleArn: string; taskRoleArn: string; networkMode: string; requiresCompatibilities: string[];
-    containerDefinitions: { user: string; readonlyRootFilesystem: boolean; privileged: boolean; linuxParameters: { initProcessEnabled: boolean; capabilities: { drop: string[] } }; environment: { name: string; value: string }[]; secrets: { name: string; valueFrom: string }[]; healthCheck: { command: string[] }; logConfiguration: { logDriver: string }; stopTimeout: number; mountPoints: { containerPath: string }[] }[];
+    containerDefinitions: { name: string; image: string; user: string; readonlyRootFilesystem: boolean; privileged: boolean; linuxParameters: { initProcessEnabled: boolean; capabilities: { drop: string[] } }; environment: { name: string; value: string }[]; secrets?: { name: string; valueFrom: string }[]; healthCheck: { command: string[] }; logConfiguration: { logDriver: string }; stopTimeout: number; mountPoints: { containerPath: string }[]; dependsOn?: unknown; portMappings?: unknown }[];
   };
   const container = taskDefinition.containerDefinitions[0]!;
 
   it("runs on Fargate as a non-root, read-only, capability-less container with a /tmp volume only", () => {
     expect(taskDefinition.requiresCompatibilities).toEqual(["FARGATE"]);
     expect(taskDefinition.networkMode).toBe("awsvpc");
-    expect(taskDefinition.containerDefinitions).toHaveLength(1);
+    expect(taskDefinition.containerDefinitions.map((definition) => definition.name)).toEqual(["ingestion-worker", "clamav"]);
     expect(container.user).toBe("1000:1000");
     expect(container.readonlyRootFilesystem).toBe(true);
     expect(container.privileged).toBe(false);
@@ -172,6 +226,31 @@ describe("ECS/Fargate specification (8B-I4)", () => {
     // ECS waits longer than the worker's shutdown grace before it kills the process.
     const grace = Number(container.environment.find((entry) => entry.name === "IPA_WORKER_SHUTDOWN_GRACE_MS")!.value);
     expect(container.stopTimeout * 1000).toBeGreaterThan(grace);
+  });
+
+  it("runs ClamAV as a sidecar that receives bytes only: no credential, no environment, no port to the outside (8B-I5)", () => {
+    const clamav = taskDefinition.containerDefinitions[1]!;
+    expect(clamav.user).not.toMatch(/^0(:|$)|root/);
+    expect(clamav.readonlyRootFilesystem).toBe(true);
+    expect(clamav.privileged).toBe(false);
+    expect(clamav.linuxParameters).toEqual({ initProcessEnabled: true, capabilities: { drop: ["ALL"] } });
+    expect(clamav.secrets).toBeUndefined();
+    expect(clamav.environment).toEqual([]);
+    expect(clamav.portMappings).toBeUndefined();
+    expect(clamav.mountPoints.map((mount) => mount.containerPath)).toEqual(["/tmp"]);
+    expect(clamav.image).toMatch(/\/ipa-clamav:\$\{CLAMAV_IMAGE_TAG\}$/);
+    // The worker starts only when clamd has loaded its signatures, and talks to it on loopback.
+    expect(container.dependsOn).toEqual([{ containerName: "clamav", condition: "HEALTHY" }]);
+    expect(container.environment).toContainEqual({ name: "IPA_CLAMD_HOST", value: "127.0.0.1" });
+    const conf = read("deploy/clamav/clamd.conf");
+    expect(conf).toMatch(/^TCPAddr 127\.0\.0\.1$/m);
+    expect(conf).toMatch(/^StreamMaxLength 60M$/m);
+    expect(conf).toMatch(/^AlertExceedsMax yes$/m);
+    expect(conf).toMatch(/^LogClean no$/m);
+    const image = stripComments(read("deploy/clamav/Dockerfile").replace(/^#.*$/gm, ""));
+    expect(image).not.toMatch(/^\s*ARG\b|PASSWORD|SECRET|TOKEN|ACCESS_KEY/m);
+    expect(image).toMatch(/^USER 10001:10001$/m);
+    expect(image).toMatch(/^RUN freshclam /m);
   });
 
   it("injects the database credential only from Secrets Manager — never as a plain environment value", () => {

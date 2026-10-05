@@ -2,20 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConfigError, describeConfig, loadConfig, type PostgresConfig } from "../../workers/ingestion/config.ts";
 import { postgresOptions } from "../../workers/ingestion/db.ts";
-import { CLOSED_UNTIL_I5, processingGateFor } from "../../workers/ingestion/gate.ts";
 import { startLeaseKeeper } from "../../workers/ingestion/lease.ts";
 import { createLogger, redactLogEvent, type LogEvent } from "../../workers/ingestion/log.ts";
-import { OriginalUnavailable, ticketOriginals } from "../../workers/ingestion/originals.ts";
+import { OriginalTooLarge, OriginalUnavailable, ticketOriginals } from "../../workers/ingestion/originals.ts";
 import { JobAborted, processJob, type ClaimedJob, type PipelineDeps, type WorkerDb } from "../../workers/ingestion/pipeline.ts";
-import { backoffMs, createWorkerRuntime, runStandby, type RuntimeConfig } from "../../workers/ingestion/runtime.ts";
+import { backoffMs, createWorkerRuntime, type RuntimeConfig } from "../../workers/ingestion/runtime.ts";
 import { createEmbedder } from "../lib/knowledge/core/registry";
 
 import { buildPdf, sha256, termsFixturePages } from "./fixtures/knowledge-pdfs";
+import { blockedGate, releasedGate, securityDbDefaults, staticOriginals, unusedScanTools } from "./fixtures/worker-fakes";
 
 /**
  * 8B-I4 — the production worker runtime (docs/08b §21.5): configuration, postgres.js options,
- * the I5 gate, the job loop, the independent heartbeat, lease loss, stalls, graceful shutdown
- * and logging. No AWS account, no database.
+ * the release gate at the door (8B-I5), the job loop, the independent heartbeat, lease loss,
+ * stalls, graceful shutdown and logging. No AWS account, no database.
  */
 
 const REF = "abcdefghijklmnopqrst";
@@ -93,6 +93,16 @@ describe("runtime configuration", () => {
     const dev = loadConfig({ IPA_RUNTIME_ENV: "local", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "local-key" }, ["--once"], exists);
     expect(dev.db.kind).toBe("service-role-dev");
     expect(dev.once).toBe(true);
+    // 8B-I5: without a clamd, local/test use the development fixture scanner.
+    expect(dev.scanner).toEqual({ kind: "development-fixture" });
+  });
+
+  it("scans with ClamAV in the sidecar on the loopback interface in production — never anywhere else (8B-I5)", () => {
+    expect(loadConfig(production(), [], exists).scanner).toEqual({ kind: "clamd", host: "127.0.0.1", port: 3310 });
+    expect(problems(production({ IPA_CLAMD_HOST: "clamav.example.internal" })).join(" ")).toContain("IPA_CLAMD_HOST");
+    expect(JSON.stringify(describeConfig(loadConfig(production(), [], exists)))).toContain("\"scanner\":{\"kind\":\"clamd\"");
+    const local = loadConfig({ IPA_RUNTIME_ENV: "test", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "k", IPA_CLAMD_HOST: "127.0.0.1", IPA_CLAMD_PORT: "3310" }, [], exists);
+    expect(local.scanner).toEqual({ kind: "clamd", host: "127.0.0.1", port: 3310 });
   });
 });
 
@@ -118,25 +128,15 @@ describe("postgres.js configuration", () => {
   });
 });
 
-describe("the I5 gate", () => {
-  it("is closed in production and open only for local/test fixtures", async () => {
-    expect(processingGateFor("production")).toBe(CLOSED_UNTIL_I5);
-    expect(CLOSED_UNTIL_I5.open).toBe(false);
-    expect(await CLOSED_UNTIL_I5.inspect({ jobId: "j", bytes: new Uint8Array() })).toMatchObject({ cleared: false, code: "security_scan_unavailable" });
-    for (const env of ["local", "test"] as const) {
-      expect(processingGateFor(env).open).toBe(true);
-      expect(await processingGateFor(env).inspect({ jobId: "j", bytes: new Uint8Array() })).toMatchObject({ cleared: true });
-    }
-  });
-
-  it("stops a job at the door with a closed gate: nothing is downloaded, parsed or embedded", async () => {
+describe("the release gate at the door (8B-I5)", () => {
+  it("stops a job whose version is not released: nothing is downloaded, parsed or embedded", async () => {
     const calls: string[] = [];
     const db = fakeDb(calls);
     let downloaded = false;
     const outcome = await processJob(job(), {
       db,
-      gate: CLOSED_UNTIL_I5,
-      originals: { download: async () => ((downloaded = true), new Uint8Array()) },
+      gate: blockedGate(),
+      originals: staticOriginals(() => ((downloaded = true), new Uint8Array())),
       log: () => {},
       embedderFor: () => {
         throw new Error("no embedder may be created");
@@ -144,7 +144,7 @@ describe("the I5 gate", () => {
     });
     expect(outcome).toBe("failed");
     expect(downloaded).toBe(false);
-    expect(calls).toEqual(["fail:security_scan_unavailable:false"]);
+    expect(calls).toEqual(["fail:security_not_released:false"]);
   });
 });
 
@@ -172,6 +172,7 @@ function fakeDb(calls: string[], overrides: Partial<WorkerDb> = {}): WorkerDb {
     },
     issueStorageTicket: async () => ({ ticket: "t".repeat(64), expiresAt: new Date() }),
     forget: () => void calls.push("forget"),
+    ...securityDbDefaults(),
     ...overrides,
   };
 }
@@ -213,7 +214,7 @@ describe("the pipeline never completes or fails after losing its job", () => {
         return [];
       },
     });
-    const outcome = await processJob(job({ kind: "reembed" }), { db, gate: processingGateFor("test"), originals: { download: async () => new Uint8Array() }, log: () => {}, signal: controller.signal });
+    const outcome = await processJob(job({ kind: "reembed" }), { db, gate: releasedGate(), originals: staticOriginals(), log: () => {}, signal: controller.signal });
     expect(outcome).toBe("lost");
     expect(calls).not.toContain("complete");
     expect(calls.some((call) => call.startsWith("fail:"))).toBe(false);
@@ -231,7 +232,7 @@ describe("the pipeline never completes or fails after losing its job", () => {
       },
     });
     const outcome = await processJob(job({ checksum_sha256: sha256(bytes) }), {
-      db, gate: processingGateFor("test"), originals: { download: async () => bytes }, log: () => {}, signal: controller.signal, embedderFor: (model) => createEmbedder(model, "test"),
+      db, gate: releasedGate(), originals: staticOriginals(bytes), log: () => {}, signal: controller.signal, embedderFor: (model) => createEmbedder(model, "test"),
     });
     expect(outcome).toBe("abandoned");
     expect(calls).toContain("storePages");
@@ -243,7 +244,7 @@ describe("the pipeline never completes or fails after losing its job", () => {
       embeddingModels: async () => Promise.reject(Object.assign(new Error("reset"), { code: "ECONNRESET" })),
       fail: async () => Promise.reject(Object.assign(new Error("lease"), { code: "55P03" })),
     });
-    expect(await processJob(job({ kind: "reembed" }), { db, gate: processingGateFor("test"), originals: { download: async () => new Uint8Array() }, log: () => {} })).toBe("lost");
+    expect(await processJob(job({ kind: "reembed" }), { db, gate: releasedGate(), originals: staticOriginals(), log: () => {} })).toBe("lost");
   });
 });
 
@@ -255,7 +256,7 @@ describe("job loop", () => {
       if (waits.length === 7) runtime.stop("test");
     };
     const log = events();
-    const runtime = createWorkerRuntime(CONFIG, { db: fakeDb([]), originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: log.log, sleep, random: () => 0.5 });
+    const runtime = createWorkerRuntime(CONFIG, { db: fakeDb([]), originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: log.log, sleep, random: () => 0.5 });
     const result = await runtime.run();
     expect(result.reason).toBe("stopped");
     expect(waits).toEqual([2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
@@ -280,7 +281,7 @@ describe("job loop", () => {
       },
     });
     const log = events();
-    const runtime = createWorkerRuntime(CONFIG, { db, originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: log.log, sleep: async (ms) => void waits.push(ms), random: () => 0.5 });
+    const runtime = createWorkerRuntime(CONFIG, { db, originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: log.log, sleep: async (ms) => void waits.push(ms), random: () => 0.5 });
     expect((await runtime.run()).reason).toBe("stopped");
     expect(waits.slice(0, 3)).toEqual([1_000, 2_000, 4_000]);
     expect(log.list.filter((event) => event.event === "claim_failed").map((event) => event.code)).toEqual(["ECONNREFUSED", "ECONNREFUSED", "ECONNREFUSED"]);
@@ -294,7 +295,7 @@ describe("job loop", () => {
         throw Object.assign(new Error("refused"), { code });
       },
     });
-    const result = await createWorkerRuntime(CONFIG, { db, originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: () => {}, sleep: async () => {} }).run();
+    const result = await createWorkerRuntime(CONFIG, { db, originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: () => {}, sleep: async () => {} }).run();
     expect(result.reason).toBe("fatal");
     expect(claims).toBe(1);
   });
@@ -307,7 +308,7 @@ describe("job loop", () => {
       await deps.db.complete(claimed.job_id, {} as never);
       return "succeeded" as const;
     });
-    const result = await createWorkerRuntime({ ...CONFIG, once: true }, { db, originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: () => {}, process }).run();
+    const result = await createWorkerRuntime({ ...CONFIG, once: true }, { db, originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: () => {}, process }).run();
     expect(result).toEqual({ reason: "drained", jobs: 2 });
     expect(calls.filter((call) => call === "complete")).toHaveLength(2);
     expect(calls.filter((call) => call === "forget")).toHaveLength(2);
@@ -323,7 +324,7 @@ describe("heartbeat, lease loss, stall and shutdown", () => {
     const log = events();
     const wrapped = { ...db, claim: async () => (claimed ? null : ((claimed = true), job())) } as WorkerDb;
     const liveness = vi.fn();
-    const runtime = createWorkerRuntime({ ...CONFIG, once: true, ...config }, { db: wrapped, originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: log.log, process, liveness });
+    const runtime = createWorkerRuntime({ ...CONFIG, once: true, ...config }, { db: wrapped, originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: log.log, process, liveness });
     return { runtime, log, liveness };
   }
 
@@ -416,31 +417,12 @@ describe("heartbeat, lease loss, stall and shutdown", () => {
   });
 
   it("stops promptly on shutdown while waiting for work", async () => {
-    const runtime = createWorkerRuntime(CONFIG, { db: fakeDb([]), originals: { download: async () => new Uint8Array() }, gate: processingGateFor("test"), log: () => {} });
+    const runtime = createWorkerRuntime(CONFIG, { db: fakeDb([]), originals: staticOriginals(), gate: releasedGate(), scan: unusedScanTools(), log: () => {} });
     const done = runtime.run();
     await vi.advanceTimersByTimeAsync(5);
     runtime.stop("SIGTERM");
     await vi.advanceTimersByTimeAsync(0);
     expect(await done).toEqual({ reason: "stopped", jobs: 0 });
-  });
-
-  it("stands by with a closed gate: claims nothing, re-checks the identity, exits on revocation", async () => {
-    const calls: string[] = [];
-    let checks = 0;
-    const db = fakeDb(calls, {
-      claim: vi.fn(),
-      embeddingModels: async () => {
-        checks += 1;
-        if (checks === 2) throw Object.assign(new Error("revoked"), { code: "42501" });
-        return [];
-      },
-    });
-    const log = events();
-    const done = runStandby({ db, log: log.log, signal: new AbortController().signal, tickMs: 1_000, checkEveryTicks: 2 });
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(await done).toEqual({ reason: "fatal", jobs: 0 });
-    expect(db.claim).not.toHaveBeenCalled();
-    expect(log.names()).toEqual(["worker_standby", "worker_identity_refused"]);
   });
 
   it("the lease keeper never runs two heartbeats at once", async () => {
@@ -498,15 +480,32 @@ describe("originals through a storage ticket", () => {
       return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
     });
     const store = ticketOriginals({ db, url: "https://x.test/functions/v1/worker-storage", fetchImpl: fetchImpl as unknown as typeof fetch });
-    expect(await store.download({ job_id: "j", storage_path: "ignored/by/the/worker.pdf" })).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await store.download({ job_id: "j", storage_path: "ignored/by/the/worker.pdf" }, "download_original")).toEqual(new Uint8Array([1, 2, 3]));
     expect(db.issueStorageTicket).toHaveBeenCalledWith("j", "download_original");
     expect(String(fetchImpl.mock.calls[0]![0])).not.toContain("ignored");
   });
 
   it("refuses a rejected ticket and an oversized object", async () => {
     const rejected = ticketOriginals({ db, url: "https://x.test", fetchImpl: (async () => new Response("{}", { status: 403 })) as unknown as typeof fetch });
-    await expect(rejected.download({ job_id: "j", storage_path: "p" })).rejects.toBeInstanceOf(OriginalUnavailable);
+    await expect(rejected.download({ job_id: "j", storage_path: "p" }, "download_original")).rejects.toBeInstanceOf(OriginalUnavailable);
     const big = ticketOriginals({ db, url: "https://x.test", maxBytes: 2, fetchImpl: (async () => new Response(new Uint8Array([1, 2, 3]))) as unknown as typeof fetch });
-    await expect(big.download({ job_id: "j", storage_path: "p" })).rejects.toMatchObject({ status: 413 });
+    await expect(big.download({ job_id: "j", storage_path: "p" }, "download_original")).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("a scan download stops one byte past the policy's limit and keeps what it read (8B-I5)", async () => {
+    const store = ticketOriginals({ db, url: "https://x.test", fetchImpl: (async () => new Response(new Uint8Array(10).fill(7))) as unknown as typeof fetch });
+    const error = await store.download({ job_id: "j", storage_path: "p" }, "scan_original", 4).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(OriginalTooLarge);
+    expect((error as OriginalTooLarge).received).toEqual(new Uint8Array(5).fill(7));
+    expect(db.issueStorageTicket).toHaveBeenLastCalledWith("j", "scan_original");
+  });
+
+  it("a move returns only an outcome the database confirmed; anything else is an error", async () => {
+    const respond = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    expect(await ticketOriginals({ db, url: "https://x.test", fetchImpl: respond({ outcome: "released" }) }).move({ job_id: "j", storage_path: "p" }, "release_original")).toBe("released");
+    expect(db.issueStorageTicket).toHaveBeenLastCalledWith("j", "release_original");
+    expect(await ticketOriginals({ db, url: "https://x.test", fetchImpl: respond({ outcome: "invalidated" }) }).move({ job_id: "j", storage_path: "p" }, "release_original")).toBe("invalidated");
+    await expect(ticketOriginals({ db, url: "https://x.test", fetchImpl: respond({ outcome: "safe" }) }).move({ job_id: "j", storage_path: "p" }, "release_original")).rejects.toBeInstanceOf(OriginalUnavailable);
+    await expect(ticketOriginals({ db, url: "https://x.test", fetchImpl: respond({ error: "x" }, 502) }).move({ job_id: "j", storage_path: "p" }, "quarantine_original")).rejects.toBeInstanceOf(OriginalUnavailable);
   });
 });

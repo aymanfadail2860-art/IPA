@@ -3,14 +3,17 @@ import { isDocumentTypeKey, type DocumentTypeKey } from "./document-types";
 /**
  * Validation of upload metadata before a signed upload URL is issued and before a version
  * is registered (docs/07 §5.1, §14). Client checks are only for the user experience; this
- * runs server-side, the bucket enforces type and size, and the worker validates the file
- * content again (magic bytes, checksum).
+ * runs server-side, the bucket enforces type and size, and the security examination in
+ * quarantine validates the file content again (docs/08b §21.6).
  */
 
 /** Bucket limit for originals (supabase/migrations/20261001000200_knowledge_storage.sql). */
 export const MAX_ORIGINAL_BYTES = 50 * 1024 * 1024;
 export const ORIGINAL_MIME_TYPE = "application/pdf";
+/** Released originals only (8B-I5): read by knowledge managers, written only by the security release. */
 export const ORIGINALS_BUCKET = "knowledge-originals";
+/** Quarantine for new uploads (8B-I5): nobody can read it; the security examination releases from it. */
+export const INTAKE_BUCKET = "knowledge-intake";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;

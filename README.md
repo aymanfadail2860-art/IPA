@@ -9,9 +9,9 @@ låst (`docs/08b-production-foundation.md`). Deltrin 8B-I1 (evalueringsframework
 gennemført, og det samme er 8B-I2 (production embedding og reranking på AWS Bedrock, ikke koblet
 ind i appen) og 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
 AI-udbyder) og 8B-I3 (workerens databaseidentitet: blue/green-roller, worker-API med lease-token og
-billetkontrakt). 8B-I4 (workerens runtime til AWS ECS Fargate, `deploy/ingestion-worker/`) er
-implementeret og afventer godkendelse. Produktionsbehandling af rigtige dokumenter er spærret
-indtil 8B-I5. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+billetkontrakt) og 8B-I4 (workerens runtime til AWS ECS Fargate, `deploy/ingestion-worker/`).
+8B-I5 (upload-sikkerhed: karantæne, filvalidering, aktivt indhold og ClamAV; et dokument behandles
+kun, når databasen har frigivet de scannede bytes) er implementeret og afventer godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

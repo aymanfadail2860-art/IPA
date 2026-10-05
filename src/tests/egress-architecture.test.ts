@@ -61,10 +61,30 @@ const NETWORK = [
 /** The ONLY modules allowed to talk to an external AI provider. Each must call assertTransmittable. */
 const ALLOWED_TRANSPORTS = ["src/lib/knowledge/providers/bedrock/sdk-transport.ts"];
 
+/**
+ * Network clients that are NOT a way to an AI provider, each with what it may reach. 8B-I5: the
+ * malware scanner speaks the clamd protocol to the ClamAV sidecar on the loopback interface of
+ * the same task (production configuration refuses any other host).
+ */
+const NON_AI_NETWORK: Record<string, RegExp> = {
+  "workers/ingestion/security/scanner.ts": /^import \{ connect \} from "node:net";$/m,
+};
+
 describe("external transports: only allowlisted, and only behind the egress check", () => {
   it("no module outside the allowlist uses a network client or an AI/cloud SDK", () => {
-    const offenders = sources.filter(({ file, text }) => !ALLOWED_TRANSPORTS.includes(file) && NETWORK.some((pattern) => pattern.test(text))).map(({ file }) => file);
+    const offenders = sources
+      .filter(({ file, text }) => !ALLOWED_TRANSPORTS.includes(file) && !(file in NON_AI_NETWORK) && NETWORK.some((pattern) => pattern.test(text)))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
+  });
+
+  it("the non-AI network clients use exactly their one client and no AI/cloud SDK or HTTP (8B-I5)", () => {
+    for (const [file, allowed] of Object.entries(NON_AI_NETWORK)) {
+      const text = read(path.join(REPO, file));
+      expect(text, file).toMatch(allowed);
+      const others = NETWORK.filter((pattern) => pattern.test(text.replace(allowed, "")));
+      expect(others, file).toEqual([]);
+    }
   });
 
   it("every allowlisted transport checks the authorization before any network I/O", () => {

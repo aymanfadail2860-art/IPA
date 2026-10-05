@@ -2,12 +2,15 @@ import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
 
 import { ConfigError, describeConfig, loadConfig, type WorkerConfig } from "./config.ts";
 import { connectWorkerDatabase, postgresWorkerDb } from "./db.ts";
-import { processingGateFor } from "./gate.ts";
+import { databaseSecurityGate } from "./gate.ts";
 import { createLiveness } from "./liveness.ts";
 import { createLogger, errorClass } from "./log.ts";
 import { ticketOriginals } from "./originals.ts";
 import { isIdentityError, type OriginalStore, type WorkerDb } from "./pipeline.ts";
-import { backoffMs, createWorkerRuntime, interruptibleSleep, runStandby, type RunResult } from "./runtime.ts";
+import { backoffMs, createWorkerRuntime, interruptibleSleep } from "./runtime.ts";
+import { childProcessInspector } from "./security/inspector.ts";
+import { signatureAgeProblem } from "./security/scan.ts";
+import { clamdScanner, developmentFixtureScanner, type MalwareScanner } from "./security/scanner.ts";
 
 /**
  * Ingestion worker — standalone Node process outside the Next.js app (docs/03 §8, §14;
@@ -18,7 +21,8 @@ import { backoffMs, createWorkerRuntime, interruptibleSleep, runStandby, type Ru
  *
  * Production: postgres.js through Supavisor (transaction mode, TLS) as the active blue/green
  * login role, originals through one-time storage tickets. The service-role key is refused.
- * While the I5 gate is closed the production worker stands by and claims nothing.
+ * Every upload is examined in quarantine first (scan jobs: structure, ClamAV in the sidecar,
+ * PDF security); processing passes the database's release gate (8B-I5).
  *
  * Local/test: the same path against the local database, or the development-only service-role
  * path of phase 7 (dev-service-role.ts). Configuration: config.ts and .env.example.
@@ -37,7 +41,11 @@ try {
 
 const log = createLogger({ service: "ingestion-worker", worker: config.workerLabel });
 const liveness = createLiveness(config.livenessFile);
-const gate = processingGateFor(config.runtimeEnv);
+// ⚠ The development fixture scanner exists only for local/test (it throws otherwise); the
+// database accepts its verdicts only where the local seed allows it.
+const scanner: MalwareScanner =
+  config.scanner.kind === "clamd" ? clamdScanner({ host: config.scanner.host, port: config.scanner.port }) : developmentFixtureScanner(config.runtimeEnv);
+const inspector = childProcessInspector();
 
 let db: WorkerDb;
 let originals: OriginalStore;
@@ -53,10 +61,11 @@ if (config.db.kind === "postgres") {
   const dev = await import("./dev-service-role.ts");
   const client = dev.createDevServiceRoleClient(config.db.url, config.db.key);
   db = dev.devServiceRoleWorkerDb(client, config.workerLabel);
-  originals = dev.devServiceRoleOriginals(client);
+  originals = dev.devServiceRoleOriginals(client, db);
   close = async () => {};
 }
 
+const gate = databaseSecurityGate(db);
 log({ event: "worker_start", gate: gate.id, ...describeConfig(config) });
 
 // Startup: verify the database identity (the API checks it) — a few conservative retries for
@@ -77,29 +86,38 @@ for (let attempt = 1; ; attempt += 1) {
 }
 
 // Fail fast (docs/07 §9.1): every active/candidate model needs an allowed implementation here.
-if (gate.open) {
-  for (const model of models) {
-    try {
-      createEmbedder(model);
-    } catch (error) {
-      log({ event: "worker_startup_failed", reason: "embedder_unavailable", ...errorClass(error) });
-      process.stderr.write(`worker: ${(error as Error).message}\n`);
-      await close().catch(() => {});
-      process.exit(1);
-    }
+for (const model of models) {
+  try {
+    createEmbedder(model);
+  } catch (error) {
+    log({ event: "worker_startup_failed", reason: "embedder_unavailable", ...errorClass(error) });
+    process.stderr.write(`worker: ${(error as Error).message}\n`);
+    await close().catch(() => {});
+    process.exit(1);
   }
 }
 
-const shutdown = new AbortController();
-let result: RunResult;
-if (!gate.open) {
-  for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => shutdown.abort());
-  result = config.once ? { reason: "drained", jobs: 0 } : await runStandby({ db, log, signal: shutdown.signal, liveness });
-} else {
-  const runtime = createWorkerRuntime(config, { db, originals, gate, log, liveness });
-  for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => runtime.stop(signal));
-  result = await runtime.run();
-}
+// The scanner's state at startup (not fatal: the sidecar may still be loading signatures —
+// every scan checks again and fails closed).
+const info = await scanner.info();
+log(
+  "error" in info
+    ? { event: "scanner_status", available: false, code: info.error }
+    : {
+        event: "scanner_status",
+        available: true,
+        engine: info.engine,
+        engine_version: info.engineVersion,
+        signature_version: info.signatureVersion,
+        signature_time: info.signatureTime?.toISOString() ?? null,
+        signature_age_s: info.signatureTime ? Math.round((Date.now() - info.signatureTime.getTime()) / 1000) : null,
+        signatures_current_for_24h: signatureAgeProblem(info.signatureTime, 24 * 3600, Date.now()) === null,
+      },
+);
+
+const runtime = createWorkerRuntime(config, { db, originals, gate, scan: { scanner, inspector }, log, liveness });
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => runtime.stop(signal));
+const result = await runtime.run();
 
 await close().catch(() => {});
 log({ event: "worker_stop", reason: result.reason, jobs: result.jobs });

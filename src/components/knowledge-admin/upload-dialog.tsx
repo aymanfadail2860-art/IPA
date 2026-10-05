@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DOCUMENT_TYPES } from "@/lib/knowledge/document-types";
 import { findDuplicateVersions, registerUploadedVersion, requestUploadTarget, type DuplicateVersion } from "@/lib/knowledge/upload-actions";
-import { MAX_ORIGINAL_BYTES, ORIGINAL_MIME_TYPE, ORIGINALS_BUCKET } from "@/lib/knowledge/upload-validation";
+import { INTAKE_BUCKET, MAX_ORIGINAL_BYTES, ORIGINAL_MIME_TYPE } from "@/lib/knowledge/upload-validation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 import { Field, FormError, SelectInput, TextInput } from "./form";
@@ -90,7 +90,7 @@ export function UploadDialog({
       const target = await requestUploadTarget(metadata);
       if (!target.ok) return reset(), setErrors(target.errors);
       const upload = await createSupabaseBrowserClient()
-        .storage.from(ORIGINALS_BUCKET)
+        .storage.from(INTAKE_BUCKET)
         .uploadToSignedUrl(target.path, target.token, file, { contentType: ORIGINAL_MIME_TYPE });
       if (upload.error) return reset(), setErrors(["Filen kunne ikke uploades. Prøv igen."]);
       const registered = await registerUploadedVersion({ ...metadata, documentId: target.documentId, versionId: target.versionId, isNewDocument: !documentId });

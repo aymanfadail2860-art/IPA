@@ -86,10 +86,14 @@ select is(pg_temp.api(), array[
     'knowledge.worker_checkpoint(uuid,text,text,jsonb)', 'knowledge.worker_chunks_to_embed(uuid,text,uuid)',
     'knowledge.worker_claim_job(text,integer)', 'knowledge.worker_complete_job(uuid,text,jsonb)', 'knowledge.worker_embedding_models()',
     'knowledge.worker_fail_job(uuid,text,text,text,boolean)', 'knowledge.worker_heartbeat(uuid,text,integer)',
-    'knowledge.worker_issue_storage_ticket(uuid,text,text)', 'knowledge.worker_store_chunks(uuid,text,jsonb,text)',
+    'knowledge.worker_issue_storage_ticket(uuid,text,text)',
+    -- 8B-I5: sikkerhedskontrollens tre funktioner (kontekst, verdict-indberetning, release-gate).
+    'knowledge.worker_record_security_verdict(uuid,text,jsonb)', 'knowledge.worker_security_clearance(uuid,text,text)',
+    'knowledge.worker_security_scan_context(uuid,text)',
+    'knowledge.worker_store_chunks(uuid,text,jsonb,text)',
     'knowledge.worker_store_embeddings(uuid,text,uuid,jsonb)', 'knowledge.worker_store_pages(uuid,text,jsonb,integer,bigint,text,text)',
     'knowledge.worker_verify_index(uuid,text)'],
-  'API-listen er de tolv godkendte funktioner');
+  'API-listen er de femten godkendte funktioner (I3 + I5)');
 select ok((select bool_and(p.prosecdef and p.proconfig @> array['search_path=""'] and p.prosrc like '%knowledge.assert_worker_caller()%')
            from unnest(ops.ingestion_worker_api()) f join pg_proc p on p.oid = f),
   'hver API-funktion er security definer med fast search_path og kontrollerer kalderens identitet');
@@ -215,6 +219,8 @@ select throws_ok($$ select * from knowledge.worker_embedding_models() $$, '42501
 reset role;
 select ok(not exists (select 1 from unnest(ops.ingestion_worker_api()) f where has_function_privilege('service_role', f, 'EXECUTE')),
   'service_role har ingen EXECUTE på worker-API''et uden udviklingsmedlemskabet');
+-- (Det lokale seeds udviklingsscanner er også en overtrædelse i produktion — 8B-I5; testet i upload_security.)
+delete from knowledge.security_development_scanners;
 select is(ops.ingestion_worker_status() -> 'violations', '[]'::jsonb, 'status: ingen overtrædelser, når service_role ikke er worker');
 grant ingestion_worker to service_role;
 select ok(ops.ingestion_worker_status() -> 'violations' ? 'service_role_is_worker', 'status melder service_role som worker (kun lovligt lokalt)');

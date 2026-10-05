@@ -3,12 +3,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildPdf, partlyScannedFixturePages, simplePdf, termsFixturePages } from "../fixtures/knowledge-pdfs";
 
 import { integrationConfigured, signedInClient } from "./helpers";
-import { RUN, runWorkerOnce, runWorkerWith, uploadVersion, versionRow, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
+import { RUN, runWorkerOnce, runWorkerWith, securityStatus, uploadVersion, versionRow, workerConfigured, type UploadedVersion } from "./knowledge-helpers";
 
 /**
  * Fase 7, trin 3 — den rigtige ingestion-worker mod lokal Supabase (docs/07 §5). Upload
  * og teknisk behandling gør aldrig en version synlig eller autoritativ: den når højst
- * "Klar til review".
+ * "Klar til review". 8B-I5: hver upload undersøges først i karantæne (scan-job); kun en
+ * frigivet fil behandles.
  */
 interface QualityReport {
   pages: Record<string, unknown>;
@@ -37,9 +38,9 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("ingestion worker e
     await runWorkerOnce();
   }, 180_000);
 
-  async function job(versionId: string) {
+  async function job(versionId: string, kind: "scan" | "process" = "process") {
     const admin = await signedInClient("admin");
-    const { data } = await admin.schema("knowledge").from("ingestion_jobs").select("*").eq("document_version_id", versionId).single();
+    const { data } = await admin.schema("knowledge").from("ingestion_jobs").select("*").eq("document_version_id", versionId).eq("kind", kind).maybeSingle();
     return data as Record<string, unknown> & { quality_report: QualityReport };
   }
 
@@ -104,18 +105,31 @@ describe.skipIf(!integrationConfigured || !workerConfigured)("ingestion worker e
     }
   });
 
-  it("fails visibly, without retry, when the file is not a PDF, has no text layer or differs from the upload", async () => {
+  it("rejects a non-PDF and a file that differs from the upload in quarantine — never processed (8B-I5)", async () => {
     const admin = await signedInClient("admin");
-    for (const [key, code] of [["notPdf", "not_pdf"], ["scanned", "no_text"], ["mismatch", "checksum_mismatch"]] as const) {
+    for (const [key, code] of [["notPdf", "invalid_file_type"], ["mismatch", "checksum_mismatch"]] as const) {
       const version = await versionRow(admin, uploads[key]!.versionId);
       expect(version?.status, key).toBe("processing_failed");
-      const failed = await job(uploads[key]!.versionId);
-      expect(failed.status, key).toBe("failed");
-      expect(failed.error_code, key).toBe(code);
-      expect(failed.attempts, key).toBe(1);
+      expect(await securityStatus(admin, uploads[key]!.versionId), key).toMatchObject({ security_state: "rejected", failure_code: code, scanned_at: expect.any(String) });
+      expect(version?.storage_bucket, key).toBe("knowledge-quarantine");
+      expect((await job(uploads[key]!.versionId, "scan"))?.status, key).toBe("succeeded");
+      expect(await job(uploads[key]!.versionId), key).toBeNull();
       const { count } = await admin.schema("knowledge").from("document_chunks").select("id", { count: "exact", head: true }).eq("document_version_id", uploads[key]!.versionId);
       expect(count, key).toBe(0);
     }
+  });
+
+  it("fails visibly, without retry, when a released PDF has no text layer", async () => {
+    const admin = await signedInClient("admin");
+    const version = await versionRow(admin, uploads.scanned!.versionId);
+    expect(version?.status).toBe("processing_failed");
+    expect(await securityStatus(admin, uploads.scanned!.versionId)).toMatchObject({ security_state: "released" });
+    const failed = await job(uploads.scanned!.versionId);
+    expect(failed.status).toBe("failed");
+    expect(failed.error_code).toBe("no_text");
+    expect(failed.attempts).toBe(1);
+    const { count } = await admin.schema("knowledge").from("document_chunks").select("id", { count: "exact", head: true }).eq("document_version_id", uploads.scanned!.versionId);
+    expect(count).toBe(0);
   });
 
   it("processes a partly scanned PDF but records the unread page (approval is blocked later)", async () => {

@@ -1213,8 +1213,9 @@ implementeret.**
 | **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Ikke koblet på applikationen |
 | **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
 | **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-024) |
-| **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Implementeret 2026-10-05 — afventer godkendelse. Ingen produktionsbehandling: I5-gaten er lukket |
-| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, upload-sikkerhed (I5: karantæne, filvalidering, aktivt indhold, ClamAV), kundedataspærre, observability, aktivering | Ikke påbegyndt |
+| **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-025). Gaten blev erstattet af I5's release-gate |
+| **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV-sidecar, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Implementeret 2026-10-05 — afventer godkendelse (B-026) |
+| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -1687,8 +1688,12 @@ production-retrieval og 8C. Workeren bruger lokalt fortsat service-rollen gennem
 ### 21.5 8B-I4 — Workerens runtime
 
 Gør `workers/ingestion` klar til at køre som en kontrolleret ECS Fargate-workload med I3's
-identitet og capability-model (§6.1, §6.1.1, B-025). **Ingen rigtige dokumenter behandles:**
-I5-gaten er lukket i produktion.
+identitet og capability-model (§6.1, §6.1.1, B-025). Godkendt 2026-10-05. **Status efter I5:**
+den lukkede I5-gate og standby er erstattet af release-gaten (§21.6).
+
+**Kendt flaky-test-observation (2026-10-05):** én isoleret fejl i en AI Gateway-test i den
+fulde testkørsel ved I4, som ikke kunne genskabes. Fejler samme test igen i et senere deltrin,
+skal årsagen undersøges før pilot/produktion. Status ved I5: se §21.6 og rapporten.
 
 **Arkitektur** (`workers/ingestion/`):
 
@@ -1904,3 +1909,232 @@ Funktionens grænser:
 **Ikke implementeret:** ClamAV, karantæne, filvalidering og aktivt indhold (I5), registret og
 P1–P9, `evaluation_publisher`, aktivering af production-retrieval og Bedrock i appen, 8C og
 rigtige cloud-ressourcer (konto, VPC, NAT, ECR, secret og deployment).
+
+### 21.6 8B-I5 — Upload-sikkerhed, karantæne og malware-scanning
+
+Efter I5 kan et produktionsdokument kun nå parsing, chunking og embedding, hvis det **eksplicit
+har bestået hele filsikkerhedskæden**, og databasen har frigivet netop de bytes, der blev
+scannet (§7, D-11, D-12, B-026). I5 erstatter I4's lukkede gate med en rigtig release-gate.
+
+**Tilstandsmaskine** (`document_versions.security_state`, håndhævet af triggeren
+`check_version_security` for alle roller):
+
+```
+upload ──► quarantined (knowledge-intake) ──claim af scan-job──► scanning
+scanning ──verdict safe──► (stadig scanning) ──flytning bekræftet med checksum──► released (knowledge-originals) ──► behandlingsjob
+scanning ──verdict rejected──► rejected ──flytning──► knowledge-quarantine (endestation)
+scanning ──teknisk fejl──► scan_failed ──genforsøg──► scanning
+released ──bytes ændret / genscanning──► quarantined
+legacy_unscanned (versioner fra før I5) ──genscanning──► quarantined
+```
+
+- En ny version oprettes altid som `quarantined` i `knowledge-intake` — også af tabellens ejer.
+- Sikkerhedskolonnerne kan kun ændres af databasens egne funktioner (tabellens ejer). En klient,
+  `service_role` og workeren kan ikke opdatere dem.
+- `processed` og `published` kræver `released` — for alle roller.
+- `released` kræver et verdict og `knowledge-originals` (constraint).
+- Højst én aktiv scanning pr. version (unikt partielt indeks).
+
+**Buckets (lagergrænsen):**
+
+| Bucket | Indhold | Politikker |
+|--------|---------|------------|
+| `knowledge-intake` | Nye uploads (karantæne) | Kun `INSERT` for `knowledge.document.write` i den faste sti. Ingen kan læse, ændre eller slette |
+| `knowledge-originals` | Kun frigivne originaler | Kun læsning for forvaltere, og kun for `released` (eller versioner fra før I5). Ingen upload fra klienter |
+| `knowledge-quarantine` | Afviste filer | Ingen politikker. Ingen kan læse dem gennem API'et |
+
+Kun Edge Function `worker-storage` (service_role, server-side) flytter filer, og kun på en
+engangsbillet, som databasen har udstedt til netop den flytning.
+
+**Kontroller i rækkefølge** (`workers/ingestion/security/`):
+
+1. **Strukturel validering på byteniveau** (`file-checks.ts`, ingen parser): størrelse,
+   SHA-256 og størrelse = de registrerede, magic bytes `%PDF-1.0–1.7/2.0` på byte 0 (andre
+   signaturer genkendes: ZIP, EXE, ELF, PNG, JPEG, GIF, OLE, RAR, 7z, gzip, HTML), filendelsen
+   `.pdf`, upload-MIME `application/pdf`, `%%EOF` i de sidste 4 KB og kun whitespace efter det
+   sidste `%%EOF` (ellers polyglot). Endelse eller MIME alene er aldrig nok.
+2. **ClamAV** (`scanner.ts`): clamd-protokollen over TCP til sidecaren på `127.0.0.1:3310`
+   (`zVERSION`, `zINSTREAM` i bidder på 64 KB). Alle filer under størrelsesgrænsen scannes —
+   også en fil, der allerede er strukturelt ugyldig.
+3. **PDF-sikkerhedsinspektion** (`pdf-structure.ts`, `pdf-inspect.ts`) — kun for en strukturelt
+   gyldig fil, som ClamAV fandt ren. Den læser PDF'ens **struktur** (alle dictionaries, også i
+   komprimerede objektstrømme, navne med `#xx` afkodet), aldrig en bytesøgning, og den bruger
+   **ikke pdfjs**. Den kører i en børneproces (`inspector.ts`) med tom miljøvariabel-liste,
+   begrænset heap og hård tidsgrænse (SIGKILL), og bytes går over stdin — ingen midlertidige
+   filer.
+
+**PDF-politik V1 (`pdf-v1`)** — afvises:
+
+- JavaScript: `/JS`, `/JavaScript` (nøgler, navnetræer, `/S /JavaScript`).
+- Handlinger, der åbner eller sender noget: `/Launch`, `/SubmitForm`, `/ImportData`, `/GoToR`,
+  `/GoToE`.
+- `/AA` (additional actions) overalt.
+- `/OpenAction`, der er andet end en sidedestination eller en `/GoTo` uden `/Next`.
+- Indlejrede filer og vedhæftninger: `/EmbeddedFiles`, `/EF`, `/Type /EmbeddedFile`,
+  `/FileAttachment`. De pakkes aldrig ud.
+- RichMedia og multimedier: `/RichMedia*`, `/Screen`, `/Movie`, `/Sound`, `/3D`, `/Rendition`.
+- XFA (`/XFA`).
+- Kryptering (`/Encrypt`). Der prøves aldrig en adgangskode, og der er intet password-flow.
+- Defekte PDF'er og alt, læseren ikke kan læse pålideligt: ukendt syntaks, uafsluttede
+  strenge, ugyldige navne, objektstrømme med andre filtre end FlateDecode, intet katalog eller
+  ingen sider, og krydsreferencer, der ikke peger præcis på det objekt, de nævner (forhindrer at
+  en anden læser ledes til et objekt gemt i en stream).
+
+Tilladt: almindelige links inklusive `/URI` (de åbner intet af sig selv) og navigation
+(`/GoTo`, `/Named`, `/Thread`).
+
+**Grænser** (serverens politik, begrænset af hårde lofter i `limits.ts`, som hverken politik,
+Admin eller miljø kan hæve):
+
+| Grænse | V1 | Begrundelse |
+|--------|----|-------------|
+| Filstørrelse (upload og efter download) | 50 MB | Bucket-grænsen fra fase 7 |
+| Sider | 2.000 | Fase 7's grænse |
+| Objekter | 200.000 | Langt over normale betingelser; stopper objektbomber |
+| Udpakket objektstrøm (én / i alt) | 20 MB / 100 MB | Dekomprimeringsbomber |
+| Udpakningsforhold | 200:1 | Typisk tekst-PDF ligger langt under |
+| Indlejringsdybde | 64 | Rekursion |
+| Inspektion: tid / heap | 60 s / 512 MB | Børneprocessen dræbes ved overskridelse |
+| ClamAV pr. fil | 120 s | §6.4 |
+
+**Verdict** (`knowledge.security_verdicts`, uforanderligt bortset fra frigivelse/afløsning):
+version, job, politikversion, checksum, filstørrelse, fundet MIME, bucket og sti, strukturelt
+resultat og kode, malwareresultat, fundets navn og fejlkode, scanner, scannerversion,
+signaturversion og -tid, PDF-sikkerhedsresultat og kode, aktivt indhold og fund, endeligt
+verdict, fejlkode, tidspunkt, frigivelse og afløsning (med årsag).
+
+**`safe` afledes i databasen** (`worker_record_security_verdict`). Workeren indberetter kun
+målinger, i et strengt valideret format uden fri tekst. Rækkefølgen er politikken:
+
+1. fund → afvist `malware_detected`;
+2. strukturel fejl → afvist (koden);
+3. checksum eller størrelse ≠ versionens → afvist `checksum_mismatch`;
+4. scannerfejl → teknisk scanfejl (koden);
+5. scanner er hverken ClamAV eller en tilladt udviklingsscanner → `scanner_not_allowed`;
+6. signaturtid ukendt, i fremtiden eller ældre end politikkens maksimum (24 t) →
+   `stale_signatures`;
+7. målt under en anden politik → `policy_outdated`;
+8. PDF-fejl → afvist (koden);
+9. aktivt indhold → afvist `active_content` (`embedded_file`, hvis fundet kun er filer);
+10. noget ikke kørt → `inspection_incomplete`;
+11. ellers `safe`.
+
+**Checksum-binding:** scannede bytes X → verdict for X → frigivelsen flytter X og bekræftes
+med checksummen af de flyttede bytes → behandlingen henter X og spørger gaten med checksummen
+af de hentede bytes.
+
+- Andre bytes ved frigivelsen: funktionen skriver intet, databasen afløser verdict
+  (`checksum_changed`), versionen går tilbage i karantæne, og scan-jobbet scanner igen.
+- Andre bytes ved behandlingen: gaten afviser (`bytes_changed`) før parsing, verdict afløses,
+  versionen går i karantæne, og en ny scanning sættes i kø.
+
+**Release-gaten** (`security_block_reason` via `worker_security_clearance`, `gate.ts`):
+versionen er `released`; verdict findes, hører til versionen, er `safe`, ikke afløst, frigivet,
+under den aktive politik og med alle dele bestået; verdict-checksum = versionens checksum (=
+de hentede bytes); sti = versionens sti i `knowledge-originals`. Gaten spørges før download og
+igen med bytes før første parserkald. Der findes ingen miljøvariabel, Admin-indstilling eller
+almindelig opdatering, der åbner den. Claim annullerer behandlings- og re-embedding-jobs for
+ufrigivne versioner (`security_not_released`).
+
+**Absolut regel, bevist statisk:** scan-jobbets importgraf og inspektionsbarnet når hverken
+pdfjs, chunkeren, normalisering, strukturering eller embedderne (arkitekturtest). Efter
+frigivelsen krydstjekker udtrækket desuden pdfjs' eget syn (JS-handlinger, vedhæftninger,
+open action, XFA, annotationer) mod samme politik (`parser-crosscheck.ts`) og stopper jobbet
+før chunking, hvis to læsere ser forskelligt.
+
+**Politikversion:** verdicts bærer `policy_version`. En ny politik gør ældre verdicts
+forældede for gaten (`policy_outdated`). Der er ingen automatisk genscanning af korpus i I5.
+
+**ClamAV-arkitektur:**
+
+- Sidecar-container `clamav` i samme Fargate-task (`deploy/clamav/`). clamd lytter kun på
+  `127.0.0.1:3310`. Ingen port mod omverdenen; security groupen har ingen indgående regler.
+- Ingen credentials, intet miljø, ingen secrets, ikke-root (10001), skrivebeskyttet rodfilsystem,
+  `capabilities drop ALL`, kun `/tmp` som volumen.
+- Workeren starter først, når clamd er sund (`dependsOn HEALTHY`).
+- `StreamMaxLength 60M` (over bucket-grænsen), `AlertExceedsMax yes`, `LogClean no`. Rå bytes
+  logges aldrig; et fund logges med signaturnavnet.
+- **Signaturer:** bygges ind i imaget af `freshclam` ved byggetid. Den kørende container henter
+  intet og behøver ingen netværksforbindelse. Imaget bygges og udrulles efter en fast plan (hver
+  6. time anbefales) [AFKLARES: CI-pipeline og spejl, fx `cvdupdate` i et privat spejl].
+  Engine-version, signaturversion og -tid registreres på hvert verdict og logges ved opstart
+  (`scanner_status` med alder). Ældre end 24 timer → intet nyt `safe`.
+- **Blast radius ved en kompromitteret clamd:** den har ingen database-credential, ingen
+  service_role, ingen billet og ingen adgang til workerens hukommelse eller volumen. **Men** en
+  ECS-taskrolle gælder hele tasken: clamd-containeren kan i princippet hente task-rollens
+  credentials (i dag kun `bedrock:InvokeModel` på Embed v4-profilen) og bruge taskens udgående
+  443. Den kan altså misbruge embedding-kvoten og sende bytes, den selv har fået at scanne, ud.
+  Se B-026 for afvejningen og alternativet (separat ClamAV-task uden rolle og uden udgående
+  trafik) [AFKLARES].
+
+**Fejltilstande:**
+
+| Situation | Resultat |
+|-----------|----------|
+| clamd utilgængelig, timeout, `ERROR`, ukendt svar, for langt svar | Teknisk scanfejl; genforsøg med backoff; aldrig frigivet |
+| Signaturer ukendte eller ældre end 24 t | Teknisk scanfejl (`signature_unknown`/`stale_signatures`) |
+| Inspektionen timer ud, crasher eller svarer ulæseligt | `inspection_timeout`/`inspection_failed` → afvist (fail closed) |
+| Flytningen fejler eller bekræftes ikke | Genforsøg; kilden slettes først efter bekræftelse |
+| Udtømte forsøg | Versionen `processing_failed`, sikkerhed `scan_failed`; genbehandling scanner igen |
+
+**Admin-statusser** (`SECURITY_STATUS`, kun kategori og kode fra `version_security_status` —
+aldrig filen eller fundets detaljer): **I karantæne**, **Scanner**, **Godkendt
+sikkerhedskontrol**, **Afvist: ugyldig PDF**, **Afvist: aktivt indhold**, **Afvist: malware**,
+**Teknisk scanfejl**. Versioner fra før I5 vises som "Ikke sikkerhedsscannet". "Genbehandl"
+vises ikke for en afvist fil.
+
+**Kontrolleret genscanning:** `knowledge.request_security_rescan` (kræver
+`system.settings.manage`, server-side): kun for `uploaded`/`processing_failed` uden aktivt job.
+Alle verdicts afløses (`rescan_requested`), frigivelsen ophæves (karantæne), et scan-job sættes
+i kø, og det auditeres. Ingen UI-knap i I5.
+
+**Lokal udvikling:** samme gate og samme database. Uden `IPA_CLAMD_HOST` bruges
+udviklingsscanneren (`development-fixture`), som kun kan oprettes lokalt/i test og kun
+accepteres, når det lokale seed har indsat rækken i `security_development_scanners`. I
+produktion er tabellen tom, og `ops.ingestion_worker_status()` melder en række som
+overtrædelse.
+
+**Tests:**
+
+- **pgTAP** `upload_security.test.sql` (115): buckets og politikker, rettigheder, tilstandsmaskinen,
+  spoofet `safe` fra klient, `service_role` og ejer, afledningen (malware, scannerfejl, forældede
+  og ukendte signaturer, ukendt scanner, udviklingsscanner uden seed, politik, ufuldstændig
+  inspektion, aktivt indhold, indlejrede filer, kryptering, polyglot, checksum), strengt input,
+  frigivelse med checksum, parallel flytning, genbrug af bekræftelse, verdict-replay på tværs af
+  versioner, gammelt verdict på ny fil, anden sti, politikskifte, bytes ændret efter frigivelse,
+  re-embedding-omgåelse, genscanning og Admin-adgang. De eksisterende pgTAP-filer frigiver nu
+  deres fixtures med en sessionslokal hjælper.
+- **Enhedstests:** `worker-security-pdf.test.ts` (47) med syntetiske fixtures,
+  `worker-security-scan.test.ts` (37) med en falsk clamd over TCP, `worker-gate.test.ts` (6) og
+  opdaterede arkitekturtests (scanstiens importgraf, ingen midlertidige filer, ingen
+  udviklingsgenvej i gaten, ClamAV-sidecaren).
+- **Integration** `upload-security.integration.test.ts` (7): hele flowet med den rigtige
+  worker; afvisning af aktivt indhold, indlejrede filer, kryptering, polyglot, ikke-PDF og forkert
+  endelse; bytes byttet før scanning og efter frigivelse; klientforsøg på at frigive; **ClamAV med
+  EICAR** (fundet og sat i karantæne) og ukendte signaturer og nedlagt clamd (aldrig frigivet).
+- **Mutationer:** 34/34 fanget — 12 i SQL (verdict-checksum, hentede bytes, politikversion,
+  verdict tilhører versionen, malware vinder, forældede signaturer, scanner-allowlist, aktivt
+  indhold, politik ved afledning, checksum ved flytning, ejerkravet og `processed` kræver
+  `released`) og 22 i TypeScript (gatens eksplicitte pass og egen checksum, gaten før og efter
+  download, scanner fail-closed ved ukendt svar og timeout, forældede signaturer, inspektion kun
+  af rene filer, checksum, JavaScript, OpenAction, indlejrede filer, `#xx`-navne, objektstrømme,
+  kryptering, krydsreferencer, inspektionstimeout, clamd kun på loopback, lagerfunktionen skriver
+  aldrig andre bytes og sletter kun efter bekræftelse, udviklingsscanneren kun lokalt og
+  ugyldiggjort frigivelse). JavaScript-mutationen overlevede første kørsel; der er tilføjet
+  fixtures med en bar `/JS` og et utypet navnetræ.
+
+**Afvigelser og realiseringsvalg** (B-026):
+
+- Rækkefølgen i §7.1 er realiseret som byteniveau-validering → ClamAV → strukturinspektion.
+  §7.1 nr. 5 ("parseren kan åbne filen") udføres af inspektionens egen læser — ikke pdfjs — for
+  at overholde reglen om, at ingen bytes når pdfjs før `safe`. pdfjs' syn krydstjekkes efter
+  frigivelsen.
+- Brugerteksterne i §7.3 er erstattet af de syv Admin-statusser, du angav for I5.
+- Afviste filer flyttes til `knowledge-quarantine` uanset årsag (ikke kun malware).
+- Inspektionstimeout og ressourcegrænser giver afvisning (ikke genforsøg).
+- ClamAV som sidecar deler taskrollen (se blast radius) [AFKLARES].
+
+**Ikke implementeret:** andre formater, OCR, P1–P9, registret og `evaluation_publisher`,
+aktivering af production-retrieval, 8C, en rigtig Copilot-model, Learn/Practice/Advise,
+automatisk korpusgenscanning, UI til genscanning og rigtige cloud-ressourcer (CI til
+signaturimaget, ECR, VPC, NAT/EIP).

@@ -10,11 +10,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleWorkerStorage, supabaseStorageDeps, type StorageClient } from "../../../supabase/functions/worker-storage/handler.ts";
 import { createEmbedder } from "../../lib/knowledge/core/registry";
 import { postgresOptions, postgresWorkerDb } from "../../../workers/ingestion/db.ts";
-import { processingGateFor } from "../../../workers/ingestion/gate.ts";
+import { databaseSecurityGate } from "../../../workers/ingestion/gate.ts";
 import type { LogEvent } from "../../../workers/ingestion/log.ts";
 import { ticketOriginals } from "../../../workers/ingestion/originals.ts";
 import { processJob, type ClaimedJob, type PipelineDeps, type WorkerDb } from "../../../workers/ingestion/pipeline.ts";
 import { createWorkerRuntime } from "../../../workers/ingestion/runtime.ts";
+import { runScanJob } from "../../../workers/ingestion/scan-job.ts";
+import { childProcessInspector } from "../../../workers/ingestion/security/inspector.ts";
+import { developmentFixtureScanner } from "../../../workers/ingestion/security/scanner.ts";
 import { buildPdf, termsFixturePages } from "../fixtures/knowledge-pdfs";
 
 import { env, integrationConfigured, signedInClient } from "./helpers";
@@ -31,6 +34,9 @@ import { RUN, runWorkerOnce, uploadVersion, workerConfigured } from "./knowledge
  *     over and completes, and the old worker can no longer write;
  *   * lease loss mid-flight, heartbeat, credential and connection failures, and the real
  *     worker process (main.ts) end to end and on SIGTERM.
+ *
+ * 8B-I5: every version first passes the security examination (scan job, development fixture
+ * scanner — local only) and the real release gate in the database.
  *
  * Needs IPA_TEST_DB_ADMIN_URL: a LOCAL admin connection (the local stack's postgres user) to
  * set throwaway passwords on the login roles and to let leases run out. Never a production URL.
@@ -101,10 +107,13 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
   const pools: Partial<Record<"blue" | "green", Sql>> = {};
   const workerDb = (color: "blue" | "green", label = `${color}-${RUN}`) =>
     postgresWorkerDb((pools[color] ??= connect(color)), label, { leaseSeconds: 60, queryTimeoutMs: 30_000 });
+  // ⚠ Development fixture scanner: accepted only because the local seed allows it.
+  const scanTools = () => ({ scanner: developmentFixtureScanner("test"), inspector: childProcessInspector() });
   const deps = (db: WorkerDb, log: LogEvent[] = []): PipelineDeps => ({
     db,
     originals: ticketOriginals({ db, url: storageUrl }),
-    gate: processingGateFor("test"),
+    gate: databaseSecurityGate(db),
+    scan: scanTools(),
     log: (event) => void log.push({ event: "job_step", ...event }),
     embedderFor: (model) => createEmbedder(model, "test"),
   });
@@ -125,7 +134,13 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
   };
   const upload = async (label: string) => {
     const client = await signedInClient("admin");
-    return uploadVersion(client, await buildPdf(termsFixturePages()), { title: `Runtime ${label} ${RUN}` });
+    const version = await uploadVersion(client, await buildPdf(termsFixturePages()), { title: `Runtime ${label} ${RUN}` });
+    // 8B-I5: the security examination releases the file and queues its processing job.
+    const scanner = workerDb("blue", `blue-scan-${RUN}`);
+    const scan = await claimOwn(scanner, version.versionId);
+    expect(scan.kind).toBe("scan");
+    expect(await runScanJob(scan, deps(scanner))).toBe("succeeded");
+    return version;
   };
   /** Claims this test's job. A leftover job of an earlier test run is put back (retry). */
   const claimOwn = async (db: WorkerDb, versionId: string): Promise<ClaimedJob> => {
@@ -198,7 +213,7 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
     await expect(db.claim()).rejects.toMatchObject({ code: "28000" });
     const result = await createWorkerRuntime(
       { once: false, leaseSeconds: 60, heartbeatMs: 12_000, stallMs: 600_000, idle: { initialMs: 10, maxMs: 10 }, errorBackoff: { initialMs: 10, maxMs: 10 }, shutdownGraceMs: 0 },
-      { db, originals: ticketOriginals({ db, url: storageUrl }), gate: processingGateFor("test"), log: () => {}, sleep: async () => {} },
+      { db, originals: ticketOriginals({ db, url: storageUrl }), gate: databaseSecurityGate(db), scan: scanTools(), log: () => {}, sleep: async () => {} },
     ).run();
     expect(result.reason).toBe("fatal");
   });
@@ -212,7 +227,8 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
       {
         db,
         originals: ticketOriginals({ db, url: storageUrl }),
-        gate: processingGateFor("test"),
+        gate: databaseSecurityGate(db),
+        scan: scanTools(),
         log: (event) => void events.push(event),
         random: () => 0.5,
         sleep: async (ms) => {
@@ -325,7 +341,8 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
       {
         db: counted,
         originals: ticketOriginals({ db: counted, url: storageUrl }),
-        gate: processingGateFor("test"),
+        gate: databaseSecurityGate(counted),
+        scan: scanTools(),
         log: (event) => void events.push(event),
         embedderFor: (model) => {
           const embedder = createEmbedder(model, "test");
@@ -350,7 +367,8 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
       {
         db: onlyOwn(blue, version.versionId),
         originals: ticketOriginals({ db: blue, url: storageUrl }),
-        gate: processingGateFor("test"),
+        gate: databaseSecurityGate(blue),
+        scan: scanTools(),
         log: (event) => void events.push(event),
         embedderFor: (model) => {
           const embedder = createEmbedder(model, "test");

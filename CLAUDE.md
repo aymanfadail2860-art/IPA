@@ -14,9 +14,9 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 (`docs/08b-production-foundation.md`, B-020). 8B implementeres i deltrin, som hver kræver
 eksplicit godkendelse. Deltrin 8B-I1 (evalueringsframework og gates), 8B-I2 (production
 embedding og reranking, ikke koblet på appen), 8B-I2.5 (ekstern AI-datagrænse) og 8B-I3
-(workerens databaseidentitet og databasefunktioner) er gennemført og godkendt. Deltrin 8B-I4
-(workerens runtime; produktionsbehandling spærret indtil I5) er implementeret og afventer
-godkendelse. Resten af 8B er ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
+(workerens databaseidentitet og databasefunktioner) og 8B-I4 (workerens runtime) er gennemført og
+godkendt. Deltrin 8B-I5 (upload-sikkerhed, karantæne og malware-scanning) er implementeret og
+afventer godkendelse. Resten af 8B er ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -91,7 +91,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5 og 8B-I3 gennemført, 8B-I4 implementeret (afventer godkendelse), resten ikke påbegyndt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3 og 8B-I4 gennemført, 8B-I5 implementeret (afventer godkendelse), resten ikke påbegyndt |
 | 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { processingGateFor } from "../../workers/ingestion/gate.ts";
 
 import { knowledgeText } from "@/lib/egress/classification";
 import { embeddingInput, inputHash } from "@/lib/knowledge/core/embedding";
@@ -8,6 +7,7 @@ import { createEmbedder } from "@/lib/knowledge/core/registry";
 import { createTestEmbedder, hashEmbedding, TEST_EMBEDDER } from "@/lib/knowledge/core/test-embedder";
 
 import { processJob, type ClaimedJob, type IntegrityRow, type WorkerDb } from "../../workers/ingestion/pipeline.ts";
+import { releasedGate, securityDbDefaults, staticOriginals } from "./fixtures/worker-fakes";
 
 /** Fase 7, trin 4 — embeddings, test-embedder og den fail-closed grad (docs/07 §7, §9.1). */
 
@@ -18,7 +18,8 @@ function cosine(a: number[], b: number[]): number {
 }
 
 
-const TEST_GATE = processingGateFor("test");
+// The version is released (8B-I5): the release gate itself is tested in worker-gate.test.ts.
+const TEST_GATE = releasedGate();
 describe("runtime environment and grade (docs/07 §9.1)", () => {
   it("treats a missing or unknown IPA_RUNTIME_ENV as production (fail-closed)", () => {
     expect(runtimeEnv(undefined)).toBe("production");
@@ -117,6 +118,7 @@ describe("embedding and indexing in the worker pipeline (docs/07 §5.2 steps 8�
       complete: async () => void calls.push("complete"),
       issueStorageTicket: async () => ({ ticket: "0".repeat(64), expiresAt: new Date() }),
       forget: () => {},
+      ...securityDbDefaults(),
       fail: async (_job, code, _message, retryable) => {
         calls.push(`fail:${code}:${retryable}`);
         return retryable ? "retry" : "failed";
@@ -131,7 +133,7 @@ describe("embedding and indexing in the worker pipeline (docs/07 §5.2 steps 8�
 
   it("embeds every chunk with the model and an input hash, then verifies the index", async () => {
     const { fake, stored, calls } = db(complete);
-    const outcome = await processJob(job, { db: fake, originals: { download: async () => new Uint8Array() }, log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "test") });
+    const outcome = await processJob(job, { db: fake, originals: staticOriginals(), log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "test") });
     expect(outcome).toBe("succeeded");
     expect(stored).toHaveLength(2);
     expect(stored.every((row) => row.embedding.length === 256 && /^[0-9a-f]{64}$/.test(row.input_hash))).toBe(true);
@@ -140,14 +142,14 @@ describe("embedding and indexing in the worker pipeline (docs/07 §5.2 steps 8�
 
   it("retries when the index is incomplete after embedding", async () => {
     const { fake, calls } = db(() => complete(1));
-    const outcome = await processJob(job, { db: fake, originals: { download: async () => new Uint8Array() }, log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "test") });
+    const outcome = await processJob(job, { db: fake, originals: staticOriginals(), log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "test") });
     expect(outcome).toBe("retry");
     expect(calls).toEqual(["fail:processing_error:true"]);
   });
 
   it("fails without retry when the test embedder would run in production", async () => {
     const { fake, calls } = db(complete);
-    const outcome = await processJob(job, { db: fake, originals: { download: async () => new Uint8Array() }, log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "production") });
+    const outcome = await processJob(job, { db: fake, originals: staticOriginals(), log: () => {}, gate: TEST_GATE, embedderFor: (model) => createEmbedder(model, "production") });
     expect(outcome).toBe("failed");
     expect(calls).toEqual(["fail:embedding_unavailable:false"]);
   });

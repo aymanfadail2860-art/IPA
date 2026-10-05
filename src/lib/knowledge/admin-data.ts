@@ -12,6 +12,7 @@ import type {
   ValidityGap,
   VersionStatus,
 } from "./admin-types";
+import { securityStatus, type SecurityStatus } from "./admin-types";
 
 /*
  * Reads for the Knowledge Engine administration (docs/07 §12). Every query runs as the
@@ -60,7 +61,18 @@ async function failureReasons(versionIds: string[]): Promise<Map<string, string>
   return reasons;
 }
 
-function toVersionRow(record: VersionRecord, gaps: Set<string>, reasons: Map<string, string>): AdminVersionRow {
+/** The security category per version (knowledge.version_security_status: codes only, managers only). */
+async function securityStatuses(versionIds: string[]): Promise<Map<string, SecurityStatus>> {
+  if (versionIds.length === 0) return new Map();
+  const { data } = await (await knowledge()).rpc("version_security_status", { p_version_ids: versionIds });
+  const statuses = new Map<string, SecurityStatus>();
+  for (const row of (data ?? []) as { version_id: string; security_state: string; failure_code: string | null }[]) {
+    statuses.set(row.version_id, securityStatus(row.security_state, row.failure_code));
+  }
+  return statuses;
+}
+
+function toVersionRow(record: VersionRecord, gaps: Set<string>, reasons: Map<string, string>, security: Map<string, SecurityStatus>): AdminVersionRow {
   return {
     id: record.id,
     documentId: record.document_id,
@@ -77,6 +89,7 @@ function toVersionRow(record: VersionRecord, gaps: Set<string>, reasons: Map<str
     updatedAt: record.updated_at,
     errorMessage: record.status === "processing_failed" ? (reasons.get(record.id) ?? null) : null,
     documentHasGap: gaps.has(record.document_id),
+    security: security.get(record.id) ?? "quarantined",
   };
 }
 
@@ -86,16 +99,20 @@ export async function listVersions(documentId?: string): Promise<AdminVersionRow
   if (documentId) query = query.eq("document_id", documentId);
   const { data } = await query;
   const records = (data ?? []) as unknown as VersionRecord[];
-  const [gaps, reasons] = await Promise.all([gapDocumentIds(), failureReasons(records.filter((r) => r.status === "processing_failed").map((r) => r.id))]);
-  return records.map((record) => toVersionRow(record, gaps, reasons));
+  const [gaps, reasons, security] = await Promise.all([
+    gapDocumentIds(),
+    failureReasons(records.filter((r) => r.status === "processing_failed").map((r) => r.id)),
+    securityStatuses(records.map((r) => r.id)),
+  ]);
+  return records.map((record) => toVersionRow(record, gaps, reasons, security));
 }
 
 export async function getVersionRow(versionId: string): Promise<AdminVersionRow | null> {
   const { data } = await (await knowledge()).from("document_versions").select(VERSION_COLUMNS).eq("id", versionId).maybeSingle();
   if (!data) return null;
   const record = data as unknown as VersionRecord;
-  const [gaps, reasons] = await Promise.all([gapDocumentIds(), failureReasons([record.id])]);
-  return toVersionRow(record, gaps, reasons);
+  const [gaps, reasons, security] = await Promise.all([gapDocumentIds(), failureReasons([record.id]), securityStatuses([record.id])]);
+  return toVersionRow(record, gaps, reasons, security);
 }
 
 export async function listProducts(): Promise<AdminProduct[]> {

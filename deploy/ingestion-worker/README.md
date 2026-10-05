@@ -5,16 +5,16 @@ Versionsstyret specifikation for ingestion-workeren som AWS ECS Fargate-workload
 IaC-framework (Terraform, CDK eller Pulumi). Filerne her er derfor de præcise definitioner, som
 driften anvender med AWS CLI, når produktionskontoen findes. Pladsholdere står som `${NAVN}`.
 
-> **I5-gate:** Workeren er klar som runtime, men den behandler ikke rigtige dokumenter. I
-> produktion er behandlingsgaten lukket, indtil 8B-I5 (karantæne, filvalidering, aktivt indhold
-> og ClamAV) er godkendt. Indtil da forbinder workeren, verificerer sin identitet og venter. Den
-> tager ingen jobs (`workers/ingestion/gate.ts`).
+> **Release-gate (8B-I5):** Hver upload undersøges i karantæne (scan-job: byteniveau-validering,
+> ClamAV i sidecaren, PDF-inspektion). Workeren behandler kun en fil, når databasen har frigivet
+> netop de scannede bytes (`workers/ingestion/gate.ts`, `docs/08b` §21.6).
 
 | Fil | Indhold |
 |-----|---------|
 | `Dockerfile` | Image i flere trin, kun runtime-dependencies, ikke-root, ingen build-argumenter eller hemmeligheder |
 | `package.json`, `package-lock.json` | Imagets eneste dependencies: `postgres` og `pdfjs-dist` (samme versioner som rodens lockfil) |
-| `task-definition.json` | ECS-taskdefinition: Fargate, 1 vCPU/2 GB, skrivebeskyttet rodfilsystem, `/tmp`-volumen, miljø, secrets, healthcheck, logs |
+| `task-definition.json` | ECS-taskdefinition: Fargate, 1 vCPU/4 GB, workeren (2 GB) og ClamAV-sidecaren `clamav` (2 GB), skrivebeskyttede rodfilsystemer, `/tmp`-volumener, miljø, secrets (kun workeren), healthchecks, logs |
+| `../clamav/` | ClamAV-sidecarens image (signaturer bygget ind ved byggetid) og `clamd.conf` (kun `127.0.0.1:3310`) |
 | `service.json` | ECS-service: 1 task, rullende deployment med circuit breaker, private subnets, ingen offentlig IP |
 | `security-group.json` | Ingen indgående trafik. Udgående kun 443 og 6543 |
 | `iam/execution-role-policy.json` | Execution-rollen: image-pull, logs, injektion af den ene secret |
@@ -107,3 +107,24 @@ Fargate-task (privat subnet, ingen offentlig IP, ingen indgående trafik)
   dokumenttekst, tokens, billetter, passwords eller PII.
 - `pdfjs-dist` skriver ved indlæsning to linjer på stderr om den udeladte valgfrie
   `@napi-rs/canvas`. Tekstudtrækket er identisk med og uden den (verificeret).
+
+## ClamAV-sidecar (8B-I5)
+
+```bash
+# Bygges efter en fast plan (anbefalet hver 6. time) — signaturerne hentes HER, ved byggetid:
+docker build -f deploy/clamav/Dockerfile -t ipa-clamav:$(date -u +%Y%m%d%H%M) .
+# push til ECR-repositoriet ipa-clamav; registrér en ny taskdefinition med ${CLAMAV_IMAGE_TAG}
+# og udrul (aws ecs update-service --force-new-deployment).
+```
+
+- clamd lytter kun på `127.0.0.1:3310` i tasken. Workeren forbinder dertil (`IPA_CLAMD_HOST`,
+  `IPA_CLAMD_PORT`); konfigurationen afviser enhver anden vært i produktion.
+- Containeren har ingen secrets og intet miljø, henter intet ved kørsel og kører som uid 10001 på
+  et skrivebeskyttet rodfilsystem. Workeren starter først, når clamd er sund.
+- **Signaturernes alder:** workeren logger `scanner_status` ved start (version, signaturversion,
+  alder). Er signaturerne ældre end 24 timer, giver ingen scanning `safe` — filerne venter som
+  "Teknisk scanfejl" og prøves igen. Signaturimaget skal derfor udrulles mindst hver 24. time.
+- CI-pipeline og spejl til `freshclam` (fx `cvdupdate` i et privat spejl) [AFKLARES].
+- **Blast radius:** en kompromitteret clamd har ingen database-credential, service_role eller
+  billet, men deler taskens rolle (kun Embed v4) og udgående 443 (B-026) [AFKLARES].
+

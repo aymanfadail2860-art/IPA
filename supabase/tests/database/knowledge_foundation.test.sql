@@ -6,6 +6,24 @@ set search_path = public, extensions;
 
 select plan(40);
 
+-- 8B-I5: en fixture-version består sikkerhedskontrollen (testhjælper, kun i denne session).
+-- Som postgres (tabellens ejer) og efter tilstandsmaskinen: karantæne → scanning → frigivet.
+create function pg_temp.release(p_version uuid) returns void language plpgsql as $release$
+declare v_verdict uuid;
+begin
+  insert into knowledge.security_verdicts (document_version_id, policy_version, checksum_sha256, byte_size, detected_mime,
+    object_bucket, object_path, structural_result, malware_result, scanner_engine, scanner_version, signature_version,
+    signature_time, pdf_security_result, active_content_result, final_verdict, released_at)
+  select v.id, 'pdf-v1', v.checksum_sha256, coalesce(v.byte_size, 0), 'application/pdf', 'knowledge-originals', v.storage_path,
+         'pass', 'clean', 'development-fixture', '0', '0', now(), 'pass', 'pass', 'safe', now()
+  from knowledge.document_versions v where v.id = p_version
+  returning id into v_verdict;
+  update knowledge.document_versions set security_state = 'scanning' where id = p_version;
+  update knowledge.document_versions
+  set security_state = 'released', storage_bucket = 'knowledge-originals', security_verdict_id = v_verdict, security_released_at = now()
+  where id = p_version;
+end $release$;
+
 -- ---------------------------------------------------------------------------
 -- Fiktive testdata (oprettes og rulles tilbage i transaktionen)
 -- ---------------------------------------------------------------------------
@@ -97,6 +115,8 @@ select ok(
   'chunks får leksikalske søgekolonner inkl. overskriftskæden'
 );
 
+do $$ begin perform pg_temp.release('24000000-0000-4000-a000-000000000001'); end $$;
+
 update knowledge.document_versions set status = 'processed', page_count = 1 where id = '24000000-0000-4000-a000-000000000001';
 select throws_ok(
   $$ delete from knowledge.document_chunks where document_version_id = '24000000-0000-4000-a000-000000000001' $$,
@@ -140,6 +160,7 @@ insert into knowledge.document_versions (id, document_id, version_label, valid_f
 values ('24000000-0000-4000-a000-000000000002', '23000000-0000-4000-a000-000000000001', '2', '2024-01-01',
         'pgtap/v2/original.pdf', repeat('d', 64));
 update knowledge.document_versions set status = 'processing' where id = '24000000-0000-4000-a000-000000000002';
+do $$ begin perform pg_temp.release('24000000-0000-4000-a000-000000000002'); end $$;
 update knowledge.document_versions set status = 'processed' where id = '24000000-0000-4000-a000-000000000002';
 update knowledge.document_versions set status = 'under_review' where id = '24000000-0000-4000-a000-000000000002';
 select throws_ok(

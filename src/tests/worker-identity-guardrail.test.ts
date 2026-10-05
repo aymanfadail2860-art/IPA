@@ -60,7 +60,14 @@ describe("worker identity guardrails (8B-I3)", () => {
     }
     const seed = read("supabase/seed.sql");
     expect(seed).toMatch(/DEVELOPMENT-ONLY/);
-    expect(after(seed).trim()).toBe("grant ingestion_worker to service_role with inherit true, set false;");
+    expect(after(seed).trim().split(/\n+/)).toEqual([
+      "grant ingestion_worker to service_role with inherit true, set false;",
+      // 8B-I5: the development fixture scanner is allowed only here (tested in upload_security).
+      "insert into knowledge.security_development_scanners (engine) values ('development-fixture') on conflict do nothing;",
+    ]);
+    for (const { file, sql } of migrations) {
+      expect(after(sql), file).not.toMatch(/insert\s+into\s+knowledge\.security_development_scanners/i);
+    }
   });
 
   it("checks the caller's real database identity in every worker function, not a parameter", () => {
@@ -105,6 +112,8 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/integration/ai-gateway.integration.test.ts",
       "src/tests/integration/ingestion-worker-lease.integration.test.ts",
       "src/tests/integration/knowledge-helpers.ts",
+      // 8B-I5: tampers with Storage objects in the local stack to test checksum binding (test only).
+      "src/tests/integration/upload-security.integration.test.ts",
       "src/tests/integration/worker-runtime.integration.test.ts",
       "src/tests/worker-identity-guardrail.test.ts",
       "src/tests/worker-runtime-architecture.test.ts",

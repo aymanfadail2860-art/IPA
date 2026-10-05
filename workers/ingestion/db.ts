@@ -4,7 +4,9 @@ import postgres, { type JSONValue, type Options, type PendingQuery, type Row, ty
 
 import type { PostgresConfig } from "./config.ts";
 import type { Chunk } from "./chunker.ts";
-import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, WorkerDb } from "./pipeline.ts";
+import type { Clearance } from "./gate.ts";
+import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, RecordedVerdict, WorkerDb } from "./pipeline.ts";
+import type { ScanContext } from "./security/scan.ts";
 
 /**
  * The production worker's database adapter (docs/08b §21.5): postgres.js, connected as the
@@ -158,6 +160,20 @@ export function postgresWorkerDb(sql: Sql, workerLabel: string, options: Postgre
       const [row] = await run(sql<{ ticket: string; expires_at: Date }[]>`select * from knowledge.worker_issue_storage_ticket(${jobId}::uuid, ${lease(jobId)}::text, ${purpose}::text)`);
       if (!row) throw new Error("Ingen billet.");
       return { ticket: row.ticket, expiresAt: row.expires_at };
+    },
+    async securityScanContext(jobId) {
+      const [row] = await run(sql<{ context: ScanContext }[]>`select knowledge.worker_security_scan_context(${jobId}::uuid, ${lease(jobId)}::text) as context`);
+      return row!.context;
+    },
+    async recordSecurityVerdict(jobId, measurements) {
+      const [row] = await run(
+        sql<{ verdict: RecordedVerdict }[]>`select knowledge.worker_record_security_verdict(${jobId}::uuid, ${lease(jobId)}::text, ${json(measurements)}::jsonb) as verdict`,
+      );
+      return row!.verdict;
+    },
+    async securityClearance(jobId, sha256) {
+      const [row] = await run(sql<{ clearance: Clearance }[]>`select knowledge.worker_security_clearance(${jobId}::uuid, ${lease(jobId)}::text, ${sha256}::text) as clearance`);
+      return row!.clearance;
     },
     forget(jobId) {
       leases.delete(jobId);

@@ -201,7 +201,8 @@ export function ReviewPanel({
             </Button>
           </>
         ) : null}
-        {["processing_failed", "rejected"].includes(version.status) && canWrite ? (
+        {/* A file rejected by the security examination is never processed again (8B-I5): upload a new version. */}
+        {["processing_failed", "rejected"].includes(version.status) && canWrite && !version.security.startsWith("rejected_") ? (
           <Button variant="secondary" loading={pending} onClick={() => run(() => requestReprocess(version.id))}>
             Genbehandl
           </Button>

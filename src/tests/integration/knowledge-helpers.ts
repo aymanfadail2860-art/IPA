@@ -8,13 +8,17 @@ import { sha256 } from "../fixtures/knowledge-pdfs";
 /**
  * Helpers for Knowledge Engine integration tests. They follow the same calls as the server
  * actions in src/lib/knowledge/upload-actions.ts — signed upload URL, direct upload to the
- * private bucket, registration through knowledge.register_upload — as the signed-in user.
+ * private quarantine bucket (8B-I5), registration through knowledge.register_upload — as the
+ * signed-in user.
  *
  * Versions are never deleted (docs/07 §2), so every test run creates its own documents with
  * a unique marker and only asserts on those.
  */
 
-export const BUCKET = "knowledge-originals";
+/** Uploads land here (quarantine, 8B-I5); nobody can read it. */
+export const INTAKE_BUCKET = "knowledge-intake";
+/** Released originals only. */
+export const ORIGINALS_BUCKET = "knowledge-originals";
 export const RUN = randomUUID().slice(0, 8);
 
 export interface UploadOptions {
@@ -28,6 +32,8 @@ export interface UploadOptions {
   contentType?: string;
   /** Declared checksum (defaults to the real SHA-256 of the bytes). */
   declaredChecksum?: string;
+  /** The original filename (defaults to testbetingelser.pdf). */
+  filename?: string;
 }
 
 export interface UploadedVersion {
@@ -59,10 +65,10 @@ export async function uploadVersion(client: SupabaseClient, bytes: Uint8Array, o
   const versionId = randomUUID();
   const path = `${documentId}/${versionId}/original.pdf`;
 
-  const signed = await client.storage.from(BUCKET).createSignedUploadUrl(path);
+  const signed = await client.storage.from(INTAKE_BUCKET).createSignedUploadUrl(path);
   if (signed.error) throw new Error(`sign: ${signed.error.message}`);
   const upload = await client.storage
-    .from(BUCKET)
+    .from(INTAKE_BUCKET)
     .uploadToSignedUrl(path, signed.data.token, bytes, { contentType: options.contentType ?? "application/pdf" });
   if (upload.error) throw new Error(`upload: ${upload.error.message}`);
 
@@ -81,7 +87,7 @@ export async function uploadVersion(client: SupabaseClient, bytes: Uint8Array, o
     p_valid_from: options.validFrom === undefined ? "2026-01-01" : options.validFrom,
     p_valid_to: options.validTo ?? null,
     p_checksum_sha256: options.declaredChecksum ?? sha256(bytes),
-    p_original_filename: "testbetingelser.pdf",
+    p_original_filename: options.filename ?? "testbetingelser.pdf",
   });
   if (error) throw new Error(`register: ${error.message}`);
   return { documentId, versionId, path };
@@ -93,7 +99,11 @@ export async function versionRow(client: SupabaseClient, versionId: string) {
   return data as Record<string, unknown> | null;
 }
 
-/** Runs the real ingestion worker (node workers/ingestion/main.ts --once) against the local stack. */
+/**
+ * Runs the real ingestion worker (node workers/ingestion/main.ts --once) against the local stack:
+ * the security examination of every upload (development fixture scanner — local only), then
+ * processing of what was released.
+ */
 export async function runWorkerOnce(): Promise<string> {
   const { execFile } = await import("node:child_process");
   const path = await import("node:path");
@@ -125,3 +135,10 @@ export async function runWorkerWith(env: Record<string, string>): Promise<{ code
 
 /** The worker needs its development-only access; integration runs without it skip the worker tests. */
 export const workerConfigured = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+/** The security category of versions, as the Admin sees it (codes only). */
+export async function securityStatus(client: SupabaseClient, versionId: string): Promise<{ security_state: string; failure_code: string | null } | null> {
+  const { data, error } = await client.schema("knowledge").rpc("version_security_status", { p_version_ids: [versionId] });
+  if (error) throw error;
+  return ((data ?? []) as { security_state: string; failure_code: string | null }[])[0] ?? null;
+}
