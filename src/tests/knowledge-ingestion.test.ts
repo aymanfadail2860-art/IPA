@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { processingGateFor } from "../../workers/ingestion/gate.ts";
 
 import { chunkDocument, DEFAULT_CHUNKER_CONFIG, type Chunk } from "../../workers/ingestion/chunker.ts";
 import { extractPdf } from "../../workers/ingestion/extract.ts";
@@ -47,6 +48,8 @@ function expectNoHeadingInside(document: StructuredDocument, chunks: Chunk[]) {
   }
 }
 
+
+const TEST_GATE = processingGateFor("test");
 describe("validation of originals (docs/07 §5.2, B-14)", () => {
   it("accepts a PDF whose checksum matches", async () => {
     const bytes = await buildPdf(termsFixturePages());
@@ -273,6 +276,8 @@ describe("pipeline (docs/07 §5.2)", () => {
         return chunks.length;
       },
       complete: async () => void calls.push("complete"),
+      issueStorageTicket: async () => ({ ticket: "0".repeat(64), expiresAt: new Date() }),
+      forget: () => {},
       fail: async (_job, code, _message, retryable) => {
         calls.push(`fail:${code}:${retryable}`);
         return retryable ? "retry" : "failed";
@@ -296,7 +301,7 @@ describe("pipeline (docs/07 §5.2)", () => {
   it("runs validation → extraction → chunking → complete", async () => {
     const bytes = await buildPdf(termsFixturePages());
     const { db, calls } = fakeDb();
-    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {} });
+    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {}, gate: TEST_GATE });
     expect(outcome).toBe("succeeded");
     expect(calls[0]).toBe("checkpoint:validation");
     expect(calls).toContain("storePages");
@@ -307,7 +312,7 @@ describe("pipeline (docs/07 §5.2)", () => {
   it("fails without retry when the PDF has no text layer (no OCR)", async () => {
     const bytes = await buildPdf([{ lines: [], imageOnly: true }]);
     const { db, calls } = fakeDb();
-    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {} });
+    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {}, gate: TEST_GATE });
     expect(outcome).toBe("failed");
     expect(calls).toContain("fail:no_text:false");
   });
@@ -324,7 +329,7 @@ describe("pipeline (docs/07 §5.2)", () => {
         return retryable ? "retry" : "failed";
       },
     });
-    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {} });
+    const outcome = await processJob(job(bytes), { db, originals: { download: async () => bytes }, log: () => {}, gate: TEST_GATE });
     expect(outcome).toBe("retry");
     expect(message).not.toContain("Forsikringen");
   });
@@ -334,7 +339,7 @@ describe("pipeline (docs/07 §5.2)", () => {
     const { db: first } = fakeDb();
     let state: ClaimedJob["step_state"] = {};
     first.checkpoint = async (_job, step, value) => void (state = { ...state, [step]: value });
-    await processJob(job(bytes), { db: first, originals: { download: async () => bytes }, log: () => {} });
+    await processJob(job(bytes), { db: first, originals: { download: async () => bytes }, log: () => {}, gate: TEST_GATE });
 
     const { db, calls } = fakeDb();
     let downloaded = false;
@@ -346,7 +351,7 @@ describe("pipeline (docs/07 §5.2)", () => {
           return bytes;
         },
       },
-      log: () => {},
+      log: () => {}, gate: TEST_GATE,
     });
     expect(outcome).toBe("succeeded");
     expect(downloaded).toBe(false);

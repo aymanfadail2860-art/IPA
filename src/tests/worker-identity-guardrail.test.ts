@@ -105,8 +105,12 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/integration/ai-gateway.integration.test.ts",
       "src/tests/integration/ingestion-worker-lease.integration.test.ts",
       "src/tests/integration/knowledge-helpers.ts",
+      "src/tests/integration/worker-runtime.integration.test.ts",
       "src/tests/worker-identity-guardrail.test.ts",
-      "workers/ingestion/main.ts",
+      "src/tests/worker-runtime-architecture.test.ts",
+      "src/tests/worker-runtime.test.ts",
+      // Names the key only to refuse it outside local/test (8B-I4).
+      "workers/ingestion/config.ts",
     ]);
   });
 

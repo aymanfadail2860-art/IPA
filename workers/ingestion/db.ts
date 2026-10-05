@@ -1,131 +1,166 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
 
+import postgres, { type JSONValue, type Options, type PendingQuery, type Row, type Sql } from "postgres";
+
+import type { PostgresConfig } from "./config.ts";
 import type { Chunk } from "./chunker.ts";
-import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, OriginalStore, WorkerDb } from "./pipeline.ts";
+import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, WorkerDb } from "./pipeline.ts";
 
 /**
- * The worker's only ways into the database and Storage (docs/07 §14.1): a narrow set of
- * named functions in the knowledge schema, and read access to originals. No direct table
- * writes. The connection is a development-only service-role client (B-16), allowed only in
- * local/test (main.ts); in production the worker connects as its own login role
- * (docs/08b §6.1.1, §21.4) — without changing this interface or the domain model.
+ * The production worker's database adapter (docs/08b §21.5): postgres.js, connected as the
+ * active blue/green login role through Supavisor in transaction mode.
  *
- * Every call on a job carries the lease token that worker_claim_job returned (8B-I3). The
- * token lives only in this process, keyed by job id, and is dropped when the job is completed
- * or failed. The job id alone gives no access.
+ *   * ONLY the locked knowledge.worker_* API (I3). No table is queried or written, no admin or
+ *     ops function is called (architecture test). Every call is one statement = one
+ *     transaction, so nothing depends on session state between transactions.
+ *   * prepare: false — Supavisor's transaction mode does not keep prepared statements.
+ *   * fetch_types: false — no catalog query on connect.
+ *   * The lease token from worker_claim_job lives only in this process, per job. The job id
+ *     alone gives no access (I3).
  */
 
-const LEASE_SECONDS = 300;
+const APPLICATION_NAME = "ipa-ingestion-worker";
 
-type ClaimedRow = ClaimedJob & { lease_token: string };
-
-async function call<T>(promise: PromiseLike<{ data: T | null; error: { message: string; code?: string } | null }>): Promise<T> {
-  const { data, error } = await promise;
-  if (error) {
-    const failure = new Error(error.message) as Error & { code?: string };
-    failure.code = error.code;
-    throw failure;
-  }
-  return data as T;
+/** The postgres.js options for the worker. Exported so the configuration can be tested. */
+export function postgresOptions(config: PostgresConfig, readFile: (path: string) => string = (path) => readFileSync(path, "utf8")): Options<Record<string, never>> {
+  return {
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    username: config.username,
+    password: config.password,
+    ssl: config.ssl === "verify-full" ? { ca: readFile(config.caFile!), rejectUnauthorized: true, servername: config.host } : false,
+    prepare: false,
+    fetch_types: false,
+    max: config.poolMax,
+    connect_timeout: config.connectTimeoutSeconds,
+    idle_timeout: 30,
+    max_lifetime: 15 * 60,
+    connection: { application_name: APPLICATION_NAME },
+    onnotice: () => {},
+    debug: false,
+  };
 }
 
-export function supabaseWorkerDb(client: SupabaseClient, workerId: string): WorkerDb {
-  const knowledge = client.schema("knowledge");
+export function connectWorkerDatabase(config: PostgresConfig): Sql {
+  return postgres(postgresOptions(config));
+}
+
+/** Cancels the query client-side after `ms` (the role's statement_timeout is the server side). */
+async function timed<T extends readonly Row[]>(query: PendingQuery<T>, ms: number): Promise<T> {
+  const timer = setTimeout(() => void query.cancel(), ms);
+  try {
+    return await query;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+type ClaimedRow = ClaimedJob & { lease_token: string; lease_expires_at: Date };
+
+export interface PostgresWorkerDbOptions {
+  leaseSeconds: number;
+  queryTimeoutMs: number;
+}
+
+export function postgresWorkerDb(sql: Sql, workerLabel: string, options: PostgresWorkerDbOptions): WorkerDb {
   const leases = new Map<string, string>();
   const lease = (jobId: string): string => {
     const token = leases.get(jobId);
-    if (!token) throw new Error("Workeren har ingen lease på jobbet.");
+    if (!token) throw Object.assign(new Error("Workeren har ingen lease på jobbet."), { code: "55P03" });
     return token;
   };
+  const run = <T extends readonly Row[]>(query: PendingQuery<T>) => timed(query, options.queryTimeoutMs);
+  // Typed by the server as jsonb: postgres.js serializes the value itself (a pre-stringified
+  // value would arrive as a JSON string).
+  const json = (value: unknown) => sql.json(value as JSONValue);
+
   return {
     async claim() {
-      const rows = await call<ClaimedRow[]>(knowledge.rpc("worker_claim_job", { p_worker: workerId, p_lease_seconds: LEASE_SECONDS }));
-      const row = rows?.[0];
+      const rows = await run(sql<ClaimedRow[]>`select * from knowledge.worker_claim_job(${workerLabel}::text, ${options.leaseSeconds}::int)`);
+      const row = rows[0];
       if (!row) return null;
       // The token stays here; the pipeline only sees the job.
       const { lease_token: token, ...job } = row;
       leases.set(job.job_id, token);
-      return job;
+      return job as ClaimedJob;
     },
     async embeddingModels() {
-      return (await call<EmbeddingModelRow[]>(knowledge.rpc("worker_embedding_models"))) ?? [];
+      return [...(await run(sql<EmbeddingModelRow[]>`select * from knowledge.worker_embedding_models()`))];
     },
     async chunksToEmbed(jobId, modelId) {
-      return (await call<ChunkToEmbed[]>(knowledge.rpc("worker_chunks_to_embed", { p_job_id: jobId, p_lease_token: lease(jobId), p_model_id: modelId }))) ?? [];
+      // text[] arrives as jsonb: with fetch_types off, postgres.js parses no array types.
+      return [
+        ...(await run(
+          sql<ChunkToEmbed[]>`select chunk_id, text, lead_in, to_jsonb(heading_path) as heading_path, language from knowledge.worker_chunks_to_embed(${jobId}::uuid, ${lease(jobId)}::text, ${modelId}::uuid)`,
+        )),
+      ];
     },
     async storeEmbeddings(jobId, modelId, rows) {
-      return call<number>(knowledge.rpc("worker_store_embeddings", { p_job_id: jobId, p_lease_token: lease(jobId), p_model_id: modelId, p_rows: rows }));
+      const [result] = await run(
+        sql<{ stored: number }[]>`select knowledge.worker_store_embeddings(${jobId}::uuid, ${lease(jobId)}::text, ${modelId}::uuid, ${json(rows)}::jsonb) as stored`,
+      );
+      return result!.stored;
     },
     async verifyIndex(jobId) {
-      return (await call<IntegrityRow[]>(knowledge.rpc("worker_verify_index", { p_job_id: jobId, p_lease_token: lease(jobId) }))) ?? [];
+      const [result] = await run(sql<{ integrity: IntegrityRow[] }[]>`select knowledge.worker_verify_index(${jobId}::uuid, ${lease(jobId)}::text) as integrity`);
+      return result!.integrity ?? [];
     },
     async heartbeat(jobId) {
-      await call(knowledge.rpc("worker_heartbeat", { p_job_id: jobId, p_lease_token: lease(jobId), p_lease_seconds: LEASE_SECONDS }));
+      await run(sql`select knowledge.worker_heartbeat(${jobId}::uuid, ${lease(jobId)}::text, ${options.leaseSeconds}::int) as lease_expires_at`);
     },
     async checkpoint(jobId, step, state) {
-      await call(knowledge.rpc("worker_checkpoint", { p_job_id: jobId, p_lease_token: lease(jobId), p_step: step, p_state: state }));
+      await run(sql`select knowledge.worker_checkpoint(${jobId}::uuid, ${lease(jobId)}::text, ${step}::text, ${json(state)}::jsonb)`);
     },
     async storePages(jobId, pages, info) {
-      await call(
-        knowledge.rpc("worker_store_pages", {
-          p_job_id: jobId,
-          p_lease_token: lease(jobId),
-          p_pages: pages,
-          p_page_count: info.pageCount,
-          p_byte_size: info.byteSize,
-          p_mime_type: info.mimeType,
-          p_extractor_version: info.extractorVersion,
-        }),
+      await run(
+        sql`select knowledge.worker_store_pages(${jobId}::uuid, ${lease(jobId)}::text, ${json(pages)}::jsonb, ${info.pageCount}::int, ${info.byteSize}::bigint, ${info.mimeType}::text, ${info.extractorVersion}::text)`,
       );
     },
     async storeChunks(jobId, chunks: Chunk[], chunkerVersion) {
-      return call<number>(
-        knowledge.rpc("worker_store_chunks", {
-          p_job_id: jobId,
-          p_lease_token: lease(jobId),
-          p_chunker_version: chunkerVersion,
-          p_chunks: chunks.map((chunk) => ({
-            chunk_index: chunk.chunkIndex,
-            kind: chunk.kind,
-            text: chunk.text,
-            lead_in: chunk.leadIn,
-            heading: chunk.heading,
-            heading_path: chunk.headingPath,
-            section_number: chunk.sectionNumber,
-            page_start: chunk.pageStart,
-            page_end: chunk.pageEnd,
-            char_start: chunk.charStart,
-            char_end: chunk.charEnd,
-            overlap_chars: chunk.overlapChars,
-            content_hash: chunk.contentHash,
-            char_count: chunk.charCount,
-            token_estimate: chunk.tokenEstimate,
-          })),
-        }),
+      const payload = chunks.map((chunk) => ({
+        chunk_index: chunk.chunkIndex,
+        kind: chunk.kind,
+        text: chunk.text,
+        lead_in: chunk.leadIn,
+        heading: chunk.heading,
+        heading_path: chunk.headingPath,
+        section_number: chunk.sectionNumber,
+        page_start: chunk.pageStart,
+        page_end: chunk.pageEnd,
+        char_start: chunk.charStart,
+        char_end: chunk.charEnd,
+        overlap_chars: chunk.overlapChars,
+        content_hash: chunk.contentHash,
+        char_count: chunk.charCount,
+        token_estimate: chunk.tokenEstimate,
+      }));
+      const [result] = await run(
+        sql<{ stored: number }[]>`select knowledge.worker_store_chunks(${jobId}::uuid, ${lease(jobId)}::text, ${json(payload)}::jsonb, ${chunkerVersion}::text) as stored`,
       );
+      return result!.stored;
     },
     async complete(jobId, report) {
-      await call(knowledge.rpc("worker_complete_job", { p_job_id: jobId, p_lease_token: lease(jobId), p_quality_report: report }));
+      await run(sql`select knowledge.worker_complete_job(${jobId}::uuid, ${lease(jobId)}::text, ${json(report)}::jsonb)`);
       leases.delete(jobId);
     },
     async fail(jobId, code, message, retryable) {
       try {
-        return await call<"retry" | "failed">(
-          knowledge.rpc("worker_fail_job", { p_job_id: jobId, p_lease_token: lease(jobId), p_error_code: code, p_error_message: message, p_retryable: retryable }),
+        const [result] = await run(
+          sql<{ outcome: "retry" | "failed" }[]>`select knowledge.worker_fail_job(${jobId}::uuid, ${lease(jobId)}::text, ${code}::text, ${message}::text, ${retryable}::boolean) as outcome`,
         );
+        return result!.outcome;
       } finally {
         leases.delete(jobId);
       }
     },
-  };
-}
-
-export function supabaseOriginals(client: SupabaseClient): OriginalStore {
-  return {
-    async download(path) {
-      const { data, error } = await client.storage.from("knowledge-originals").download(path);
-      if (error || !data) throw new Error("Originalen kunne ikke hentes fra Storage.");
-      return new Uint8Array(await data.arrayBuffer());
+    async issueStorageTicket(jobId, purpose) {
+      const [row] = await run(sql<{ ticket: string; expires_at: Date }[]>`select * from knowledge.worker_issue_storage_ticket(${jobId}::uuid, ${lease(jobId)}::text, ${purpose}::text)`);
+      if (!row) throw new Error("Ingen billet.");
+      return { ticket: row.ticket, expiresAt: row.expires_at };
+    },
+    forget(jobId) {
+      leases.delete(jobId);
     },
   };
 }

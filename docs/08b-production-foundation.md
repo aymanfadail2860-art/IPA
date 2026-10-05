@@ -1212,8 +1212,9 @@ implementeret.**
 | **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Gennemført og godkendt 2026-10-03 (rettet i 8B-I2: påkrævede passager som sæt, B-021) |
 | **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Ikke koblet på applikationen |
 | **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
-| **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Implementeret 2026-10-03 — afventer godkendelse |
-| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, workerens kørselsmiljø (Fargate, Secrets Manager, NAT, Edge Function `worker-storage`, ClamAV, karantæne), kundedataspærre, observability, aktivering | Ikke påbegyndt |
+| **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-024) |
+| **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Implementeret 2026-10-05 — afventer godkendelse. Ingen produktionsbehandling: I5-gaten er lukket |
+| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, upload-sikkerhed (I5: karantæne, filvalidering, aktivt indhold, ClamAV), kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -1676,7 +1677,230 @@ Der passerer aldrig et password gennem funktionerne.
   `p_worker` er erstattet af `p_lease_token` i alle funktioner undtagen claim.
 - Driftsfunktionerne ligger i et nyt skema, `ops`.
 
-**Ikke implementeret:** Fargate-container og -runtime, AWS Secrets Manager-integration,
+**Status:** gennemført og godkendt 2026-10-05. Klientsiden (postgres.js, kørselsmiljø, billetindløsning) er realiseret i 8B-I4 (§21.5).
+
+**Ikke implementeret i I3:** Fargate-container og -runtime, AWS Secrets Manager-integration,
 NAT-gateway, deployment af workeren, Edge Function `worker-storage` og download, postgres.js
 (D-19), Bedrock-aktivering i appen, ClamAV, karantæne, registret og P1–P9, aktivering af
 production-retrieval og 8C. Workeren bruger lokalt fortsat service-rollen gennem PostgREST.
+
+### 21.5 8B-I4 — Workerens runtime
+
+Gør `workers/ingestion` klar til at køre som en kontrolleret ECS Fargate-workload med I3's
+identitet og capability-model (§6.1, §6.1.1, B-025). **Ingen rigtige dokumenter behandles:**
+I5-gaten er lukket i produktion.
+
+**Arkitektur** (`workers/ingestion/`):
+
+```
+main.ts      konfiguration → forbindelse → identitetskontrol → løkke (eller standby, når gaten er lukket)
+config.ts    validering af runtime-konfigurationen; fejl nævner variabler, aldrig værdier
+db.ts        postgres.js-adapter: KUN knowledge.worker_* (I3), ét statement = én transaktion
+runtime.ts   løkken (claim → behandling → complete/fail), backoff, nedlukning, standby
+lease.ts     uafhængig heartbeat, tab af lease og stall-vagt
+pipeline.ts  behandlingen (fase 7) + gate og afbrydelse
+gate.ts      I5-gaten
+originals.ts originaler via engangsbillet
+log.ts       struktureret JSON-log med redigering
+liveness.ts, healthcheck.ts   liveness uden HTTP-server
+dev-service-role.ts           ⚠ kun lokalt/test (fase 7, B-16); ikke i production-imaget
+```
+
+**postgres.js** (den godkendte dependency `postgres` 3.4.9, uden transitive dependencies):
+
+- Supavisor i transaktionstilstand (port 6543) og TLS med `verify-full` mod Supabases CA.
+- `prepare: false` (transaktionstilstanden bevarer ikke prepared statements) og
+  `fetch_types: false`, så der ikke køres en katalogforespørgsel ved forbindelse.
+- Pulje `max: 2`: én forbindelse til jobbet og én til heartbeat. Rollens `CONNECTION LIMIT 5` er
+  et sikkerhedsnet, ikke et mål.
+- `connect_timeout` 10 s, `idle_timeout` 30 s, `max_lifetime` 15 min og
+  `application_name ipa-ingestion-worker`.
+- Hvert kald annulleres klientside efter højst 60 s. Rollens `statement_timeout` er serversiden.
+- Workeren afhænger ikke af sessionstilstand mellem transaktioner. Lease-tokenet holdes i
+  processen og sendes med hvert kald.
+- jsonb-parametre sendes med `sql.json`, og `text[]`-kolonner returneres som jsonb, fordi
+  postgres.js uden `fetch_types` ikke parser array-typer. Begge fejl blev fundet af
+  integrationstestene.
+- Konfigurationen afviser i produktion:
+  - `service_role` og ejer- eller gruppe-roller som bruger: kun
+    `ingestion_worker_login_(blue|green).<projekt-ref>` accepteres;
+  - service-rolle-nøglen;
+  - en port, der ikke er 6543;
+  - en forbindelse uden TLS;
+  - en manglende CA-fil.
+
+**Secrets Manager og blue/green:**
+
+- ECS' indbyggede secret-injektion. Execution-rollen henter `username` og `password` fra
+  secreten `ipa/production/ingestion-worker/db` (`AWSCURRENT`), når en task starter, og ECS
+  sætter dem som `IPA_WORKER_DB_USER` og `IPA_WORKER_DB_PASSWORD`. Der er ingen egen
+  secret-klient.
+- Den aktive farve er den, som secretens aktuelle version peger på. Skiftet kræver ingen
+  kodeændring:
+  1. Klargør den anden rolle (§21.4).
+  2. Læg en ny secret-version.
+  3. Kør `update-service --force-new-deployment`.
+  4. Gamle tasks får SIGTERM.
+  5. Verificér.
+  6. Deaktivér den gamle rolle.
+- Hemmeligheden er aldrig i image, repo, build-argumenter, almindelige miljøvariabler eller logs.
+  Runbook: `deploy/ingestion-worker/README.md`.
+
+**IAM** (`deploy/ingestion-worker/iam/`):
+
+- **Execution-rollen:**
+  - `ecr:GetAuthorizationToken` (kan ikke afgrænses);
+  - image-pull fra repositoriet `ipa-ingestion-worker`;
+  - logs til `/ipa/ingestion-worker`;
+  - `secretsmanager:GetSecretValue` på den ene secret;
+  - `kms:Decrypt` via Secrets Manager.
+- **Task-rollen:** kun den forberedte `bedrock:InvokeModel` for Embed v4 gennem
+  EU-inferensprofilen. Foundation-modellen er kun tilladt gennem profilen (condition). Der er
+  ingen reranker, secrets eller wildcard-handling.
+- Begge roller kan kun påtages af ECS-tasks i kontoen.
+- Bedrock bruges ikke af workeren, før gaten åbnes og en model aktiveres.
+
+**Fargate** (`deploy/ingestion-worker/`):
+
+- **Image** (`Dockerfile`):
+  - to trin;
+  - kun `postgres` og `pdfjs-dist` (eget manifest, samme versioner som rodens lockfil, uden
+    valgfrie pakker);
+  - kode ejet af root og læsbar for brugeren `node` (uid 1000);
+  - ingen `ARG` og ingen hemmeligheder;
+  - `.dockerignore` udelukker `.env*` og udviklingsadapteren.
+- **Taskdefinition:**
+  - 1 vCPU og 2 GB;
+  - skrivebeskyttet rodfilsystem og kun `/tmp` som skrivbar volumen;
+  - `capabilities drop ALL`, `initProcessEnabled` og `stopTimeout` 120 s (længere end workerens
+    nedlukningsfrist på 90 s);
+  - healthcheck med liveness-filen;
+  - `awslogs` i non-blocking mode.
+- **Service:**
+  - desiredCount 1;
+  - deployment med 100/200 % og circuit breaker med rollback;
+  - private subnets uden offentlig IP;
+  - ingen ECS Exec.
+- **Security group:** ingen indgående trafik, udgående kun 443 og 6543.
+
+**Netværk:**
+
+```
+privat subnet → NAT (Elastic IP) → Supavisor :6543 → Supabase Postgres
+                                 → HTTPS :443 → worker-storage, Bedrock, ECR, CloudWatch, Secrets Manager
+```
+
+- Supabase Network Restrictions skal tillade NAT'ens Elastic IP (/32).
+- Begrænsningen beskytter Postgres og pooleren, **ikke** Supabases HTTPS-API'er. For
+  `worker-storage` er engangsbilletten sikkerhedsgrænsen.
+- Kontoen, VPC'en og NAT'en findes ikke endnu [AFKLARES]. Specifikationen deployes, når de
+  gør.
+
+**Job-løkken:** claim → behandling → complete/fail → næste job.
+
+- **Tom kø:** eksponentiel backoff med ±20 % jitter fra 2 til 30 s.
+- **Fejl i database eller netværk:** backoff fra 1 til 60 s.
+- **Afvist identitet** (`28P01`, `28000`, `42501`, fx efter nødspærring): processen afslutter
+  med kode 2, og ECS erstatter tasken.
+
+**Heartbeat:**
+
+- Kører på egen timer og egen poolforbindelse: hvert 60. sekund ved en lease på 300 s.
+- Afviser databasen en heartbeat (`55P03`), eller udløber leasen lokalt uden en vellykket
+  heartbeat, afbrydes jobbet straks. Alle videre databasekald afvises i workeren, og databasen
+  afviser dem under alle omstændigheder.
+- **Stall-vagt:** er der ingen fremdrift i 10 minutter (et hængende kald), stopper heartbeat, og
+  jobbet opgives. Leasen udløber, og en anden worker overtager. Liveness opdateres ikke længere,
+  så tasken erstattes, hvis løkken hænger.
+
+**Nedlukning (SIGTERM):**
+
+- Ingen nye claims.
+- Det igangværende job får 90 s. Derefter opgives det: det completes eller fejles aldrig, leasen
+  udløber, og næste worker fortsætter fra sidste checkpoint.
+- Exit 0.
+
+**Billetindløsning** (Edge Function `supabase/functions/worker-storage/`):
+
+1. Workeren beder om en billet under sin lease (`worker_issue_storage_ticket`).
+2. Den sender kun `{"ticket": "…"}` til funktionen.
+3. Funktionen indløser billetten med service-rollen, som kun findes server-side i funktionen.
+4. Den streamer bytes fra præcis det ene objekt tilbage, med checksum i en header.
+
+Funktionens grænser:
+
+- Ingen signeret URL og ingen credential i svaret. Funktionen kan ikke liste objekter.
+- Felter som sti eller bucket afvises (400). Ugyldige, brugte, udløbne og overtagne billetter
+  får et ensartet 403.
+- Billetten logges aldrig.
+- `verify_jwt = false`, fordi kalderen ikke har en JWT. Billetten er den eneste adgang.
+- Logikken ligger i `handler.ts` (Web-standard), og Deno-indgangen er `index.ts`. Lokalt testes
+  den samme handler mod den rigtige database og Storage.
+
+**I5-gaten** (`gate.ts`):
+
+- **Produktion:** gaten er altid lukket. Der findes ingen variabel eller flag, der åbner den.
+  - **Lag 1:** workeren står standby og tager ingen jobs. Den kontrollerer sin identitet
+    periodisk.
+  - **Lag 2:** pipelinen afviser ethvert job før download, også re-embedding.
+  - **Lag 3:** downloadede bytes går gennem `gate.inspect` før enhver parsing.
+- Når gaten afviser, fejles jobbet uden genforsøg med koden `security_scan_unavailable`. Intet
+  parses, chunkes eller embeddes.
+- **Lokalt og i test:** en udviklingsgate lukker fiktive fixtures igennem.
+- Gaten må kun ændres som del af et godkendt 8B-I5.
+
+**Tests:**
+
+- **Enhedstests:**
+  - `worker-runtime.test.ts` (43): konfiguration, postgres.js-optioner, gate, løkke, backoff,
+    identitetsfejl, heartbeat, tab af lease, stall, nedlukning, standby, logredigering,
+    billet-download, og at pipelinen aldrig completer eller fejler et afbrudt job.
+  - `worker-gate.test.ts` (3): parser og chunker kaldes ikke ved lukket gate, og fixtures går
+    igennem lokalt.
+  - `worker-storage-handler.test.ts` (16).
+  - `worker-runtime-architecture.test.ts` (19):
+    - importgrafen;
+    - kun `worker_*` i adapteren;
+    - Dockerfile, taskdefinition, IAM og netværk;
+    - ingen credentials;
+    - Bedrock er ikke i appens register.
+- **Integration:** `worker-runtime.integration.test.ts` (15) mod den lokale database som blue og
+  green:
+  - rigtigt login via adapteren;
+  - credential- og forbindelsesfejl;
+  - billetter: gyldig, genafspillet, forfalsket, ekstra felter, udløbet og overtaget lease;
+  - crash efter claim, efter sider, efter chunks, midt i embedding og efter embeddings før
+    complete. I hvert tilfælde udløber leasen, en anden worker gør jobbet færdigt, og den gamle
+    worker afvises (`55P03`), mens data er uændrede;
+  - dobbelt levering;
+  - rigtige heartbeats;
+  - tab af lease midt i et job;
+  - den rigtige proces (`main.ts`) ende til ende, ved SIGTERM og efter nødspærring (exit 2).
+
+  Testene kræver `IPA_TEST_DB_ADMIN_URL` (lokal). Den lokale database stoler på
+  loopback-forbindelser, så et forkert password kan ikke testes lokalt. Credential-fejlen testes
+  i stedet med en rolle, der ikke kan logge ind (`28000`).
+- **Mutationer:** 27/27 fanget. Mutationerne dækker gate, pipeline, lease-keeper, løkke,
+  konfiguration, postgres.js-optioner, logredigering, størrelsesgrænse og Edge Function. To
+  mutationer overlevede første kørsel (afbrydelse før complete og en lease, der er tabt under
+  fail), og der er tilføjet tests for begge.
+- **Image:** `docker build` kunne ikke køres i dette miljø, fordi registrene afviste at hente
+  base-imaget (rate limit / forbidden). Imagets filer blev i stedet samlet præcis som i
+  Dockerfilen, og afhængighederne blev installeret fra imagets manifest. Resultat:
+  - start i produktion uden konfiguration og med service-rolle-nøgle afvises (exit 1);
+  - healthcheck virker;
+  - tekstudtrækket er identisk med og uden `@napi-rs/canvas`;
+  - der er ingen credentials i træet.
+
+**Afvigelser og realiseringsvalg** (B-025):
+
+- Ingen IaC-framework. Specifikationen er versionsstyret JSON plus runbook.
+- Funktionen streamer objektet i stedet for at returnere en signeret URL.
+- Produktionsworkeren står standby, mens gaten er lukket.
+- Imaget har eget dependency-manifest.
+- Valgfrie pdfjs-pakker er udeladt.
+- `heading_path` hentes som jsonb.
+
+**Ikke implementeret:** ClamAV, karantæne, filvalidering og aktivt indhold (I5), registret og
+P1–P9, `evaluation_publisher`, aktivering af production-retrieval og Bedrock i appen, 8C og
+rigtige cloud-ressourcer (konto, VPC, NAT, ECR, secret og deployment).

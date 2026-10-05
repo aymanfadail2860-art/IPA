@@ -373,6 +373,11 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# Edge Function worker-storage (8B-I4, docs/08b §21.5): the caller has no JWT. It is
+# authenticated only by its one-time storage ticket, which the function redeems in the database.
+[functions.worker-storage]
+verify_jwt = false
+
 [edge_runtime]
 enabled = false
 # Supported request policies: `oneshot`, `per_worker`.

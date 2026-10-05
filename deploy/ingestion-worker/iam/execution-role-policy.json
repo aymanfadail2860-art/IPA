@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrAuthorizationToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullWorkerImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"],
+      "Resource": "arn:aws:ecr:eu-central-1:${AWS_ACCOUNT_ID}:repository/ipa-ingestion-worker"
+    },
+    {
+      "Sid": "WriteWorkerLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:eu-central-1:${AWS_ACCOUNT_ID}:log-group:/ipa/ingestion-worker:*"
+    },
+    {
+      "Sid": "InjectWorkerDbSecret",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "${WORKER_DB_SECRET_ARN}"
+    },
+    {
+      "Sid": "DecryptWorkerDbSecret",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "${WORKER_SECRET_KMS_KEY_ARN}",
+      "Condition": { "StringEquals": { "kms:ViaService": "secretsmanager.eu-central-1.amazonaws.com" } }
+    }
+  ]
+}

@@ -7,8 +7,8 @@ status. En fase markeres først som gennemført efter eksplicit besked.
 godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikationen er godkendt og låst** 2026-10-03 (B-020,
 `docs/08b-production-foundation.md`). **Deltrin 8B-I1 (evalueringsframework og gates) er
 gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemført og godkendt,
-8B-I2.5 (ekstern AI-datagrænse) er gennemført og godkendt, og 8B-I3 (workerens databaseidentitet og
-databasefunktioner) er implementeret og afventer godkendelse.** Resten af 8B
+8B-I2.5 (ekstern AI-datagrænse) og 8B-I3 (workerens databaseidentitet og databasefunktioner) er
+gennemført og godkendt, og 8B-I4 (workerens runtime) er implementeret og afventer godkendelse.** Resten af 8B
 implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
@@ -44,7 +44,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2 og 8B-I2.5 gennemført, 8B-I3 implementeret (afventer godkendelse), resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5 og 8B-I3 gennemført, 8B-I4 implementeret (afventer godkendelse), resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -392,13 +392,22 @@ godkendelse.
   - Admin-værktøjet "Afprøv retrieval" redigerer ikke forespørgslen, og den afvises ved grænsen,
     hvis en ekstern udbyder bruges. Der er ingen tilsidesættelse. Beslutningen er låst for 8B
     (B-023).
-- **8B-I3 — workerens databaseidentitet og databasefunktioner: ✅ implementeret 2026-10-03,
-  afventer godkendelse.**
+- **8B-I3 — workerens databaseidentitet og databasefunktioner: ✅ gennemført og godkendt 2026-10-05.**
   - Blue/green-login-roller med kun `EXECUTE` på det godkendte worker-API.
   - Lease-token (hash i databasen) på hvert kald og DB-kontrakten for engangsbilletter.
   - Rotation og nødspærring på databasesiden. service_role er kun worker lokalt (seed).
-  - Detaljer i `docs/08b` §21.4 og B-024. Kørselsmiljøet (Fargate, Secrets Manager, NAT, Edge
-    Function, ClamAV, karantæne) er ikke påbegyndt.
+  - Detaljer i `docs/08b` §21.4 og B-024.
+- **8B-I4 — workerens runtime: ✅ implementeret 2026-10-05, afventer godkendelse.**
+  - postgres.js via Supavisor (transaktionstilstand, TLS, `prepare: false`) som den aktive
+    blue/green-rolle.
+  - Job-løkke med uafhængig heartbeat, backoff og nedlukning.
+  - Secrets Manager via ECS-injektion, adskilte IAM-roller og Fargate-specifikation i
+    `deploy/ingestion-worker/`.
+  - Edge Function `worker-storage` til billetindløsning.
+  - Detaljer i `docs/08b` §21.5 og B-025.
+  - **I5-gaten er lukket:** produktionsworkeren behandler ingen rigtige dokumenter, før
+    karantæne, filvalidering, aktivt indhold og ClamAV (8B-I5) er godkendt.
+  - Konto, VPC, NAT, ECR og secret oprettes, når produktionskontoen findes [AFKLARES].
 - En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
   evidens kan ikke blive production.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af

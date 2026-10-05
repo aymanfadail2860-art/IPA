@@ -10,6 +10,47 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-025 — Workerens runtime: specifikation uden IaC-framework, streamet billetindløsning og standby bag I5-gaten (8B-I4)
+
+**Dato:** 5. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.5, `workers/ingestion/`, `deploy/ingestion-worker/`,
+`supabase/functions/worker-storage/`
+
+**Beslutning:**
+- **Deployment:** en versionsstyret specifikation i `deploy/ingestion-worker/` (Dockerfile,
+  ECS-task og -service, security group, IAM og runbook) i stedet for et IaC-framework, som
+  projektet ikke har valgt.
+- **Secrets:** ECS' indbyggede secret-injektion fra AWS Secrets Manager. Den aktive blue/green-
+  rolle er den, som secretens aktuelle version peger på.
+- **Database:** postgres.js mod Supavisor i transaktionstilstand med TLS, `prepare: false`,
+  `fetch_types: false` og en pulje på 2.
+- **Edge Function `worker-storage`:** streamer bytes fra det ene objekt, billetten giver adgang
+  til. Den returnerer ingen signeret URL.
+- **Produktion med lukket gate:** workeren forbinder, kontrollerer sin identitet og står standby.
+  Den tager ingen jobs, indtil 8B-I5 er godkendt. Pipelinen afviser derudover ethvert job før
+  download og alle bytes før parsing.
+- **Image:** eget dependency-manifest (`postgres`, `pdfjs-dist`) uden valgfrie pakker, kørt som
+  ikke-root på et skrivebeskyttet rodfilsystem.
+
+**Overvejede alternativer:**
+- *Terraform, CDK eller Pulumi.* Fravalgt uden særskilt godkendelse: det ville være et nyt
+  arkitekturvalg.
+- *Egen Secrets Manager-klient i workeren.* Fravalgt: kræver mere kode og en bredere task-rolle.
+  ECS-injektion er enklere og holder secreten ude af task-rollen.
+- *Signeret URL fra funktionen.* Fravalgt: den kan bruges af alle, der har den, så længe den
+  gælder. Streaming lader intet genbrugeligt forlade funktionen.
+- *Fejle hvert job i produktion før I5.* Fravalgt: rigtige dokumenter ville blive markeret som
+  "kunne ikke behandles". Standby lader køen være urørt.
+- *Fuld rod-`node_modules` i imaget.* Fravalgt: Next.js, React og Supabase-SDK'en hører ikke
+  hjemme i workeren.
+- *`@napi-rs/canvas` i imaget.* Fravalgt: 63 MB native kode uden betydning for tekstudtrækket,
+  som er verificeret identisk.
+
+**Begrundelse:** Runtime, identitet og nedlukning er klar og testet, uden at rigtige dokumenter
+kan nå parser eller embedder før I5. Ingen credential ligger i repo, image eller logs.
+
+---
+
 ## B-024 — Workerens databaseidentitet realiseres med lease-token og driftsfunktioner (8B-I3)
 
 **Dato:** 3. oktober 2026
@@ -44,6 +85,9 @@ er ikke omskrevet, fordi loggen er historik.
   funktion i `knowledge`, `public` eller `ops` er eksekverbar for PUBLIC.
 - *Et tilfældigt password ved deaktivering.* Fravalgt: `password null` gør login umuligt uden en
   værdi, nogen kunne gemme, og ingen password passerer gennem SQL.
+
+**Implementeringsnote (8B-I4, B-025):** Klientsiden er realiseret med postgres.js
+(`workers/ingestion/db.ts`) og Edge Function `worker-storage`. API'et og rollerne er uændrede.
 
 **Begrundelse:** Databasen håndhæver selv, hvem der er workeren, og hvilket job der må røres.
 Nødspærring virker ved næste kald, også på en forbindelse, som pooleren har holdt åben. Ingen

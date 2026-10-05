@@ -1,0 +1,14 @@
+# Build context for deploy/ingestion-worker/Dockerfile (docs/08b §21.5).
+# Never send credentials, local state or the development-only worker adapter to a build.
+**/.env
+**/.env.*
+!.env.example
+.git
+.next
+node_modules
+**/node_modules
+coverage
+*.log
+supabase/.temp
+supabase/.branches
+workers/ingestion/dev-service-role.ts

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
+import { processingGateFor } from "../../workers/ingestion/gate.ts";
 
 import { userText } from "@/lib/egress/classification";
 import { embeddingInput } from "@/lib/knowledge/core/embedding";
@@ -42,6 +43,8 @@ const ROW: SearchRow = {
   product_name: "Fiktivt produkt", source_type: "manual_upload", temporal_status: "current", vector_rank: 1, vector_score: 0.9, lexical_rank: 1, lexical_score: 1, lexical_terms: ["selvrisiko"],
 };
 
+
+const TEST_GATE = processingGateFor("test");
 describe("the data boundary: exactly what is sent to Bedrock", () => {
   async function retrieve(query: string) {
     const fake = fakeBedrock(bedrockHandler);
@@ -92,7 +95,7 @@ describe("the data boundary: exactly what is sent to Bedrock", () => {
       fail: async () => "failed" as const,
     } as unknown as WorkerDb;
     const job: ClaimedJob = { job_id: "j", version_id: "v", kind: "reembed", attempts: 1, max_attempts: 3, step_state: {}, storage_path: "a/b.pdf", checksum_sha256: "0".repeat(64) };
-    const outcome = await processJob(job, { db, originals: { download: async () => new Uint8Array() }, log: () => {}, embedderFor: (model) => createProductionEmbedder(model, { bedrock: fake.transport, retryDeps: noSleep }) });
+    const outcome = await processJob(job, { db, originals: { download: async () => new Uint8Array() }, log: () => {}, gate: TEST_GATE, embedderFor: (model) => createProductionEmbedder(model, { bedrock: fake.transport, retryDeps: noSleep }) });
     expect(outcome).toBe("succeeded");
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0]!.body.input_type).toBe("search_document");

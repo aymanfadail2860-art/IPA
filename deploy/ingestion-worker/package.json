@@ -1,0 +1,13 @@
+{
+  "name": "ipa-ingestion-worker-runtime",
+  "private": true,
+  "description": "Runtime dependencies of the production ingestion worker image only (docs/08b §21.5). Versions match the root lockfile.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.3.289",
+    "postgres": "3.4.9"
+  }
+}

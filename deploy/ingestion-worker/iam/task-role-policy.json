@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PreparedEmbedV4ViaEuInferenceProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:eu-central-1:${AWS_ACCOUNT_ID}:inference-profile/eu.cohere.embed-v4:0"
+    },
+    {
+      "Sid": "PreparedEmbedV4FoundationModelOnlyThroughTheProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:eu-*::foundation-model/cohere.embed-v4:0",
+      "Condition": {
+        "StringEquals": { "bedrock:InferenceProfileArn": "arn:aws:bedrock:eu-central-1:${AWS_ACCOUNT_ID}:inference-profile/eu.cohere.embed-v4:0" }
+      }
+    }
+  ]
+}

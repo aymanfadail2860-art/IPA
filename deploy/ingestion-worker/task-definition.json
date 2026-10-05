@@ -1,0 +1,60 @@
+{
+  "family": "ipa-ingestion-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ipa-ingestion-worker-execution",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ipa-ingestion-worker-task",
+  "ephemeralStorage": { "sizeInGiB": 21 },
+  "volumes": [{ "name": "tmp" }],
+  "containerDefinitions": [
+    {
+      "name": "ingestion-worker",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/ipa-ingestion-worker:${IMAGE_TAG}",
+      "essential": true,
+      "user": "1000:1000",
+      "readonlyRootFilesystem": true,
+      "privileged": false,
+      "linuxParameters": { "initProcessEnabled": true, "capabilities": { "drop": ["ALL"] } },
+      "stopTimeout": 120,
+      "mountPoints": [{ "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false }],
+      "environment": [
+        { "name": "IPA_RUNTIME_ENV", "value": "production" },
+        { "name": "IPA_WORKER_DB_HOST", "value": "${SUPAVISOR_HOST}" },
+        { "name": "IPA_WORKER_DB_PORT", "value": "6543" },
+        { "name": "IPA_WORKER_DB_NAME", "value": "postgres" },
+        { "name": "IPA_WORKER_DB_SSL", "value": "verify-full" },
+        { "name": "IPA_WORKER_DB_CA_FILE", "value": "/app/certs/supabase-ca.crt" },
+        { "name": "IPA_WORKER_DB_POOL_MAX", "value": "2" },
+        { "name": "IPA_WORKER_STORAGE_URL", "value": "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/worker-storage" },
+        { "name": "IPA_WORKER_LEASE_SECONDS", "value": "300" },
+        { "name": "IPA_WORKER_SHUTDOWN_GRACE_MS", "value": "90000" },
+        { "name": "IPA_WORKER_LIVENESS_FILE", "value": "/tmp/ipa-worker/alive" },
+        { "name": "AWS_REGION", "value": "eu-central-1" }
+      ],
+      "secrets": [
+        { "name": "IPA_WORKER_DB_USER", "valueFrom": "${WORKER_DB_SECRET_ARN}:username::" },
+        { "name": "IPA_WORKER_DB_PASSWORD", "valueFrom": "${WORKER_DB_SECRET_ARN}:password::" }
+      ],
+      "healthCheck": {
+        "command": ["CMD", "node", "workers/ingestion/healthcheck.ts"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ipa/ingestion-worker",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "worker",
+          "mode": "non-blocking",
+          "max-buffer-size": "4m"
+        }
+      }
+    }
+  ]
+}

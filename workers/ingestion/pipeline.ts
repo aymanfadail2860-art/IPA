@@ -4,6 +4,7 @@ import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
 
 import { CHUNKER_VERSION, chunkDocument, type Chunk } from "./chunker.ts";
 import { EXTRACTOR_VERSION, extractPdf } from "./extract.ts";
+import { ProcessingBlocked, type ProcessingGate } from "./gate.ts";
 import { normalizePages } from "./normalize.ts";
 import { buildQualityReport, type WorkerQualityReport } from "./quality.ts";
 import { structurePages } from "./structure.ts";
@@ -17,6 +18,11 @@ import { validateOriginal } from "./validate.ts";
  *
  * Technical processing only. Nothing here can make a version authoritative: the database
  * functions the worker calls cannot publish, and only `processed` is ever reached.
+ *
+ * 8B-I4: the processing gate decides whether a job may enter at all and whether downloaded
+ * bytes may reach the parser (closed in production until 8B-I5). An aborted job (lease lost,
+ * stalled or shut down) is never completed or failed by this worker — its lease runs out and
+ * another worker takes over.
  */
 
 export interface ClaimedJob {
@@ -71,18 +77,28 @@ export interface WorkerDb {
   storeChunks(jobId: string, chunks: Chunk[], chunkerVersion: string): Promise<number>;
   complete(jobId: string, report: WorkerQualityReport): Promise<void>;
   fail(jobId: string, code: string, message: string, retryable: boolean): Promise<"retry" | "failed">;
+  issueStorageTicket(jobId: string, purpose: "download_original"): Promise<{ ticket: string; expiresAt: Date }>;
+  /** Drops the process-local lease token of a job (after it ended or was abandoned). */
+  forget(jobId: string): void;
 }
 
 export interface OriginalStore {
-  download(path: string): Promise<Uint8Array>;
+  download(job: Pick<ClaimedJob, "job_id" | "storage_path">): Promise<Uint8Array>;
 }
+
+/** Why a job was aborted by the runtime. */
+export type AbortKind = "lease_lost" | "stalled" | "shutdown";
 
 export interface PipelineDeps {
   db: WorkerDb;
   originals: OriginalStore;
   log: (event: Record<string, unknown>) => void;
+  /** The I5 processing gate (gate.ts). Required: there is no default. */
+  gate: ProcessingGate;
   /** Defaults to the fail-closed registry (docs/07 §9.1). */
   embedderFor?: (model: EmbeddingModelSpec) => Embedder;
+  /** Aborted by the runtime with { kind: AbortKind }. */
+  signal?: AbortSignal;
 }
 
 const EMBED_BATCH = 64;
@@ -123,17 +139,43 @@ async function embedAndIndex(job: ClaimedJob, deps: PipelineDeps): Promise<{ mod
   return { models: integrity, active_model: active ? modelLabel(active) : null };
 }
 
-export type JobOutcome = "succeeded" | "retry" | "failed" | "lost";
+export type JobOutcome = "succeeded" | "retry" | "failed" | "lost" | "abandoned";
 
 /** The database refused the job: another worker holds it (lease expired). Stop silently. */
 function isLeaseLost(error: unknown): boolean {
   return (error as { code?: string }).code === "55P03";
 }
 
+/** The worker's identity was refused or revoked (e.g. emergency revoke): fatal for the process. */
+export function isIdentityError(error: unknown): boolean {
+  const code = (error as { code?: string }).code;
+  return code === "42501" || code === "28P01" || code === "28000";
+}
+
+export class JobAborted extends Error {
+  readonly kind: AbortKind;
+  constructor(kind: AbortKind) {
+    super(`Jobbet blev afbrudt (${kind}).`);
+    this.name = "JobAborted";
+    this.kind = kind;
+  }
+}
+
+function abortKind(signal: AbortSignal | undefined): AbortKind | null {
+  if (!signal?.aborted) return null;
+  const kind = (signal.reason as { kind?: AbortKind } | undefined)?.kind;
+  return kind ?? "shutdown";
+}
+
 export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<JobOutcome> {
   const { db, log } = deps;
   const started = Date.now();
+  const checkAborted = () => {
+    const kind = abortKind(deps.signal);
+    if (kind) throw new JobAborted(kind);
+  };
   const step = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+    checkAborted();
     const begin = Date.now();
     const result = await run();
     log({ job: job.job_id, version: job.version_id, step: name, ms: Date.now() - begin });
@@ -141,8 +183,11 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
   };
 
   try {
+    // The I5 gate first: a closed gate lets no job in — nothing is downloaded or embedded.
+    if (!deps.gate.open) throw new ProcessingBlocked();
     if (job.kind === "reembed") {
       const embeddings = await step("embedding", () => embedAndIndex(job, deps));
+      checkAborted();
       await db.complete(job.job_id, { reembed: embeddings } as unknown as WorkerQualityReport);
       log({ job: job.job_id, version: job.version_id, outcome: "succeeded", kind: "reembed", ms: Date.now() - started });
       return "succeeded";
@@ -160,9 +205,12 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
       report = resumed.report as WorkerQualityReport;
       log({ job: job.job_id, version: job.version_id, step: "resume", from: "chunking" });
     } else {
-      const bytes = await step("download", () => deps.originals.download(job.storage_path));
+      const bytes = await step("download", () => deps.originals.download(job));
       const { checksum } = await step("validation", async () => validateOriginal(bytes, job.checksum_sha256));
-      await db.checkpoint(job.job_id, "validation", { checksum, byte_size: bytes.byteLength });
+      // The gate sees the verified bytes before ANY parsing (8B-I5 will scan here).
+      const verdict = await step("gate", () => deps.gate.inspect({ jobId: job.job_id, bytes }));
+      if (!verdict.cleared) throw new ProcessingBlocked(verdict.code, verdict.message);
+      await db.checkpoint(job.job_id, "validation", { checksum, byte_size: bytes.byteLength, gate: deps.gate.id });
 
       const extracted = await step("extraction", () => extractPdf(bytes));
       if (!extracted.some((page) => page.hasTextLayer)) {
@@ -206,28 +254,47 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
     await db.checkpoint(job.job_id, "embedding", { models: embeddings.models.map((row) => row.model) });
     report = { ...report, versions: { ...report.versions, embedding_model: embeddings.active_model }, embeddings };
 
+    checkAborted();
     await db.complete(job.job_id, report);
     log({ job: job.job_id, version: job.version_id, outcome: "succeeded", ms: Date.now() - started });
     return "succeeded";
   } catch (error) {
+    // Aborted by the runtime: never complete or fail — the lease runs out (or is already gone).
+    const aborted = abortKind(deps.signal) ?? (error instanceof JobAborted ? error.kind : null);
+    if (aborted) {
+      const outcome: JobOutcome = aborted === "lease_lost" ? "lost" : "abandoned";
+      log({ job: job.job_id, version: job.version_id, outcome, reason: aborted });
+      return outcome;
+    }
+    if (isIdentityError(error)) throw error;
+    // Failing needs the lease too: if it is gone meanwhile, the job is simply lost.
+    const failOrLost = async (code: string, message: string, retryable: boolean): Promise<JobOutcome> => {
+      try {
+        return await db.fail(job.job_id, code, message, retryable);
+      } catch (failure) {
+        if (isLeaseLost(failure)) return "lost";
+        throw failure;
+      }
+    };
     if (isLeaseLost(error)) {
       log({ job: job.job_id, version: job.version_id, outcome: "lost" });
       return "lost";
     }
     if (["GradeNotAllowedError", "ProviderNotConfiguredError"].includes((error as Error).name)) {
-      const outcome = await db.fail(job.job_id, "embedding_unavailable", (error as Error).message, false);
+      const outcome = await failOrLost("embedding_unavailable", (error as Error).message, false);
       log({ job: job.job_id, version: job.version_id, outcome, code: "embedding_unavailable" });
       return outcome;
     }
-    if (error instanceof FileRejected) {
-      const outcome = await db.fail(job.job_id, error.code, error.message, false);
+    if (error instanceof ProcessingBlocked || error instanceof FileRejected) {
+      const outcome = await failOrLost(error.code, error.message, false);
       log({ job: job.job_id, version: job.version_id, outcome, code: error.code });
       return outcome;
     }
     // Never log or store document content — only the kind of error.
     const name = (error as { name?: string }).name ?? "Error";
-    const outcome = await db.fail(job.job_id, "processing_error", `Behandlingen fejlede (${name}). Der forsøges igen automatisk.`, true);
-    log({ job: job.job_id, version: job.version_id, outcome, error: name });
+    const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : undefined;
+    const outcome = await failOrLost("processing_error", `Behandlingen fejlede (${name}). Der forsøges igen automatisk.`, true);
+    log({ job: job.job_id, version: job.version_id, outcome, error: name, ...(code ? { code } : {}) });
     return outcome;
   }
 }
