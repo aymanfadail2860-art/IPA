@@ -8,8 +8,9 @@ godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikationen er go
 `docs/08b-production-foundation.md`). **Deltrin 8B-I1 (evalueringsframework og gates) er
 gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemført og godkendt,
 8B-I2.5 (ekstern AI-datagrænse), 8B-I3 (workerens databaseidentitet og databasefunktioner) og
-8B-I4 (workerens runtime) og 8B-I5 (upload-sikkerhed, karantæne og malware-scanning) er
-gennemført og godkendt, og 8B-I5.5 (scanner-isolation og signaturforsyning) er gennemført.** Resten af 8B
+8B-I4 (workerens runtime), 8B-I5 (upload-sikkerhed, karantæne og malware-scanning), 8B-I5.5
+(scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6) er gennemført og
+godkendt — I5 er fuldt lukket.** Resten af 8B
 implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
@@ -45,7 +46,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5 og 8B-I5.5 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5 og 8B-I5.6 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -420,7 +421,7 @@ godkendelse.
   - Release-gate i databasen før download og før parsing. Ingen bytes når pdfjs, chunker eller
     embedder før `safe`.
   - Detaljer i `docs/08b` §21.6 og B-026.
-- **8B-I5.5 — scanner-isolation og signaturforsyning: ✅ gennemført 2026-10-06.**
+- **8B-I5.5 — scanner-isolation og signaturforsyning: ✅ gennemført og godkendt 2026-10-06.**
   - ClamAV er en separat ECS-service uden taskrolle og uden internet. Kun workerens SG når den på
     TCP 3310 via Cloud Map (`clamav.ipa-worker.internal`).
   - Et planlagt signaturimage hver 6. time med verifikation og uforanderligt tag lig
@@ -431,6 +432,11 @@ godkendelse.
     signaturforsyning) er lukket.
   - Deploymentforudsætninger, når kontoen findes: ECR, VPC/subnets/endpoints, Cloud Map, roller,
     GitHub OIDC og alarmtopic.
+- **8B-I5.6 — ClamAV-patchversion: ✅ gennemført 2026-10-06.**
+  - Production på ClamAV 1.4.6 (LTS-linje 1.4) via `deploy/clamav/engine.json`.
+  - Databasen kender de godkendte engines; en ikke-godkendt engine giver aldrig `safe`.
+  - Signaturopdatering (automatisk) og engine-opgradering (manuel kandidat med tests og godkendt
+    digest) er adskilt. Detaljer i `docs/08b` §21.8 og B-028.
 - En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
   evidens kan ikke blive production.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af

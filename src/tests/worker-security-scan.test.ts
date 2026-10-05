@@ -53,7 +53,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
 });
 
-async function fakeClamd(mode: Mode, version = "ClamAV 1.4.3/27790/Mon Oct  5 08:20:00 2026"): Promise<{ port: number; received: Uint8Array[] }> {
+async function fakeClamd(mode: Mode, version = "ClamAV 1.4.6/27790/Mon Oct  5 08:20:00 2026"): Promise<{ port: number; received: Uint8Array[] }> {
   const received: Uint8Array[] = [];
   const server = createServer((socket: Socket) => {
     let buffer = Buffer.alloc(0);
@@ -86,12 +86,12 @@ async function fakeClamd(mode: Mode, version = "ClamAV 1.4.3/27790/Mon Oct  5 08
 
 describe("clamd protocol (scanner.ts)", () => {
   it("parses the engine and signature version and time; anything else is unknown", () => {
-    expect(parseClamdVersion("ClamAV 1.4.3/27790/Mon Oct  5 08:20:00 2026")).toEqual({
-      engine: "ClamAV", engineVersion: "1.4.3", signatureVersion: "27790", signatureTime: new Date("2026-10-05T08:20:00Z"),
+    expect(parseClamdVersion("ClamAV 1.4.6/27790/Mon Oct  5 08:20:00 2026")).toEqual({
+      engine: "ClamAV", engineVersion: "1.4.6", signatureVersion: "27790", signatureTime: new Date("2026-10-05T08:20:00Z"),
     });
     expect(parseClamdVersion("ClamAV 1.5.4")).toEqual({ engine: "ClamAV", engineVersion: "1.5.4", signatureVersion: null, signatureTime: null });
     expect(parseClamdVersion("FakeAV 1/2/3")).toBeNull();
-    expect(parseClamdVersion("ClamAV 1.4.3/27790/not a date at all")?.signatureTime).toBeNull();
+    expect(parseClamdVersion("ClamAV 1.4.6/27790/not a date at all")?.signatureTime).toBeNull();
   });
 
   it("reads OK as clean, FOUND as infected (with a sanitized name) and everything else as an error", () => {
@@ -156,7 +156,7 @@ function scanner(options: { result?: "clean" | "infected" | "error"; signatureTi
     scans: 0,
     async info() {
       if (options.info === "error") return { error: "scanner_unavailable" as const };
-      return { engine: "ClamAV", engineVersion: "1.4.3", signatureVersion: "27790", signatureTime: options.signatureTime === undefined ? new Date(NOW - 3_600_000) : options.signatureTime };
+      return { engine: "ClamAV", engineVersion: "1.4.6", signatureVersion: "27790", signatureTime: options.signatureTime === undefined ? new Date(NOW - 3_600_000) : options.signatureTime };
     },
     async scan() {
       value.scans += 1;
@@ -183,7 +183,7 @@ describe("the examination's order: structure → ClamAV → PDF security", async
     expect(measured).toMatchObject({
       policy_version: "pdf-v1", checksum_sha256: sha(pdf), byte_size: pdf.byteLength, detected_mime: "application/pdf",
       structural: { result: "pass", code: null }, malware: { result: "clean" }, pdf_security: { result: "pass" }, active_content: { result: "pass", findings: [] },
-      scanner: { engine: "ClamAV", engine_version: "1.4.3", signature_version: "27790" },
+      scanner: { engine: "ClamAV", engine_version: "1.4.6", signature_version: "27790" },
     });
     expect(Object.keys(measured)).not.toEqual(expect.arrayContaining(["final"]));
     expect(JSON.stringify(measured)).not.toMatch(/"safe"/);

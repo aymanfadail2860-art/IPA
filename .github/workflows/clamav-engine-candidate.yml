@@ -1,0 +1,97 @@
+# ClamAV engine candidate (docs/08b §21.8, 8B-I5.6, B-028).
+#
+# A new 1.4.x security/patch release never goes to production by itself. This MANUAL workflow
+# builds it as a candidate and runs the gates; it never deploys:
+#
+#   1. reviewed release → dispatch with the version (only the approved LTS line 1.4.x)
+#   2. build the candidate on that release's base image, resolved to an immutable digest
+#   3. scanner checks (engine version, fresh signatures), EICAR test, clean-file test
+#      (scripts/verify-clamav-scanner.ts)
+#   4. our PDF/security fixture suite against the running candidate
+#      (src/tests/clamav-candidate.test.ts) and the scanner unit suites
+#   5. push as ipa-clamav:candidate-<version>-<signature version> and print both digests
+#
+# Approval is then a reviewed change of deploy/clamav/engine.json (version + base digest), the
+# Dockerfile default and a migration row in knowledge.security_approved_scanner_engines. Only
+# after that does the 6-hourly signature refresh build — and deploy — the new engine.
+
+name: ClamAV engine candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ClamAV patch release in the approved LTS line (1.4.x)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CANDIDATE: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+
+      - name: Only the approved LTS line
+        run: |
+          LTS=$(jq -r .lts_line deploy/clamav/engine.json)
+          [[ "$CANDIDATE" =~ ^${LTS//./\\.}\.[0-9]+$ ]] || { echo "$CANDIDATE is not in the approved LTS line $LTS"; exit 1; }
+
+      - name: Resolve the candidate base image to a digest and build
+        run: |
+          BASE="docker.io/clamav/clamav:${CANDIDATE}_base"
+          DIGEST=$(docker buildx imagetools inspect "$BASE" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "BASE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          docker build --pull --build-arg "CLAMAV_BASE=$BASE@$DIGEST" -f deploy/clamav/Dockerfile -t ipa-clamav:engine-candidate .
+
+      - name: Start the candidate (read-only, unprivileged)
+        run: |
+          docker run -d --name candidate --read-only --tmpfs /tmp --user 10001:10001 --cap-drop ALL \
+            -p 127.0.0.1:3310:3310 ipa-clamav:engine-candidate
+          for i in $(seq 1 60); do
+            docker exec candidate clamdscan --config-file=/etc/clamav/clamd.conf --ping 1 >/dev/null 2>&1 && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Scanner, EICAR and clean-file tests
+        run: node scripts/verify-clamav-scanner.ts --host 127.0.0.1 --port 3310 --engine "$CANDIDATE" --max-age-hours 8 | tee verify.json
+
+      - name: PDF/security fixture suite against the candidate
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          IPA_CANDIDATE_CLAMD_HOST=127.0.0.1 IPA_CANDIDATE_CLAMD_PORT=3310 IPA_CANDIDATE_ENGINE="$CANDIDATE" \
+            npx vitest run src/tests/clamav-candidate.test.ts src/tests/worker-security-pdf.test.ts src/tests/worker-security-scan.test.ts src/tests/scanner-isolation.test.ts
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ vars.IPA_AWS_ACCOUNT_ID != '' }}
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.IPA_AWS_ACCOUNT_ID }}:role/ipa-clamav-publisher
+          aws-region: eu-central-1
+
+      - name: Push the candidate image (never deployed by this workflow)
+        if: ${{ vars.IPA_AWS_ACCOUNT_ID != '' }}
+        run: |
+          REPO="${{ vars.IPA_AWS_ACCOUNT_ID }}.dkr.ecr.eu-central-1.amazonaws.com/ipa-clamav"
+          TAG="candidate-$(jq -r '.revision | sub("^ipa-clamav:"; "")' verify.json)"
+          aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin "${REPO%/*}"
+          docker tag ipa-clamav:engine-candidate "$REPO:$TAG"
+          docker push "$REPO:$TAG"
+
+      - name: Summary for the approval
+        run: |
+          {
+            echo "### ClamAV engine candidate $CANDIDATE"
+            echo "- Base image digest (for deploy/clamav/engine.json): \`$BASE_DIGEST\`"
+            echo "- Verification: \`$(cat verify.json)\`"
+            echo "- Approve by changing engine.json, the Dockerfile default and adding a migration row."
+          } >> "$GITHUB_STEP_SUMMARY"

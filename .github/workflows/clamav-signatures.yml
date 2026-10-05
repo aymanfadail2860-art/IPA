@@ -1,6 +1,7 @@
 # ClamAV signature supply (docs/08b §21.7, 8B-I5.5).
 #
-#   schedule → build the scanner image (official signatures via freshclam, pinned ClamAV 1.4.3)
+#   schedule → build the scanner image on the APPROVED engine (deploy/clamav/engine.json, base
+#   image by digest) with fresh official signatures via freshclam
 #   → verify the candidate (engine, signature freshness, EICAR, clean file)
 #   → push to ECR (immutable tag = scanner revision) → register a task revision by digest
 #   → deploy the ipa-clamav service and wait until it is stable.
@@ -10,6 +11,10 @@
 # workflow failure and the ECS deployment event are alarms, and the worker's 24-hour signature
 # limit stops new "safe" verdicts by itself if no refresh succeeds in time. There is no switch to
 # ignore stale signatures.
+#
+# This workflow refreshes SIGNATURES only. It can never change the ClamAV engine: it builds
+# exactly the approved engine and fails if the image reports any other version. Engine patch
+# upgrades go through clamav-engine-candidate.yml and an approval (8B-I5.6, B-028).
 #
 # Inactive until the production account exists: the job runs only when the repository variable
 # IPA_AWS_ACCOUNT_ID is set. No credentials are stored: AWS access is GitHub OIDC → a role that
@@ -40,7 +45,6 @@ jobs:
       AWS_REGION: eu-central-1
       AWS_ACCOUNT_ID: ${{ vars.IPA_AWS_ACCOUNT_ID }}
       ECS_CLUSTER: ${{ vars.IPA_ECS_CLUSTER }}
-      CLAMAV_ENGINE: "1.4.3"
       MAX_BUILD_AGE_HOURS: "8"
     steps:
       - uses: actions/checkout@v4
@@ -49,8 +53,18 @@ jobs:
         with:
           node-version: "22.22.2"
 
-      - name: Build the candidate scanner image
-        run: docker build --pull -f deploy/clamav/Dockerfile -t ipa-clamav:candidate .
+      - name: Read the approved engine (never changed by this workflow)
+        run: |
+          ENGINE=$(jq -r .production deploy/clamav/engine.json)
+          BASE=$(jq -r .base_image deploy/clamav/engine.json)
+          DIGEST=$(jq -r '.base_image_digest // empty' deploy/clamav/engine.json)
+          jq -e --arg e "$ENGINE" '.approved | index($e)' deploy/clamav/engine.json >/dev/null
+          test -n "$DIGEST" || { echo "No approved base image digest in deploy/clamav/engine.json"; exit 1; }
+          echo "CLAMAV_ENGINE=$ENGINE" >> "$GITHUB_ENV"
+          echo "CLAMAV_BASE=$BASE@$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Build the scanner image on the approved engine
+        run: docker build --pull --build-arg "CLAMAV_BASE=$CLAMAV_BASE" -f deploy/clamav/Dockerfile -t ipa-clamav:candidate .
 
       - name: Start the candidate exactly as in production (read-only, unprivileged)
         run: |

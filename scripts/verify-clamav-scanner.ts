@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { clamdScanner, type MalwareScanner } from "../workers/ingestion/security/scanner.ts";
@@ -16,8 +17,17 @@ import { clamdScanner, type MalwareScanner } from "../workers/ingestion/security
  * and the workflow failure is the alarm. The output names the scanner revision
  * (ipa-clamav:<engine>-<signature version>) — the immutable ECR tag that verdicts trace back to.
  *
- *   node scripts/verify-clamav-scanner.ts --host 127.0.0.1 --port 3310 --engine 1.4.3
+ *   node scripts/verify-clamav-scanner.ts --host 127.0.0.1 --port 3310 [--engine <version>]
+ *
+ * The expected engine defaults to the APPROVED production engine in deploy/clamav/engine.json
+ * (8B-I5.6); --engine is used only by the engine-candidate workflow.
  */
+
+/** The approved engine (deploy/clamav/engine.json): the single, versioned source of truth. */
+export function approvedEngine(read: (path: string) => string = (path) => readFileSync(path, "utf8")): { production: string; approved: string[]; ltsLine: string } {
+  const file = JSON.parse(read(fileURLToPath(new URL("../deploy/clamav/engine.json", import.meta.url)))) as { production: string; approved: string[]; lts_line: string };
+  return { production: file.production, approved: file.approved, ltsLine: file.lts_line };
+}
 
 export interface VerifyOptions {
   expectedEngineVersion: string;
@@ -78,7 +88,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     return index >= 0 && process.argv[index + 1] ? process.argv[index + 1]! : fallback;
   };
   const result = await verifyScanner(clamdScanner({ host: arg("host", "127.0.0.1"), port: Number(arg("port", "3310")) }), {
-    expectedEngineVersion: arg("engine", "1.4.3"),
+    expectedEngineVersion: arg("engine", approvedEngine().production),
     maxBuildAgeSeconds: Number(arg("max-age-hours", "8")) * 3600,
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);

@@ -5,7 +5,8 @@ læser fjendtlige filer og har derfor ingen AWS-credentials, ingen secrets og in
 
 | Fil | Indhold |
 |-----|---------|
-| `Dockerfile` | ClamAV 1.4.3 (pinned) med de officielle signaturer bygget ind ved byggetid; ikke-root; byggeregistrering i `/usr/share/ipa/scanner-build.txt` |
+| `engine.json` | Den godkendte engine (8B-I5.6): LTS-linje 1.4, production 1.4.6, base-image og dets godkendte digest. Ændres kun ved godkendt engine-opgradering |
+| `Dockerfile` | Den godkendte engine (via `CLAMAV_BASE`, med digest fra pipelinen) med officielle signaturer bygget ind ved byggetid; ikke-root; byggeregistrering i `/usr/share/ipa/scanner-build.txt` |
 | `clamd.conf` | TCP 3310, ingen signaturopdatering ved kørsel, grænser over 50 MB, fund ved overskredne grænser |
 | `task-definition.json` | Fargate 1 vCPU/3 GB, **ingen taskrolle**, intet miljø, ingen secrets, skrivebeskyttet rodfilsystem, `/tmp`-volumen, image refereret med digest |
 | `service.json` | Private subnets, ingen offentlig IP, ingen ECS Exec, Cloud Map-registrering, rullende udskiftning (100/200 %) med circuit breaker og rollback |
@@ -42,7 +43,7 @@ Planlagt workflow `.github/workflows/clamav-signatures.yml` (hver 6. time):
 1. Byg imaget. `freshclam` henter de officielle signaturer ved byggetid.
 2. Start kandidaten skrivebeskyttet og uprivilegeret.
 3. Verificér med `scripts/verify-clamav-scanner.ts`:
-   - engine 1.4.3;
+   - engine = den godkendte (`engine.json`), som refresh aldrig ændrer;
    - signaturversion og -tid kendt, ikke i fremtiden og højst 8 timer gamle;
    - EICAR findes;
    - en ren fil er ren.
@@ -60,6 +61,19 @@ Planlagt workflow `.github/workflows/clamav-signatures.yml` (hver 6. time):
 - Der findes intet flag, der ignorerer forældede signaturer.
 
 **Manuel kørsel:** `workflow_dispatch` på workflowet. Byg aldrig et produktionsimage i hånden.
+
+## Engine-opgradering (8B-I5.6)
+
+En ny ClamAV 1.4.x-patch går aldrig automatisk i production:
+
+1. Review releasen.
+2. Kør `clamav-engine-candidate.yml` med versionen. Den bygger kandidaten med base-digest og
+   kører scanner-, EICAR-, clean-file- og PDF-/sikkerhedstests. Den pusher til
+   `candidate-<version>-<signatur>` og udruller ikke.
+3. Godkend med en reviewet ændring af `engine.json` (version og base-digest), Dockerfilens
+   default og en migrationsrække i `knowledge.security_approved_scanner_engines`.
+4. Den næste signaturopdatering bygger og udruller den nye engine.
+5. Træk den gamle version tilbage (`revoked_at`), når den nye kører.
 
 ## Forudsætninger (når produktionskontoen findes)
 

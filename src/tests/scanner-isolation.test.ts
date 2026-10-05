@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { scannerRevision, verifyScanner } from "../../scripts/verify-clamav-scanner.ts";
+import { approvedEngine, scannerRevision, verifyScanner } from "../../scripts/verify-clamav-scanner.ts";
 import { PRODUCTION_SCANNER } from "../../workers/ingestion/config.ts";
 import { examineOriginal, type ScanContext } from "../../workers/ingestion/security/scan.ts";
 import { clamdScanner } from "../../workers/ingestion/security/scanner.ts";
@@ -134,6 +134,52 @@ describe("ClamAV is its own task and service (deploy/clamav)", () => {
   });
 });
 
+describe("the approved ClamAV engine (8B-I5.6)", () => {
+  const engine = json<{ lts_line: string; production: string; approved: string[]; base_image: string; base_image_digest: string | null }>("deploy/clamav/engine.json");
+  const refresh = read(".github/workflows/clamav-signatures.yml");
+  const candidate = read(".github/workflows/clamav-engine-candidate.yml");
+  const migration = read("supabase/migrations/20261006000200_approved_scanner_engines.sql");
+
+  it("production is ClamAV 1.4.6 in the approved 1.4 LTS line — one versioned source of truth", () => {
+    expect(engine).toMatchObject({ lts_line: "1.4", production: "1.4.6", base_image: "docker.io/clamav/clamav:1.4.6_base" });
+    expect(engine.approved).toContain(engine.production);
+    for (const version of engine.approved) expect(version.startsWith(`${engine.lts_line}.`), version).toBe(true);
+    expect(engine.base_image_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(approvedEngine().production).toBe(engine.production);
+  });
+
+  it("the image, the database and the verification all name the same approved engine", () => {
+    expect(read("deploy/clamav/Dockerfile")).toContain(`ARG CLAMAV_BASE=${engine.base_image}\n`);
+    expect(migration).toMatch(new RegExp(`values \\('ClamAV', '${engine.production.replaceAll(".", "\\.")}'`));
+    expect(migration).not.toMatch(/'1\.4\.3'/);
+    expect(read("scripts/verify-clamav-scanner.ts")).toMatch(/arg\("engine", approvedEngine\(\)\.production\)/);
+  });
+
+  it("the 6-hourly signature refresh cannot change the engine", () => {
+    expect(refresh).toMatch(/ENGINE=\$\(jq -r \.production deploy\/clamav\/engine\.json\)/);
+    expect(refresh).toMatch(/test -n "\$DIGEST" \|\|/);
+    expect(refresh).toMatch(/--build-arg "CLAMAV_BASE=\$CLAMAV_BASE"/);
+    expect(refresh).toMatch(/--engine "\$CLAMAV_ENGINE"/);
+    // No engine version is written into the refresh itself.
+    expect(refresh).not.toMatch(/\b1\.4\.\d+\b/);
+  });
+
+  it("an engine upgrade is a manual candidate that is tested and never deployed by itself", () => {
+    expect(candidate).toMatch(/workflow_dispatch:/);
+    expect(candidate).not.toMatch(/schedule:/);
+    expect(candidate).not.toMatch(/update-service|register-task-definition/);
+    expect(candidate).toMatch(/not in the approved LTS line/);
+    for (const step of ["scripts/verify-clamav-scanner.ts", "src/tests/clamav-candidate.test.ts", "src/tests/worker-security-pdf.test.ts", "candidate-"]) {
+      expect(candidate, step).toContain(step);
+    }
+  });
+
+  it("the scanner revision binds engine and signature version", () => {
+    expect(scannerRevision("1.4.6", "27790")).toBe("ipa-clamav:1.4.6-27790");
+    expect(read("supabase/migrations/20261006000100_scanner_revision.sql")).toContain("'ipa-clamav:' || scanner_version || '-' || signature_version");
+  });
+});
+
 describe("signature supply (scheduled image build)", () => {
   const workflow = read(".github/workflows/clamav-signatures.yml");
   const dockerfile = read("deploy/clamav/Dockerfile");
@@ -165,8 +211,7 @@ describe("signature supply (scheduled image build)", () => {
     expect(trust).toContain("repo:aymanfadail2860-art/IPA:ref:refs/heads/main");
   });
 
-  it("pins the ClamAV release, takes only official signatures at build time and records the build", () => {
-    expect(dockerfile.match(/^FROM docker\.io\/clamav\/clamav:1\.4\.3_base/gm)).toHaveLength(2);
+  it("takes only official signatures at build time and records the build", () => {
     expect(dockerfile).toMatch(/freshclam --foreground --stdout --show-progress=no --config-file=\/etc\/clamav\/freshclam\.conf/);
     expect(dockerfile).not.toMatch(/DatabaseCustomURL|PrivateMirror|ExtraDatabase|curl |wget /);
     expect(dockerfile).toMatch(/clamscan --version > \/usr\/share\/ipa\/scanner-build\.txt/);
@@ -246,7 +291,7 @@ describe("the worker against the scanner service", async () => {
   });
 
   it("a failed refresh keeps the old scanner, which stops being usable by itself after 24 hours — a fresh revision restores scanning", async () => {
-    const state = { version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0))}` };
+    const state = { version: `ClamAV 1.4.6/27790/${clamdDate(new Date(T0))}` };
     const service = await scannerService(state);
     const scanner = clamdScanner({ host: "127.0.0.1", port: service.port });
     const at = (hours: number) => examineOriginal(pdf, context, { scanner, inspector, now: () => T0 + hours * HOUR });
@@ -255,26 +300,27 @@ describe("the worker against the scanner service", async () => {
     expect((await at(24.5)).malware).toEqual({ result: "error", code: "stale_signatures", name: null });
     expect((await at(24.5)).pdf_security.result).toBe("not_run");
     // A fresh revision replaces it at the same endpoint.
-    state.version = `ClamAV 1.4.3/27801/${clamdDate(new Date(T0 + 24 * HOUR))}`;
+    state.version = `ClamAV 1.4.6/27801/${clamdDate(new Date(T0 + 24 * HOUR))}`;
     const fresh = await at(24.6);
     expect(fresh.malware).toEqual({ result: "clean", code: null, name: null });
-    expect(fresh.scanner).toMatchObject({ engine: "ClamAV", engine_version: "1.4.3", signature_version: "27801" });
+    expect(fresh.scanner).toMatchObject({ engine: "ClamAV", engine_version: "1.4.6", signature_version: "27801" });
   });
 
   it("the build verification accepts only a fresh, pinned, working scanner — and names its revision", async () => {
-    const options = { expectedEngineVersion: "1.4.3", maxBuildAgeSeconds: 8 * 3600, now: () => T0 + 2 * HOUR };
-    const fresh = await scannerService({ version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0))}` });
+    const options = { expectedEngineVersion: "1.4.6", maxBuildAgeSeconds: 8 * 3600, now: () => T0 + 2 * HOUR };
+    const fresh = await scannerService({ version: `ClamAV 1.4.6/27790/${clamdDate(new Date(T0))}` });
     expect(await verifyScanner(clamdScanner({ host: "127.0.0.1", port: fresh.port }), options)).toMatchObject({
-      ok: true, revision: "ipa-clamav:1.4.3-27790", engineVersion: "1.4.3", signatureVersion: "27790", signatureAgeSeconds: 7200,
+      ok: true, revision: "ipa-clamav:1.4.6-27790", engineVersion: "1.4.6", signatureVersion: "27790", signatureAgeSeconds: 7200,
     });
-    expect(scannerRevision("1.4.3", "27790")).toBe("ipa-clamav:1.4.3-27790");
+    expect(scannerRevision("1.4.6", "27790")).toBe("ipa-clamav:1.4.6-27790");
 
     const cases: [string, { version: string; detectEicar?: boolean }, RegExp][] = [
-      ["stale", { version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0 - 10 * HOUR))}` }, /old/],
-      ["unknown date", { version: "ClamAV 1.4.3" }, /signature time unknown/],
-      ["future date", { version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0 + 5 * HOUR))}` }, /future/],
+      ["stale", { version: `ClamAV 1.4.6/27790/${clamdDate(new Date(T0 - 10 * HOUR))}` }, /old/],
+      ["unknown date", { version: "ClamAV 1.4.6" }, /signature time unknown/],
+      ["future date", { version: `ClamAV 1.4.6/27790/${clamdDate(new Date(T0 + 5 * HOUR))}` }, /future/],
       ["unpinned engine", { version: `ClamAV 1.5.0/27790/${clamdDate(new Date(T0))}` }, /pinned/],
-      ["blind scanner", { version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0))}`, detectEicar: false }, /EICAR not detected/],
+      ["older, unapproved patch", { version: `ClamAV 1.4.3/27790/${clamdDate(new Date(T0))}` }, /pinned/],
+      ["blind scanner", { version: `ClamAV 1.4.6/27790/${clamdDate(new Date(T0))}`, detectEicar: false }, /EICAR not detected/],
     ];
     for (const [name, state, problem] of cases) {
       const service = await scannerService(state);

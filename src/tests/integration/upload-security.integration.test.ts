@@ -224,29 +224,36 @@ describe.skipIf(!configured)("upload security end to end (8B-I5)", () => {
     try {
       const client = await signedInClient("admin");
       // Fresh revision: released, and the verdict names the scanner revision.
-      state.version = `ClamAV 1.4.3/27790/${at(2)}`;
+      state.version = `ClamAV 1.4.6/27790/${at(2)}`;
       const fresh = await upload("service-fresh", await buildPdf(termsFixturePages()));
       expect(await runScanJob(await claimOnly(fresh.versionId, "scan"), deps(tools()))).toBe("succeeded");
       expect(await securityStatus(client, fresh.versionId)).toMatchObject({ security_state: "released" });
       const [row] = await admin`select scanner_revision, scanner_engine from knowledge.security_verdicts where document_version_id = ${fresh.versionId}`;
-      expect(row).toEqual({ scanner_revision: "ipa-clamav:1.4.3-27790", scanner_engine: "ClamAV" });
+      expect(row).toEqual({ scanner_revision: "ipa-clamav:1.4.6-27790", scanner_engine: "ClamAV" });
 
       // The refresh failed for a day: the old revision is still up, but no longer usable.
-      state.version = `ClamAV 1.4.3/27790/${at(25)}`;
+      state.version = `ClamAV 1.4.6/27790/${at(25)}`;
       const stale = await upload("service-stale", await simplePdf(`service-stale-${RUN}`));
       expect(await runScanJob(await claimOnly(stale.versionId, "scan"), deps(tools()))).toBe("retry");
       expect(await securityStatus(client, stale.versionId)).toMatchObject({ security_state: "scan_failed", failure_code: "stale_signatures" });
       expect(await counts(stale.versionId)).toEqual({ pages: 0, chunks: 0, process_jobs: 0 });
 
       // A fresh revision replaces it behind the same endpoint: the retry releases the file.
-      state.version = `ClamAV 1.4.3/27801/${at(1)}`;
+      state.version = `ClamAV 1.4.6/27801/${at(1)}`;
       expect(await runScanJob(await claimOnly(stale.versionId, "scan"), deps(tools()))).toBe("succeeded");
       expect(await securityStatus(client, stale.versionId)).toMatchObject({ security_state: "released" });
       const revisions = await admin`select scanner_revision, final_verdict from knowledge.security_verdicts where document_version_id = ${stale.versionId} order by created_at`;
       expect(revisions).toEqual([
-        { scanner_revision: "ipa-clamav:1.4.3-27790", final_verdict: "scan_failed" },
-        { scanner_revision: "ipa-clamav:1.4.3-27801", final_verdict: "safe" },
+        { scanner_revision: "ipa-clamav:1.4.6-27790", final_verdict: "scan_failed" },
+        { scanner_revision: "ipa-clamav:1.4.6-27801", final_verdict: "safe" },
       ]);
+
+      // 8B-I5.6: a scanner on a non-approved engine (the older 1.4.3), even with fresh signatures, never releases.
+      state.version = `ClamAV 1.4.3/27820/${at(1)}`;
+      const oldEngine = await upload("service-old-engine", await simplePdf(`service-old-engine-${RUN}`));
+      expect(await runScanJob(await claimOnly(oldEngine.versionId, "scan"), deps(tools()))).toBe("retry");
+      expect(await securityStatus(client, oldEngine.versionId)).toMatchObject({ security_state: "scan_failed", failure_code: "engine_not_approved" });
+      expect(await counts(oldEngine.versionId)).toEqual({ pages: 0, chunks: 0, process_jobs: 0 });
 
       // The service goes away: unavailable, never released.
       await new Promise((resolve) => server.close(resolve));

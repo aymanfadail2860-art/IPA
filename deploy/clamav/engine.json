@@ -1,0 +1,10 @@
+{
+  "_comment": "The ClamAV engine approved for production (8B-I5.6, B-028). Changed only by an approved engine upgrade: candidate workflow (clamav-engine-candidate.yml) passed, then this file, the migration row in knowledge.security_approved_scanner_engines and the Dockerfile default change together. The 6-hourly signature refresh reads this file and never changes the engine. base_image_digest: the official clamav/clamav:1.4.6_base index digest, resolved 2026-10-06.",
+  "lts_line": "1.4",
+  "production": "1.4.6",
+  "approved": [
+    "1.4.6"
+  ],
+  "base_image": "docker.io/clamav/clamav:1.4.6_base",
+  "base_image_digest": "sha256:90effb795234e6a93b070310a4bab5a58d93d94b9a077a09ce2229947679782b"
+}

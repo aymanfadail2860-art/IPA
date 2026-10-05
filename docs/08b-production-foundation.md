@@ -1214,8 +1214,9 @@ implementeret.**
 | **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
 | **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-024) |
 | **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-025). Gaten blev erstattet af I5's release-gate |
-| **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), endeligt lukket med 8B-I5.5 |
-| **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført 2026-10-06 (B-027) |
+| **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), fuldt lukket med 8B-I5.5 og 8B-I5.6 |
+| **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført og godkendt 2026-10-06 (B-027) |
+| **8B-I5.6** | ClamAV-patchversion: production på ClamAV 1.4.6 (LTS 1.4), godkendte engine-versioner i databasen, signaturopdatering adskilt fra engine-opgradering (§21.8) | ✅ Gennemført 2026-10-06 (B-028). I5, I5.5 og I5.6 er fuldt lukket |
 | Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
@@ -2170,9 +2171,9 @@ ipa-ingestion-worker (ECS-service)            ipa-clamav (ECS-service, egne priv
 **Signaturforsyning** (`.github/workflows/clamav-signatures.yml`):
 
 ```
-hver 6. time (cron) → docker build (ClamAV 1.4.3, officielle signaturer via freshclam ved byggetid)
+hver 6. time (cron) → docker build (den godkendte engine fra deploy/clamav/engine.json — §21.8 —, officielle signaturer via freshclam ved byggetid)
 → start kandidaten skrivebeskyttet og uprivilegeret
-→ scripts/verify-clamav-scanner.ts: engine = 1.4.3, signaturversion og -tid kendt, ikke i
+→ scripts/verify-clamav-scanner.ts: engine = den godkendte, signaturversion og -tid kendt, ikke i
   fremtiden, højst 8 t gamle; EICAR findes; en ren fil er ren
 → push til ECR med uforanderligt tag = scanner-revision (ipa-clamav:<engine>-<signaturversion>)
 → ny taskrevision med image-digest → update-service → vent på stabil, kræv COMPLETED
@@ -2243,4 +2244,69 @@ Der findes intet flag, der ignorerer forældede signaturer.
 private subnets til scanneren, VPC-endpoints, Cloud Map-namespace, rollerne
 `ipa-clamav-execution` og `ipa-clamav-publisher` med GitHub OIDC-provider, alarmtopic (Å-5),
 VPC/NAT/EIP til workeren.
+
+### 21.8 8B-I5.6 — ClamAV-patchversion
+
+Production-scanneren kørte på ClamAV 1.4.3. Den er opdateret til **ClamAV 1.4.6**, den nyere
+security patch i den valgte **1.4 LTS-linje**, med rettelser af blandt andet parser- og
+memory-safety-fejl i ældre 1.4.x (B-028). Scanneren læser fjendtlige filer, så en kendt ældre
+security patch må ikke køre.
+
+**Én versionsstyret kilde:** `deploy/clamav/engine.json` (`lts_line` 1.4, `production` 1.4.6,
+`approved`, `base_image` og dens godkendte `base_image_digest`).
+
+- Dockerfilens `CLAMAV_BASE` peger på samme release.
+- Verifikationsscriptet forventer `production`.
+- Databasen har tabellen `knowledge.security_approved_scanner_engines`. Kun en migration kan
+  ændre den; klient, worker og service_role har ingen rettigheder.
+
+**Guardrail i databasen:** `worker_record_security_verdict` giver kun `safe` for en ClamAV-engine
+med en godkendt, ikke tilbagetrukket række. Alt andet bliver teknisk scanfejl
+`engine_not_approved`:
+
+- den ældre 1.4.3;
+- en nyere, endnu ikke godkendt patch som 1.4.7;
+- en engine, der er trukket tilbage.
+
+Domænemodellen er uændret: en ny godkendt patch er en ny række.
+
+**Engine og signaturer håndteres hver for sig:**
+
+| | A. Signaturopdatering | B. Engine-opgradering |
+|---|---|---|
+| Workflow | `clamav-signatures.yml` | `clamav-engine-candidate.yml` |
+| Udløses | Automatisk hver 6. time | Manuelt, med en version i 1.4-linjen |
+| Engine | Fast. Læses fra `engine.json`, bygges fra base-imaget med det godkendte digest, og verifikationen fejler ved enhver anden version | Kandidatens version |
+| Gates | Frisk signatur, EICAR og ren fil | Scanner-tjek, EICAR, ren fil og PDF-/sikkerhedsfixtures (`clamav-candidate.test.ts` mod den kørende kandidat plus scanner-suiterne) |
+| Resultat | Udrullet scanner med ny signatur-revision | Kandidat-image i ECR og base-digest til godkendelse. **Udruller aldrig** |
+
+**Patch-politik:**
+
+1. En ny 1.4.x security- eller patch-release opdages og reviewes.
+2. Den bygges som kandidat (B).
+3. Kandidaten består scanner-tests, EICAR-test, clean-file-test og PDF-/sikkerhedsfixtures.
+4. Kandidatens base-digest godkendes, og ændringen bliver en reviewet ændring af `engine.json`,
+   Dockerfilens default og en migrationsrække.
+5. Først derefter bygger og udruller A den nye engine.
+
+Den ældre version trækkes tilbage (`revoked_at`), når den nye kører. Intet er hardkodet som
+"sidste version", og der findes ingen automatisk opgradering.
+
+**Scanner-revision:** `scanner_revision` binder fortsat engine og signaturversion
+(`ipa-clamav:1.4.6-<signaturversion>`). Udrulning sker stadig med det uforanderlige image-digest.
+
+**Tests:**
+
+- `scanner-isolation.test.ts`: én kilde; image, database og verifikation enige; refresh kan ikke
+  ændre engine (ingen versionslitteral, digest påkrævet); kandidat-workflowet er manuelt, kun for
+  LTS-linjen, kører alle gates og udruller aldrig; verifikationen afviser 1.4.3.
+- pgTAP `upload_security` (122): 1.4.6 er den eneste godkendte engine; 1.4.3, 1.4.7 og en
+  tilbagetrukket engine giver `engine_not_approved`; ingen klient eller worker kan godkende en
+  engine.
+- Integration: en scannertjeneste på 1.4.3 med friske signaturer frigiver aldrig.
+- `clamav-candidate.test.ts` er kørt mod den lokale rigtige clamd.
+
+**Base-digest:** det officielle `clamav/clamav:1.4.6_base` (indeks-digest
+`sha256:90effb79…`) blev slået op i registret 2026-10-06. Kandidat-workflowet (B) køres mod
+1.4.6, før den første production-bygning udrulles. Det kræver kontoen (deploymentforudsætning).
 

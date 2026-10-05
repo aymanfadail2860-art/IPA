@@ -10,6 +10,42 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-028 — ClamAV 1.4.6 i production, godkendte engine-versioner og adskilt engine-opgradering (8B-I5.6)
+
+**Dato:** 6. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.8, `deploy/clamav/engine.json`, `deploy/clamav/Dockerfile`,
+`.github/workflows/clamav-signatures.yml`, `.github/workflows/clamav-engine-candidate.yml`,
+`supabase/migrations/20261006000200_approved_scanner_engines.sql`
+
+**Beslutning:**
+- **Version:** ClamAV 1.4 forbliver den valgte LTS-linje. Production opdateres fra 1.4.3 til
+  1.4.6, den nyere security patch med rettelser af parser- og memory-safety-fejl i ældre 1.4.x.
+- **Én versionsstyret kilde:** `deploy/clamav/engine.json` angiver LTS-linjen, production-version,
+  godkendte versioner og base-imagets godkendte digest.
+- **Guardrail:** databasen kender de godkendte engine-versioner i en tabel, som kun migrationer
+  ændrer. Et verdict fra en ikke-godkendt eller tilbagetrukket ClamAV-engine bliver teknisk
+  scanfejl og aldrig `safe`.
+- **Adskillelse:** signaturopdateringen (automatisk hver 6. time) bygger altid den godkendte
+  engine og kan ikke ændre den. En engine-opgradering er en manuel kandidat. Den skal bestå
+  scanner-, EICAR-, clean-file- og PDF-/sikkerhedsfixtures og få et godkendt digest, før den kan
+  udrulles.
+- **Patch-politik:** ingen automatisk opgradering. En ny 1.4.x reviewes, bygges som kandidat,
+  testes og godkendes som en ændring af `engine.json`, Dockerfilens default og en migrationsrække.
+
+**Overvejede alternativer:**
+- *Altid nyeste 1.4.x ved hver signaturbygning.* Fravalgt: en ny engine ville komme i production
+  uden kandidattest.
+- *1.4.6 hardkodet i workflowet.* Fravalgt: versionen skal være eksplicit, versionsstyret og
+  kunne afløses uden kodeændringer i workflowet.
+- *Engine-tjek kun i workeren.* Fravalgt: databasen afleder `safe` og skal derfor selv kende de
+  godkendte engines.
+
+**Begrundelse:** Scanneren læser fjendtligt input og skal køre den nyeste godkendte security
+patch. Engine-opgraderinger må alligevel aldrig ske utestet eller ubemærket. Signaturer
+opdateres ofte; engines skifter kun efter godkendelse.
+
+---
+
 ## B-027 — ClamAV som separat service uden taskrolle, Cloud Map-endpoint og planlagt signaturimage (8B-I5.5)
 
 **Dato:** 6. oktober 2026
@@ -26,7 +62,7 @@ er ikke omskrevet, fordi loggen er historik.
 - **Service discovery:** Cloud Map med privat DNS `clamav.ipa-worker.internal`, hvor kun sunde
   tasks registreres. Workeren accepterer i produktion kun dette faste endpoint.
 - **Signaturforsyning:** et planlagt workflow hver 6. time. Det bygger imaget med officielle
-  signaturer (pinned ClamAV 1.4.3) og verificerer kandidaten: frisk (højst 8 t), EICAR findes, en
+  signaturer (pinned ClamAV 1.4.3; opdateret til 1.4.6 i B-028) og verificerer kandidaten: frisk (højst 8 t), EICAR findes, en
   ren fil er ren. Derefter pushes det med et uforanderligt tag lig scanner-revisionen, og der
   udrulles med digest. Den kørende scanner henter intet.
 - **Fejlet opdatering:** den gamle scanner bliver, alarmerne udløses (workflow,

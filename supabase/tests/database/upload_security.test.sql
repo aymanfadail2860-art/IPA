@@ -6,7 +6,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(117);
+select plan(122);
 
 -- Kun testens jobs er klar.
 update knowledge.ingestion_jobs set next_attempt_at = now() + interval '1 day' where status = 'queued';
@@ -49,7 +49,7 @@ create function pg_temp.m(p_n int, p_patch jsonb default '{}') returns jsonb lan
     'policy_version', 'pdf-v1', 'checksum_sha256', pg_temp.sha(p_n), 'byte_size', 1000 + p_n, 'detected_mime', 'application/pdf',
     'structural', jsonb_build_object('result', 'pass', 'code', null),
     'malware', jsonb_build_object('result', 'clean', 'code', null, 'name', null),
-    'scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.3', 'signature_version', '27790',
+    'scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.6', 'signature_version', '27790',
                                   'signature_time', now() - interval '2 hours'),
     'pdf_security', jsonb_build_object('result', 'pass', 'code', null),
     'active_content', jsonb_build_object('result', 'pass', 'findings', '[]'::jsonb)) || p_patch
@@ -228,7 +228,7 @@ select is((select final_verdict || '/' || scanner_engine || '/' || signature_ver
            from knowledge.security_verdicts where document_version_id = pg_temp.v(1)),
   'safe/ClamAV/27790/pdf-v1/' || pg_temp.sha(1), 'verdict registrerer scanner, signaturversion, politik og checksum');
 -- 8B-I5.5: scanner-revisionen (ECR-tagget) afledes af verdictets egne felter og kan ikke sættes.
-select is((select scanner_revision from knowledge.security_verdicts where document_version_id = pg_temp.v(1)), 'ipa-clamav:1.4.3-27790',
+select is((select scanner_revision from knowledge.security_verdicts where document_version_id = pg_temp.v(1)), 'ipa-clamav:1.4.6-27790',
   'verdict kan spores til scanner-revisionen (ipa-clamav:<engine>-<signaturversion>)');
 select throws_ok($$ update knowledge.security_verdicts set scanner_revision = 'ipa-clamav:falsk' $$, '428C9', null,
   'scanner-revisionen kan ikke sættes — den afledes');
@@ -346,11 +346,11 @@ select is((pg_temp.record(4, pg_temp.m(4, '{"malware": {"result": "error", "code
   'scanner_timeout', 'timeout → teknisk scanfejl');
 do $$ begin perform pg_temp.rescan(4); end $$;
 select is((pg_temp.record(4, pg_temp.m(4, jsonb_build_object('final', 'safe', 'final_verdict', 'safe',
-  'scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.3', 'signature_version', '27000',
+  'scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.6', 'signature_version', '27000',
                                 'signature_time', now() - interval '3 days'))))) ->> 'failure_code',
   'stale_signatures', 'forældede signaturer → teknisk scanfejl, også med et spoofet "safe" i input');
 do $$ begin perform pg_temp.rescan(4); end $$;
-select is((pg_temp.record(4, pg_temp.m(4, '{"scanner": {"engine": "ClamAV", "engine_version": "1.4.3", "signature_version": null, "signature_time": null}}'))) ->> 'failure_code',
+select is((pg_temp.record(4, pg_temp.m(4, '{"scanner": {"engine": "ClamAV", "engine_version": "1.4.6", "signature_version": null, "signature_time": null}}'))) ->> 'failure_code',
   'stale_signatures', 'ukendt signaturtid → teknisk scanfejl');
 do $$ begin perform pg_temp.rescan(4); end $$;
 select is((pg_temp.record(4, pg_temp.m(4, '{"scanner": {"engine": "FakeAV", "engine_version": "1", "signature_version": "1", "signature_time": null}}'))) ->> 'failure_code',
@@ -371,6 +371,25 @@ select ok(not (ops.ingestion_worker_status() -> 'violations' ? 'development_scan
 insert into knowledge.security_development_scanners (engine) values ('development-fixture');
 select ok(ops.ingestion_worker_status() -> 'violations' ? 'development_scanner_allowed',
   'driftsstatus melder en tilladt udviklingsscanner som overtrædelse (kun lovligt lokalt)');
+-- 8B-I5.6: kun en godkendt ClamAV-engine kan give safe.
+select is(array(select engine_version from knowledge.security_approved_scanner_engines where revoked_at is null), array['1.4.6'],
+  'den godkendte production-engine er ClamAV 1.4.6 (LTS 1.4)');
+do $$ begin perform pg_temp.rescan(4); end $$;
+select is((pg_temp.record(4, pg_temp.m(4, jsonb_build_object('scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.3',
+  'signature_version', '27790', 'signature_time', now() - interval '1 hour'))))) ->> 'failure_code',
+  'engine_not_approved', 'den ældre patch 1.4.3 giver aldrig safe');
+do $$ begin perform pg_temp.rescan(4); end $$;
+select is((pg_temp.record(4, pg_temp.m(4, jsonb_build_object('scanner', jsonb_build_object('engine', 'ClamAV', 'engine_version', '1.4.7',
+  'signature_version', '27790', 'signature_time', now() - interval '1 hour'))))) ->> 'failure_code',
+  'engine_not_approved', 'en nyere, endnu ikke godkendt patch giver heller ikke safe');
+do $$ begin perform pg_temp.rescan(4); end $$;
+update knowledge.security_approved_scanner_engines set revoked_at = current_date where engine_version = '1.4.6';
+select is((pg_temp.record(4, pg_temp.m(4))) ->> 'failure_code', 'engine_not_approved', 'en tilbagetrukket engine giver ikke safe');
+update knowledge.security_approved_scanner_engines set revoked_at = null where engine_version = '1.4.6';
+select ok(not has_table_privilege('ingestion_worker', 'knowledge.security_approved_scanner_engines', 'SELECT,INSERT,UPDATE,DELETE')
+          and not has_table_privilege('authenticated', 'knowledge.security_approved_scanner_engines', 'SELECT,INSERT,UPDATE,DELETE')
+          and not has_table_privilege('service_role', 'knowledge.security_approved_scanner_engines', 'SELECT,INSERT,UPDATE,DELETE'),
+  'ingen klient eller worker kan godkende en engine — kun en migration');
 select throws_ok($$ select pg_temp.record(4, pg_temp.m(4)) $$, '23514', null, 'et verdict kræver, at versionen scannes');
 do $$ begin perform pg_temp.rescan(4); end $$;
 select throws_ok($$ select pg_temp.record(4, pg_temp.m(4, '{"active_content": {"result": "fail", "findings": []}}')) $$, '22023', null,
@@ -407,7 +426,7 @@ select pg_temp.as_user('90000000-0000-4000-a000-000000000001');
 set local role authenticated;
 select is((select array_agg(security_state || ':' || coalesce(failure_code, '-') order by version_id)
            from knowledge.version_security_status(array[pg_temp.v(2), pg_temp.v(4), pg_temp.v(5)])),
-  array['rejected:malware_detected', 'scanning:scanner_not_allowed', 'rejected:active_content'],
+  array['rejected:malware_detected', 'scanning:engine_not_approved', 'rejected:active_content'],
   'forvalteren ser sikkerhedsstatus og kode — ikke filen');
 reset role;
 select pg_temp.as_user('90000000-0000-4000-a000-000000000002');

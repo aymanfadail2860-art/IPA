@@ -11,8 +11,9 @@ ind i appen) og 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platf
 AI-udbyder) og 8B-I3 (workerens databaseidentitet: blue/green-roller, worker-API med lease-token og
 billetkontrakt) og 8B-I4 (workerens runtime til AWS ECS Fargate, `deploy/ingestion-worker/`).
 8B-I5 (upload-sikkerhed: karantæne, filvalidering, aktivt indhold og ClamAV; et dokument behandles
-kun, når databasen har frigivet de scannede bytes) og 8B-I5.5 (ClamAV som isoleret service uden
-AWS-rolle, signaturer via planlagt image, `deploy/clamav/`) er gennemført. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+kun, når databasen har frigivet de scannede bytes) 8B-I5.5 (ClamAV som isoleret service uden
+AWS-rolle, signaturer via planlagt image, `deploy/clamav/`) og 8B-I5.6 (ClamAV 1.4.6, kun godkendte
+engine-versioner) er gennemført. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
