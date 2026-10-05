@@ -1,0 +1,101 @@
+# ClamAV signature supply (docs/08b §21.7, 8B-I5.5).
+#
+#   schedule → build the scanner image (official signatures via freshclam, pinned ClamAV 1.4.3)
+#   → verify the candidate (engine, signature freshness, EICAR, clean file)
+#   → push to ECR (immutable tag = scanner revision) → register a task revision by digest
+#   → deploy the ipa-clamav service and wait until it is stable.
+#
+# The running scanner never downloads anything. If any step fails, nothing new is deployed, the
+# running scanner stays (ECS keeps it until a new one is healthy and rolls back otherwise), the
+# workflow failure and the ECS deployment event are alarms, and the worker's 24-hour signature
+# limit stops new "safe" verdicts by itself if no refresh succeeds in time. There is no switch to
+# ignore stale signatures.
+#
+# Inactive until the production account exists: the job runs only when the repository variable
+# IPA_AWS_ACCOUNT_ID is set. No credentials are stored: AWS access is GitHub OIDC → a role that
+# can push this one repository and deploy this one service (deploy/clamav/iam/).
+
+name: ClamAV signatures
+
+on:
+  schedule:
+    # Every 6 hours (at :17): one failed run still leaves a fresh scanner within the 24 h limit.
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: clamav-signatures
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: ${{ vars.IPA_AWS_ACCOUNT_ID != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      AWS_REGION: eu-central-1
+      AWS_ACCOUNT_ID: ${{ vars.IPA_AWS_ACCOUNT_ID }}
+      ECS_CLUSTER: ${{ vars.IPA_ECS_CLUSTER }}
+      CLAMAV_ENGINE: "1.4.3"
+      MAX_BUILD_AGE_HOURS: "8"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+
+      - name: Build the candidate scanner image
+        run: docker build --pull -f deploy/clamav/Dockerfile -t ipa-clamav:candidate .
+
+      - name: Start the candidate exactly as in production (read-only, unprivileged)
+        run: |
+          docker run -d --name candidate --read-only --tmpfs /tmp --user 10001:10001 --cap-drop ALL \
+            -p 127.0.0.1:3310:3310 ipa-clamav:candidate
+          for i in $(seq 1 60); do
+            docker exec candidate clamdscan --config-file=/etc/clamav/clamd.conf --ping 1 >/dev/null 2>&1 && exit 0
+            sleep 5
+          done
+          docker logs candidate | tail -50
+          exit 1
+
+      - name: Verify engine, signature freshness, EICAR and a clean file
+        run: |
+          node scripts/verify-clamav-scanner.ts --host 127.0.0.1 --port 3310 \
+            --engine "$CLAMAV_ENGINE" --max-age-hours "$MAX_BUILD_AGE_HOURS" | tee verify.json
+          docker exec candidate cat /usr/share/ipa/scanner-build.txt
+          echo "SCANNER_TAG=$(jq -r '.revision | sub("^ipa-clamav:"; "")' verify.json)" >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.IPA_AWS_ACCOUNT_ID }}:role/ipa-clamav-publisher
+          aws-region: eu-central-1
+
+      - name: Push the verified image (immutable tag = scanner revision)
+        run: |
+          REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/ipa-clamav"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%/*}"
+          if ! aws ecr describe-images --repository-name ipa-clamav --image-ids imageTag="$SCANNER_TAG" >/dev/null 2>&1; then
+            docker tag ipa-clamav:candidate "$REPO:$SCANNER_TAG"
+            docker push "$REPO:$SCANNER_TAG"
+          fi
+          DIGEST=$(aws ecr describe-images --repository-name ipa-clamav --image-ids imageTag="$SCANNER_TAG" --query 'imageDetails[0].imageDigest' --output text)
+          echo "CLAMAV_IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Register the scanner revision and deploy it
+        run: |
+          export CLAMAV_IMAGE_TAG="$SCANNER_TAG"
+          envsubst < deploy/clamav/task-definition.json > task.json
+          ARN=$(aws ecs register-task-definition --cli-input-json file://task.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service ipa-clamav --task-definition "$ARN" >/dev/null
+          # The old scanner keeps serving until the new one is healthy (minimumHealthyPercent 100);
+          # a revision that never becomes healthy is rolled back by the circuit breaker.
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services ipa-clamav
+          STATE=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services ipa-clamav \
+            --query "services[0].deployments[?status=='PRIMARY'] | [0].[taskDefinition, rolloutState]" --output text)
+          echo "$STATE"
+          test "$(echo "$STATE" | cut -f1)" = "$ARN" && test "$(echo "$STATE" | cut -f2)" = "COMPLETED"

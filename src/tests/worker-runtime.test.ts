@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConfigError, describeConfig, loadConfig, type PostgresConfig } from "../../workers/ingestion/config.ts";
+import { ConfigError, describeConfig, loadConfig, PRODUCTION_SCANNER, type PostgresConfig } from "../../workers/ingestion/config.ts";
 import { postgresOptions } from "../../workers/ingestion/db.ts";
 import { startLeaseKeeper } from "../../workers/ingestion/lease.ts";
 import { createLogger, redactLogEvent, type LogEvent } from "../../workers/ingestion/log.ts";
@@ -97,10 +97,16 @@ describe("runtime configuration", () => {
     expect(dev.scanner).toEqual({ kind: "development-fixture" });
   });
 
-  it("scans with ClamAV in the sidecar on the loopback interface in production — never anywhere else (8B-I5)", () => {
-    expect(loadConfig(production(), [], exists).scanner).toEqual({ kind: "clamd", host: "127.0.0.1", port: 3310 });
-    expect(problems(production({ IPA_CLAMD_HOST: "clamav.example.internal" })).join(" ")).toContain("IPA_CLAMD_HOST");
+  it("scans only through the deployment-controlled ClamAV service in production — never any other host (8B-I5.5)", () => {
+    expect(loadConfig(production(), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav.ipa-worker.internal", port: 3310 });
+    expect(loadConfig(production({ IPA_CLAMD_HOST: "clamav.ipa-worker.internal", IPA_CLAMD_PORT: "3310" }), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav.ipa-worker.internal", port: 3310 });
+    for (const overrides of [{ IPA_CLAMD_HOST: "127.0.0.1" }, { IPA_CLAMD_HOST: "evil.example.com" }, { IPA_CLAMD_HOST: "10.0.0.5" }, { IPA_CLAMD_PORT: "3311" }]) {
+      expect(problems(production(overrides)).join(" "), JSON.stringify(overrides)).toContain("clamav.ipa-worker.internal:3310");
+    }
+    expect(PRODUCTION_SCANNER).toEqual({ host: "clamav.ipa-worker.internal", port: 3310 });
+    expect(Object.isFrozen(PRODUCTION_SCANNER)).toBe(true);
     expect(JSON.stringify(describeConfig(loadConfig(production(), [], exists)))).toContain("\"scanner\":{\"kind\":\"clamd\"");
+    // Local/test may point at a local clamd.
     const local = loadConfig({ IPA_RUNTIME_ENV: "test", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "k", IPA_CLAMD_HOST: "127.0.0.1", IPA_CLAMD_PORT: "3310" }, [], exists);
     expect(local.scanner).toEqual({ kind: "clamd", host: "127.0.0.1", port: 3310 });
   });

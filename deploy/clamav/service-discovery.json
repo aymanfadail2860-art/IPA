@@ -1,0 +1,24 @@
+{
+  "namespace": {
+    "Name": "ipa-worker.internal",
+    "Vpc": "${VPC_ID}",
+    "Description": "Private DNS for the ingestion worker's internal services (8B-I5.5)"
+  },
+  "service": {
+    "Name": "clamav",
+    "NamespaceId": "${CLOUD_MAP_NAMESPACE_ID}",
+    "DnsConfig": {
+      "RoutingPolicy": "MULTIVALUE",
+      "DnsRecords": [
+        {
+          "Type": "A",
+          "TTL": 10
+        }
+      ]
+    },
+    "HealthCheckCustomConfig": {
+      "FailureThreshold": 1
+    },
+    "Description": "clamav.ipa-worker.internal — only healthy ClamAV tasks are registered"
+  }
+}

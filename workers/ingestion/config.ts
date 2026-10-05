@@ -13,11 +13,13 @@ import { runtimeEnv, type RuntimeEnv } from "../../src/lib/knowledge/core/grade.
  *   * Local/test: either the same Postgres path (TLS optional) or the development-only
  *     service-role path of phase 7 (B-16).
  *
- * Malware scanning (8B-I5): production scans with ClamAV's clamd in the sidecar container of
- * the same task, on the loopback interface only (IPA_CLAMD_HOST/IPA_CLAMD_PORT, default
- * 127.0.0.1:3310) — the bytes never cross the network. Local/test use clamd when
- * IPA_CLAMD_HOST is set, otherwise the development-only fixture scanner, whose verdicts the
- * database accepts only where the local seed allows it.
+ * Malware scanning (8B-I5, 8B-I5.5): production scans with ClamAV's clamd in its OWN ECS
+ * service, reached over the private network at the deployment-controlled endpoint
+ * PRODUCTION_SCANNER (clamav.ipa-worker.internal:3310, Cloud Map). Production refuses any other
+ * host or port — the endpoint is part of the code and the task definition, not a setting a user
+ * or an administrator can change. Local/test use clamd when IPA_CLAMD_HOST is set, otherwise the
+ * development-only fixture scanner, whose verdicts the database accepts only where the local
+ * seed allows it.
  *
  * Errors name the variable and the rule — never a value.
  */
@@ -53,6 +55,9 @@ export interface ServiceRoleDevConfig {
   url: string;
   key: string;
 }
+
+/** The production scanner: the ipa-clamav ECS service, by private DNS (deploy/clamav/). Fixed. */
+export const PRODUCTION_SCANNER = Object.freeze({ host: "clamav.ipa-worker.internal", port: 3310 });
 
 export type ScannerConfig = { kind: "clamd"; host: string; port: number } | { kind: "development-fixture" };
 
@@ -162,12 +167,15 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
   }
 
   let scanner: ScannerConfig;
-  if (production || env.IPA_CLAMD_HOST) {
-    const host = env.IPA_CLAMD_HOST || "127.0.0.1";
-    if (production && host !== "127.0.0.1" && host !== "localhost") {
-      problems.push("IPA_CLAMD_HOST skal være 127.0.0.1 i produktion (ClamAV kører som sidecar i samme task).");
+  if (production) {
+    const host = env.IPA_CLAMD_HOST || PRODUCTION_SCANNER.host;
+    const port = int(env, "IPA_CLAMD_PORT", PRODUCTION_SCANNER.port, 1, 65535, problems);
+    if (host !== PRODUCTION_SCANNER.host || port !== PRODUCTION_SCANNER.port) {
+      problems.push(`I produktion scanner workeren kun gennem ClamAV-tjenesten ${PRODUCTION_SCANNER.host}:${PRODUCTION_SCANNER.port} (IPA_CLAMD_HOST/IPA_CLAMD_PORT).`);
     }
-    scanner = { kind: "clamd", host, port: int(env, "IPA_CLAMD_PORT", 3310, 1, 65535, problems) };
+    scanner = { kind: "clamd", host: PRODUCTION_SCANNER.host, port: PRODUCTION_SCANNER.port };
+  } else if (env.IPA_CLAMD_HOST) {
+    scanner = { kind: "clamd", host: env.IPA_CLAMD_HOST, port: int(env, "IPA_CLAMD_PORT", 3310, 1, 65535, problems) };
   } else {
     scanner = { kind: "development-fixture" };
   }

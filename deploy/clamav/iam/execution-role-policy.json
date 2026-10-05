@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrAuthorizationToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullScannerImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"],
+      "Resource": "arn:aws:ecr:eu-central-1:${AWS_ACCOUNT_ID}:repository/ipa-clamav"
+    },
+    {
+      "Sid": "WriteScannerLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:eu-central-1:${AWS_ACCOUNT_ID}:log-group:/ipa/clamav:*"
+    }
+  ]
+}

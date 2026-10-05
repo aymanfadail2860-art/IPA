@@ -1214,7 +1214,8 @@ implementeret.**
 | **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
 | **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-024) |
 | **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-025). Gaten blev erstattet af I5's release-gate |
-| **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV-sidecar, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Implementeret 2026-10-05 — afventer godkendelse (B-026) |
+| **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), endeligt lukket med 8B-I5.5 |
+| **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført 2026-10-06 (B-027) |
 | Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, kundedataspærre, observability, aktivering | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
@@ -1953,7 +1954,7 @@ engangsbillet, som databasen har udstedt til netop den flytning.
    signaturer genkendes: ZIP, EXE, ELF, PNG, JPEG, GIF, OLE, RAR, 7z, gzip, HTML), filendelsen
    `.pdf`, upload-MIME `application/pdf`, `%%EOF` i de sidste 4 KB og kun whitespace efter det
    sidste `%%EOF` (ellers polyglot). Endelse eller MIME alene er aldrig nok.
-2. **ClamAV** (`scanner.ts`): clamd-protokollen over TCP til sidecaren på `127.0.0.1:3310`
+2. **ClamAV** (`scanner.ts`): clamd-protokollen over TCP til ClamAV-tjenesten på `clamav.ipa-worker.internal:3310` (§21.7)
    (`zVERSION`, `zINSTREAM` i bidder på 64 KB). Alle filer under størrelsesgrænsen scannes —
    også en fil, der allerede er strukturelt ugyldig.
 3. **PDF-sikkerhedsinspektion** (`pdf-structure.ts`, `pdf-inspect.ts`) — kun for en strukturelt
@@ -2045,27 +2046,9 @@ før chunking, hvis to læsere ser forskelligt.
 **Politikversion:** verdicts bærer `policy_version`. En ny politik gør ældre verdicts
 forældede for gaten (`policy_outdated`). Der er ingen automatisk genscanning af korpus i I5.
 
-**ClamAV-arkitektur:**
-
-- Sidecar-container `clamav` i samme Fargate-task (`deploy/clamav/`). clamd lytter kun på
-  `127.0.0.1:3310`. Ingen port mod omverdenen; security groupen har ingen indgående regler.
-- Ingen credentials, intet miljø, ingen secrets, ikke-root (10001), skrivebeskyttet rodfilsystem,
-  `capabilities drop ALL`, kun `/tmp` som volumen.
-- Workeren starter først, når clamd er sund (`dependsOn HEALTHY`).
-- `StreamMaxLength 60M` (over bucket-grænsen), `AlertExceedsMax yes`, `LogClean no`. Rå bytes
-  logges aldrig; et fund logges med signaturnavnet.
-- **Signaturer:** bygges ind i imaget af `freshclam` ved byggetid. Den kørende container henter
-  intet og behøver ingen netværksforbindelse. Imaget bygges og udrulles efter en fast plan (hver
-  6. time anbefales) [AFKLARES: CI-pipeline og spejl, fx `cvdupdate` i et privat spejl].
-  Engine-version, signaturversion og -tid registreres på hvert verdict og logges ved opstart
-  (`scanner_status` med alder). Ældre end 24 timer → intet nyt `safe`.
-- **Blast radius ved en kompromitteret clamd:** den har ingen database-credential, ingen
-  service_role, ingen billet og ingen adgang til workerens hukommelse eller volumen. **Men** en
-  ECS-taskrolle gælder hele tasken: clamd-containeren kan i princippet hente task-rollens
-  credentials (i dag kun `bedrock:InvokeModel` på Embed v4-profilen) og bruge taskens udgående
-  443. Den kan altså misbruge embedding-kvoten og sende bytes, den selv har fået at scanne, ud.
-  Se B-026 for afvejningen og alternativet (separat ClamAV-task uden rolle og uden udgående
-  trafik) [AFKLARES].
+**ClamAV-arkitektur:** I I5 var ClamAV en sidecar i worker-tasken. Det er erstattet i 8B-I5.5
+af en separat ECS-service uden taskrolle og uden internetadgang, med signaturer bygget ind i
+imaget af en planlagt pipeline (§21.7, B-027).
 
 **Fejltilstande:**
 
@@ -2132,9 +2115,132 @@ overtrædelse.
 - Brugerteksterne i §7.3 er erstattet af de syv Admin-statusser, du angav for I5.
 - Afviste filer flyttes til `knowledge-quarantine` uanset årsag (ikke kun malware).
 - Inspektionstimeout og ressourcegrænser giver afvisning (ikke genforsøg).
-- ClamAV som sidecar deler taskrollen (se blast radius) [AFKLARES].
+- ClamAV som sidecar delte taskrollen. Løst i 8B-I5.5 (§21.7).
 
 **Ikke implementeret:** andre formater, OCR, P1–P9, registret og `evaluation_publisher`,
 aktivering af production-retrieval, 8C, en rigtig Copilot-model, Learn/Practice/Advise,
-automatisk korpusgenscanning, UI til genscanning og rigtige cloud-ressourcer (CI til
-signaturimaget, ECR, VPC, NAT/EIP).
+automatisk korpusgenscanning, UI til genscanning og rigtige cloud-ressourcer (ECR, VPC,
+NAT/EIP).
+
+### 21.7 8B-I5.5 — Scanner-isolation og signaturforsyning
+
+I5 er funktionelt godkendt (B-026). I5.5 lukker de to åbne punkter: ClamAV delte workerens
+taskrolle, og signaturforsyningen var ikke fastlagt (B-027).
+
+**Arkitektur:**
+
+```
+ipa-ingestion-worker (ECS-service)            ipa-clamav (ECS-service, egne private subnets)
+  taskrolle: Embed v4 (forberedt)               INGEN taskrolle
+  SG: udgående 443, 6543 og ─── TCP 3310 ───►   SG: indgående KUN fra workerens SG på 3310
+      3310 kun til ClamAV-SG                         udgående KUN 443 til VPC-endpoints (ECR, logs, S3)
+  clamav.ipa-worker.internal:3310  ◄── Cloud Map (privat DNS, A-record, TTL 10 s, kun sunde tasks)
+```
+
+- `deploy/clamav/`: `task-definition.json`, `service.json`, `service-discovery.json`,
+  `security-group.json`, `iam/` (execution-rolle, CI-publisher), `alarms.json`, `Dockerfile`,
+  `clamd.conf`. Workerens task har nu kun worker-containeren.
+- ClamAV-tasken: ingen taskrolle, ingen secrets, intet miljø, ikke-root (10001), skrivebeskyttet
+  rodfilsystem, `capabilities drop ALL`, kun `/tmp`, ingen offentlig IP, ingen ECS Exec. Imaget
+  refereres med digest.
+- **Execution-rolle vs. taskrolle:**
+  - *Execution-rollen* bruges af ECS selv (Fargate-agenten) til at starte tasken: hente imaget
+    og skrive logs. Containerens processer kan ikke få dens credentials. `ipa-clamav-execution`
+    kan kun hente `ipa-clamav`-imaget og skrive til `/ipa/clamav`.
+  - *Taskrollen* er de credentials, processerne i containeren får. ClamAV har ingen, så clamd
+    kan hverken kalde Bedrock eller nogen anden AWS-tjeneste. Workerens taskrolle (Embed v4)
+    gælder kun worker-tasken.
+- **Netværk:** ClamAV-SG accepterer kun TCP 3310 fra workerens SG — aldrig en CIDR, VPC'en
+  eller internettet. Udgående kun HTTPS til VPC-endpoints (ECR api/dkr, CloudWatch Logs og
+  S3-gateway), som ECS skal bruge til imaget og logs. Ingen 0.0.0.0/0 og ingen NAT.
+- **Service discovery:** Cloud Map (ECS service discovery) med privat DNS
+  `clamav.ipa-worker.internal`.
+  - *Valgt*, fordi den kræver ingen ekstra container eller load balancer, og ECS registrerer
+    kun sunde tasks.
+  - *ECS Service Connect* er fravalgt, fordi den indsætter en proxy-container i både worker- og
+    ClamAV-tasken.
+  - *En intern NLB* er fravalgt, fordi den koster mere og giver flere dele uden ny sikkerhed.
+- **Workeren** scanner i produktion kun gennem `PRODUCTION_SCANNER`
+  (`clamav.ipa-worker.internal:3310`). Endpointet er fastlagt i koden og i taskdefinitionen.
+  Enhver anden vært eller port afvises ved start. Lokalt og i test kan en lokal clamd bruges.
+- **Fail closed:** DNS uden svar (også midlertidigt), afvist forbindelse, ingen rute, nulstillet
+  forbindelse, timeout, et ugyldigt svar eller en usund tjeneste (afregistreret i Cloud Map) giver
+  teknisk scanfejl. Der er da intet `safe`, ingen frigivelse og ingen parser.
+
+**Signaturforsyning** (`.github/workflows/clamav-signatures.yml`):
+
+```
+hver 6. time (cron) → docker build (ClamAV 1.4.3, officielle signaturer via freshclam ved byggetid)
+→ start kandidaten skrivebeskyttet og uprivilegeret
+→ scripts/verify-clamav-scanner.ts: engine = 1.4.3, signaturversion og -tid kendt, ikke i
+  fremtiden, højst 8 t gamle; EICAR findes; en ren fil er ren
+→ push til ECR med uforanderligt tag = scanner-revision (ipa-clamav:<engine>-<signaturversion>)
+→ ny taskrevision med image-digest → update-service → vent på stabil, kræv COMPLETED
+```
+
+- Seks timer frem for tolv: en mislykket kørsel efterlader stadig en frisk scanner inden for 24
+  timer (byggealder ≤ 8 t + 6 t + 6 t = 20 t).
+- Containeren henter intet ved kørsel. Der bruges ingen tredjepartssignaturer.
+- CI'en logger ind med GitHub OIDC uden lagrede credentials, i en rolle, der kun kan pushe
+  `ipa-clamav`, opdatere servicen `ipa-clamav` og videregive dens execution-rolle.
+- Workflowet er inaktivt, indtil repository-variablen `IPA_AWS_ACCOUNT_ID` er sat.
+
+**Hvis opdateringen fejler:**
+
+1. **Bygning eller verifikation fejler:** intet pushes eller udrulles, og workflowfejlen er
+   alarmen.
+2. **Udrulningen fejler:** ECS beholder den kørende scanner (minimumHealthyPercent 100), og
+   circuit breakeren ruller tilbage. EventBridge-reglen `SERVICE_DEPLOYMENT_FAILED` alarmerer.
+3. **Signaturerne ældes:** alarmen `ipa-scanner-signatures-ageing` udløses over 18 timer, og
+   `ipa-scanner-technical-failures` udløses ved tekniske scanfejl.
+4. **Ved 24 timer:** den gamle scanner bliver ubrugelig af sig selv. Workeren og databasen
+   udsteder intet nyt `safe`, og filerne venter som "Teknisk scanfejl".
+5. **Når en frisk revision kører:** genforsøgene frigiver filerne.
+
+Der findes intet flag, der ignorerer forældede signaturer.
+
+**Scanner-identitet i verdict:**
+
+- `scanner_engine`, `scanner_version` (engine), `signature_version` og `signature_time` som i I5.
+- Ny genereret kolonne `scanner_revision` = `ipa-clamav:<engine>-<signaturversion>`. Den er lig
+  med det uforanderlige ECR-tag, og ECR giver digest og byggeregistrering
+  (`/usr/share/ipa/scanner-build.txt` i imaget).
+- Kolonnen afledes og kan ikke sættes. Verdict er fortsat uforanderligt.
+- Workerens log ved hvert verdict har engine, signaturversion og signaturalder. Ingen
+  dokumentbytes.
+
+**Tests:**
+
+- `scanner-isolation.test.ts` (16): ClamAV er ikke i worker-tasken; ingen taskrolle, intet
+  Bedrock og ingen secrets; execution-rollen kun ECR og logs; non-root, skrivebeskyttet, ingen
+  offentlig IP og ingen ECS Exec; SG kun fra workerens SG på 3310 og ingen internet-egress;
+  Cloud Map-navnet = workerens faste endpoint; workflowets rækkefølge, plan og OIDC; CI-rollens
+  rækkevidde; pinned version og kun officielle signaturer; alarmer; intet "ignorér
+  forældede"-flag.
+- Samme fil, adfærd mod en scannertjeneste over TCP: DNS uden svar giver ikke `clean`; en gammel
+  scanner virker ved 23,5 t og er ubrugelig ved 24,5 t; en frisk revision genopretter;
+  byggeverifikationen afviser forældede, ukendte og fremtidige datoer, ikke-pinned engine, en
+  "blind" scanner og nedlagt tjeneste.
+- `worker-runtime.test.ts`: produktion accepterer kun det faste endpoint.
+- `worker-runtime-architecture.test.ts`: worker-tasken har én container og 3310 kun mod
+  ClamAV-SG.
+- pgTAP `upload_security` (117): scanner-revisionen afledes og kan ikke sættes.
+- Integration: workeren scanner gennem en privat tjeneste mod den rigtige database. Frisk
+  revision frigiver med `scanner_revision`; forældet giver `stale_signatures` og intet job;
+  udskiftning frigiver ved genforsøg; nedlagt tjeneste giver `scanner_unavailable`. Desuden
+  rigtig clamd med EICAR.
+
+**Afvigelser og realiseringsvalg** (B-027):
+
+- §7.2 anbefalede "ClamAV som sidecar i worker-tasken". Efter din beslutning er det realiseret
+  som en separat service. Begrundelsen og reglerne i §7.2 (fail-closed, karantæne,
+  24-timersgrænse) er uændrede.
+- Repoet havde ingen CI. Workflowet er projektets første GitHub Actions-workflow og gør kun
+  dette ene.
+- Byggegrænsen er 8 timer (strammere end 24), så den enkelte revision har margin.
+
+**Deploymentforudsætninger** (kræver produktionskontoen): ECR-repositoriet `ipa-clamav`, VPC,
+private subnets til scanneren, VPC-endpoints, Cloud Map-namespace, rollerne
+`ipa-clamav-execution` og `ipa-clamav-publisher` med GitHub OIDC-provider, alarmtopic (Å-5),
+VPC/NAT/EIP til workeren.
+

@@ -148,8 +148,9 @@ describe("production worker code (8B-I4)", () => {
     const scanner = stripComments(read("workers/ingestion/security/scanner.ts"));
     expect(scanner).toMatch(/if \(env !== "local" && env !== "test"\) throw/);
     const config = stripComments(read("workers/ingestion/config.ts"));
-    expect(config).toMatch(/if \(production \|\| env\.IPA_CLAMD_HOST\)/);
-    expect(config).toMatch(/if \(production && host !== "127\.0\.0\.1" && host !== "localhost"\)/);
+    // Production: only the fixed service endpoint; the development scanner only off production.
+    expect(config).toMatch(/export const PRODUCTION_SCANNER = Object\.freeze\(\{ host: "clamav\.ipa-worker\.internal", port: 3310 \}\);/);
+    expect(config).toMatch(/if \(production\) \{[\s\S]*?scanner = \{ kind: "clamd", host: PRODUCTION_SCANNER\.host, port: PRODUCTION_SCANNER\.port \};[\s\S]*?\} else if \(env\.IPA_CLAMD_HOST\) \{[\s\S]*?\} else \{\s*scanner = \{ kind: "development-fixture" \};/);
   });
 });
 
@@ -215,7 +216,8 @@ describe("ECS/Fargate specification (8B-I4)", () => {
   it("runs on Fargate as a non-root, read-only, capability-less container with a /tmp volume only", () => {
     expect(taskDefinition.requiresCompatibilities).toEqual(["FARGATE"]);
     expect(taskDefinition.networkMode).toBe("awsvpc");
-    expect(taskDefinition.containerDefinitions.map((definition) => definition.name)).toEqual(["ingestion-worker", "clamav"]);
+    // 8B-I5.5: the worker task holds the worker only — ClamAV is its own service.
+    expect(taskDefinition.containerDefinitions.map((definition) => definition.name)).toEqual(["ingestion-worker"]);
     expect(container.user).toBe("1000:1000");
     expect(container.readonlyRootFilesystem).toBe(true);
     expect(container.privileged).toBe(false);
@@ -228,29 +230,11 @@ describe("ECS/Fargate specification (8B-I4)", () => {
     expect(container.stopTimeout * 1000).toBeGreaterThan(grace);
   });
 
-  it("runs ClamAV as a sidecar that receives bytes only: no credential, no environment, no port to the outside (8B-I5)", () => {
-    const clamav = taskDefinition.containerDefinitions[1]!;
-    expect(clamav.user).not.toMatch(/^0(:|$)|root/);
-    expect(clamav.readonlyRootFilesystem).toBe(true);
-    expect(clamav.privileged).toBe(false);
-    expect(clamav.linuxParameters).toEqual({ initProcessEnabled: true, capabilities: { drop: ["ALL"] } });
-    expect(clamav.secrets).toBeUndefined();
-    expect(clamav.environment).toEqual([]);
-    expect(clamav.portMappings).toBeUndefined();
-    expect(clamav.mountPoints.map((mount) => mount.containerPath)).toEqual(["/tmp"]);
-    expect(clamav.image).toMatch(/\/ipa-clamav:\$\{CLAMAV_IMAGE_TAG\}$/);
-    // The worker starts only when clamd has loaded its signatures, and talks to it on loopback.
-    expect(container.dependsOn).toEqual([{ containerName: "clamav", condition: "HEALTHY" }]);
-    expect(container.environment).toContainEqual({ name: "IPA_CLAMD_HOST", value: "127.0.0.1" });
-    const conf = read("deploy/clamav/clamd.conf");
-    expect(conf).toMatch(/^TCPAddr 127\.0\.0\.1$/m);
-    expect(conf).toMatch(/^StreamMaxLength 60M$/m);
-    expect(conf).toMatch(/^AlertExceedsMax yes$/m);
-    expect(conf).toMatch(/^LogClean no$/m);
-    const image = stripComments(read("deploy/clamav/Dockerfile").replace(/^#.*$/gm, ""));
-    expect(image).not.toMatch(/^\s*ARG\b|PASSWORD|SECRET|TOKEN|ACCESS_KEY/m);
-    expect(image).toMatch(/^USER 10001:10001$/m);
-    expect(image).toMatch(/^RUN freshclam /m);
+  it("talks to the scanner only at the fixed private service endpoint (8B-I5.5)", () => {
+    expect(container.environment).toContainEqual({ name: "IPA_CLAMD_HOST", value: "clamav.ipa-worker.internal" });
+    expect(container.environment).toContainEqual({ name: "IPA_CLAMD_PORT", value: "3310" });
+    expect(container.dependsOn).toBeUndefined();
+    expect(JSON.stringify(taskDefinition)).not.toMatch(/clamav\/|ipa-clamav|127\.0\.0\.1/);
   });
 
   it("injects the database credential only from Secrets Manager — never as a plain environment value", () => {
@@ -279,9 +263,12 @@ describe("ECS/Fargate specification (8B-I4)", () => {
     expect(service.enableExecuteCommand).toBe(false);
     expect(service.desiredCount).toBe(1);
     expect(service.deploymentConfiguration).toMatchObject({ minimumHealthyPercent: 100, maximumPercent: 200, deploymentCircuitBreaker: { enable: true } });
-    const group = json(`${DEPLOY}/security-group.json`) as { Ingress: unknown[]; Egress: { FromPort: number }[] };
+    const group = json(`${DEPLOY}/security-group.json`) as { Ingress: unknown[]; Egress: ({ FromPort: number } & Record<string, unknown>)[] };
     expect(group.Ingress).toEqual([]);
-    expect(group.Egress.map((rule) => rule.FromPort).sort()).toEqual([443, 6543]);
+    expect(group.Egress.map((rule) => rule.FromPort).sort((a, b) => a - b)).toEqual([443, 3310, 6543]);
+    // clamd only towards the ClamAV security group — never a CIDR.
+    expect(group.Egress.find((rule) => rule.FromPort === 3310)).toMatchObject({ ToPort: 3310, SourceSecurityGroupId: "${CLAMAV_SECURITY_GROUP_ID}" });
+    expect(group.Egress.find((rule) => rule.FromPort === 3310)).not.toHaveProperty("CidrIp");
   });
 });
 

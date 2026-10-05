@@ -6,17 +6,17 @@ IaC-framework (Terraform, CDK eller Pulumi). Filerne her er derfor de præcise d
 driften anvender med AWS CLI, når produktionskontoen findes. Pladsholdere står som `${NAVN}`.
 
 > **Release-gate (8B-I5):** Hver upload undersøges i karantæne (scan-job: byteniveau-validering,
-> ClamAV i sidecaren, PDF-inspektion). Workeren behandler kun en fil, når databasen har frigivet
+> ClamAV-tjenesten `deploy/clamav/`, PDF-inspektion). Workeren behandler kun en fil, når databasen har frigivet
 > netop de scannede bytes (`workers/ingestion/gate.ts`, `docs/08b` §21.6).
 
 | Fil | Indhold |
 |-----|---------|
 | `Dockerfile` | Image i flere trin, kun runtime-dependencies, ikke-root, ingen build-argumenter eller hemmeligheder |
 | `package.json`, `package-lock.json` | Imagets eneste dependencies: `postgres` og `pdfjs-dist` (samme versioner som rodens lockfil) |
-| `task-definition.json` | ECS-taskdefinition: Fargate, 1 vCPU/4 GB, workeren (2 GB) og ClamAV-sidecaren `clamav` (2 GB), skrivebeskyttede rodfilsystemer, `/tmp`-volumener, miljø, secrets (kun workeren), healthchecks, logs |
-| `../clamav/` | ClamAV-sidecarens image (signaturer bygget ind ved byggetid) og `clamd.conf` (kun `127.0.0.1:3310`) |
+| `task-definition.json` | ECS-taskdefinition: Fargate, 1 vCPU/2 GB, kun worker-containeren, skrivebeskyttet rodfilsystem, `/tmp`-volumen, miljø (inkl. det faste scanner-endpoint), secrets, healthcheck, logs |
+| `../clamav/` | ClamAV som egen service uden taskrolle (8B-I5.5) — se `deploy/clamav/README.md` |
 | `service.json` | ECS-service: 1 task, rullende deployment med circuit breaker, private subnets, ingen offentlig IP |
-| `security-group.json` | Ingen indgående trafik. Udgående kun 443 og 6543 |
+| `security-group.json` | Ingen indgående trafik. Udgående kun 443, 6543 og 3310 til ClamAV-tjenestens security group |
 | `iam/execution-role-policy.json` | Execution-rollen: image-pull, logs, injektion af den ene secret |
 | `iam/task-role-policy.json` | Task-rollen: forberedt Bedrock Embed v4 via EU-inferensprofilen, intet andet |
 | `iam/ecs-tasks-trust-policy.json` | Kun ECS-tasks i kontoen kan påtage sig rollerne |
@@ -40,6 +40,7 @@ Fargate-task (privat subnet, ingen offentlig IP, ingen indgående trafik)
   → NAT-gateway med Elastic IP (offentligt subnet)
   → Supavisor :6543 (transaktionstilstand, TLS)  → Supabase Postgres
   → HTTPS :443  → Edge Function worker-storage, Bedrock, ECR, CloudWatch, Secrets Manager
+  → TCP :3310   → clamav.ipa-worker.internal (ClamAV-tjenesten, kun via dens security group)
 ```
 
 - Supabase Network Restrictions skal tillade **NAT-gatewayens Elastic IP (/32)** samt
@@ -108,23 +109,9 @@ Fargate-task (privat subnet, ingen offentlig IP, ingen indgående trafik)
 - `pdfjs-dist` skriver ved indlæsning to linjer på stderr om den udeladte valgfrie
   `@napi-rs/canvas`. Tekstudtrækket er identisk med og uden den (verificeret).
 
-## ClamAV-sidecar (8B-I5)
+## ClamAV (8B-I5.5)
 
-```bash
-# Bygges efter en fast plan (anbefalet hver 6. time) — signaturerne hentes HER, ved byggetid:
-docker build -f deploy/clamav/Dockerfile -t ipa-clamav:$(date -u +%Y%m%d%H%M) .
-# push til ECR-repositoriet ipa-clamav; registrér en ny taskdefinition med ${CLAMAV_IMAGE_TAG}
-# og udrul (aws ecs update-service --force-new-deployment).
-```
-
-- clamd lytter kun på `127.0.0.1:3310` i tasken. Workeren forbinder dertil (`IPA_CLAMD_HOST`,
-  `IPA_CLAMD_PORT`); konfigurationen afviser enhver anden vært i produktion.
-- Containeren har ingen secrets og intet miljø, henter intet ved kørsel og kører som uid 10001 på
-  et skrivebeskyttet rodfilsystem. Workeren starter først, når clamd er sund.
-- **Signaturernes alder:** workeren logger `scanner_status` ved start (version, signaturversion,
-  alder). Er signaturerne ældre end 24 timer, giver ingen scanning `safe` — filerne venter som
-  "Teknisk scanfejl" og prøves igen. Signaturimaget skal derfor udrulles mindst hver 24. time.
-- CI-pipeline og spejl til `freshclam` (fx `cvdupdate` i et privat spejl) [AFKLARES].
-- **Blast radius:** en kompromitteret clamd har ingen database-credential, service_role eller
-  billet, men deler taskens rolle (kun Embed v4) og udgående 443 (B-026) [AFKLARES].
-
+ClamAV kører ikke længere i worker-tasken. Den er en separat ECS-service uden taskrolle og uden
+internetadgang, og workeren når den kun på `clamav.ipa-worker.internal:3310`. Produktion afviser
+ethvert andet endpoint. Bygning, signaturer, netværk og drift er beskrevet i
+`deploy/clamav/README.md`.

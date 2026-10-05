@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createServer, type AddressInfo, type Server } from "node:net";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import postgres, { type Sql } from "postgres";
@@ -198,6 +199,65 @@ describe.skipIf(!configured)("upload security end to end (8B-I5)", () => {
     expect((await knowledge.rpc("worker_security_clearance", { p_job_id: version.versionId, p_lease_token: "0".repeat(64) })).error?.code).toBe("42501");
     expect((await versionRow(await signedInClient("admin"), version.versionId))?.security_state).toBe("quarantined");
   });
+
+  it("scans through a private scanner service: fresh revision releases, stale fails closed, a replacement restores (8B-I5.5)", async () => {
+    // A stand-in for the ipa-clamav service over TCP (no AWS): the clamd protocol, a signature
+    // date we control, and "redeploys" that swap the revision behind the same endpoint.
+    const state = { version: "" };
+    const server: Server = createServer((socket) => {
+      let buffer = Buffer.alloc(0);
+      socket.on("data", (data) => {
+        buffer = Buffer.concat([buffer, data]);
+        if (buffer.toString("latin1").startsWith("zVERSION\0")) return void socket.end(`${state.version}\0`);
+        if (buffer.length >= 14 && buffer.subarray(-4).readUInt32BE(0) === 0) socket.end("stream: OK\0");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const service = { host: "127.0.0.1", port: (server.address() as AddressInfo).port };
+    const at = (hoursAgo: number) => {
+      const date = new Date(Date.now() - hoursAgo * 3_600_000);
+      const utc = date.toUTCString();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${utc.slice(0, 3)} ${utc.slice(8, 11)} ${String(date.getUTCDate()).padStart(2, " ")} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${date.getUTCFullYear()}`;
+    };
+    const tools = (): ScanTools => ({ scanner: clamdScanner(service), inspector: childProcessInspector() });
+    try {
+      const client = await signedInClient("admin");
+      // Fresh revision: released, and the verdict names the scanner revision.
+      state.version = `ClamAV 1.4.3/27790/${at(2)}`;
+      const fresh = await upload("service-fresh", await buildPdf(termsFixturePages()));
+      expect(await runScanJob(await claimOnly(fresh.versionId, "scan"), deps(tools()))).toBe("succeeded");
+      expect(await securityStatus(client, fresh.versionId)).toMatchObject({ security_state: "released" });
+      const [row] = await admin`select scanner_revision, scanner_engine from knowledge.security_verdicts where document_version_id = ${fresh.versionId}`;
+      expect(row).toEqual({ scanner_revision: "ipa-clamav:1.4.3-27790", scanner_engine: "ClamAV" });
+
+      // The refresh failed for a day: the old revision is still up, but no longer usable.
+      state.version = `ClamAV 1.4.3/27790/${at(25)}`;
+      const stale = await upload("service-stale", await simplePdf(`service-stale-${RUN}`));
+      expect(await runScanJob(await claimOnly(stale.versionId, "scan"), deps(tools()))).toBe("retry");
+      expect(await securityStatus(client, stale.versionId)).toMatchObject({ security_state: "scan_failed", failure_code: "stale_signatures" });
+      expect(await counts(stale.versionId)).toEqual({ pages: 0, chunks: 0, process_jobs: 0 });
+
+      // A fresh revision replaces it behind the same endpoint: the retry releases the file.
+      state.version = `ClamAV 1.4.3/27801/${at(1)}`;
+      expect(await runScanJob(await claimOnly(stale.versionId, "scan"), deps(tools()))).toBe("succeeded");
+      expect(await securityStatus(client, stale.versionId)).toMatchObject({ security_state: "released" });
+      const revisions = await admin`select scanner_revision, final_verdict from knowledge.security_verdicts where document_version_id = ${stale.versionId} order by created_at`;
+      expect(revisions).toEqual([
+        { scanner_revision: "ipa-clamav:1.4.3-27790", final_verdict: "scan_failed" },
+        { scanner_revision: "ipa-clamav:1.4.3-27801", final_verdict: "safe" },
+      ]);
+
+      // The service goes away: unavailable, never released.
+      await new Promise((resolve) => server.close(resolve));
+      const gone = await upload("service-gone", await simplePdf(`service-gone-${RUN}`));
+      expect(await runScanJob(await claimOnly(gone.versionId, "scan"), deps(tools()))).toBe("retry");
+      expect(await securityStatus(client, gone.versionId)).toMatchObject({ security_state: "scan_failed", failure_code: "scanner_unavailable" });
+      expect(await counts(gone.versionId)).toEqual({ pages: 0, chunks: 0, process_jobs: 0 });
+    } finally {
+      server.close();
+    }
+  }, 120_000);
 
   describe.skipIf(!clamd)("ClamAV (real clamd)", () => {
     it("finds the EICAR test file and quarantines it", async () => {

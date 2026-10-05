@@ -1,0 +1,45 @@
+{
+  "cluster": "${ECS_CLUSTER}",
+  "serviceName": "ipa-clamav",
+  "taskDefinition": "ipa-clamav",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "1.4.0",
+  "deploymentConfiguration": {
+    "minimumHealthyPercent": 100,
+    "maximumPercent": 200,
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    }
+  },
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "${SCANNER_SUBNET_A}",
+        "${SCANNER_SUBNET_B}"
+      ],
+      "securityGroups": [
+        "${CLAMAV_SECURITY_GROUP_ID}"
+      ],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "serviceRegistries": [
+    {
+      "registryArn": "${CLAMAV_CLOUD_MAP_SERVICE_ARN}"
+    }
+  ],
+  "enableExecuteCommand": false,
+  "propagateTags": "SERVICE",
+  "tags": [
+    {
+      "key": "project",
+      "value": "insurance-partners"
+    },
+    {
+      "key": "component",
+      "value": "clamav"
+    }
+  ]
+}

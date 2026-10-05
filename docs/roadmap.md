@@ -8,8 +8,8 @@ godkendt 2026-10-03 (B-018). 8B — Produktionsgrundlag: **specifikationen er go
 `docs/08b-production-foundation.md`). **Deltrin 8B-I1 (evalueringsframework og gates) er
 gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemført og godkendt,
 8B-I2.5 (ekstern AI-datagrænse), 8B-I3 (workerens databaseidentitet og databasefunktioner) og
-8B-I4 (workerens runtime) er gennemført og godkendt, og 8B-I5 (upload-sikkerhed, karantæne og
-malware-scanning) er implementeret og afventer godkendelse.** Resten af 8B
+8B-I4 (workerens runtime) og 8B-I5 (upload-sikkerhed, karantæne og malware-scanning) er
+gennemført og godkendt, og 8B-I5.5 (scanner-isolation og signaturforsyning) er gennemført.** Resten af 8B
 implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
@@ -45,7 +45,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3 og 8B-I4 gennemført, 8B-I5 implementeret (afventer godkendelse), resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5 og 8B-I5.5 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -412,16 +412,25 @@ godkendelse.
   - **Kendt flaky-test-observation:** én isoleret AI Gateway-testfejl i den fulde kørsel ved I4.
     Fejler samme test igen i et senere deltrin, undersøges årsagen før pilot/produktion. Ved I5
     bestod den fulde suite (se `docs/08b` §21.6).
-- **8B-I5 — upload-sikkerhed, karantæne og malware-scanning: ✅ implementeret 2026-10-05, afventer godkendelse.**
+- **8B-I5 — upload-sikkerhed, karantæne og malware-scanning: ✅ gennemført og godkendt 2026-10-06 (endeligt lukket med I5.5).**
   - Uploads lander i `knowledge-intake` (karantæne). Kun frigivne filer ligger i
     `knowledge-originals`; afviste i `knowledge-quarantine`.
-  - Byteniveau-validering → ClamAV (sidecar) → strukturinspektion i en isoleret børneproces.
+  - Byteniveau-validering → ClamAV (egen service, I5.5) → strukturinspektion i en isoleret børneproces.
     Verdict afledes i databasen og er bundet til version, sti, checksum og politikversion.
   - Release-gate i databasen før download og før parsing. Ingen bytes når pdfjs, chunker eller
     embedder før `safe`.
   - Detaljer i `docs/08b` §21.6 og B-026.
-  - **Åbne punkter [AFKLARES]:** CI-pipeline og spejl til signaturimaget; sidecaren deler
-    taskrollen og taskens udgående trafik (B-026) — alternativet er en separat ClamAV-task.
+- **8B-I5.5 — scanner-isolation og signaturforsyning: ✅ gennemført 2026-10-06.**
+  - ClamAV er en separat ECS-service uden taskrolle og uden internet. Kun workerens SG når den på
+    TCP 3310 via Cloud Map (`clamav.ipa-worker.internal`).
+  - Et planlagt signaturimage hver 6. time med verifikation og uforanderligt tag lig
+    scanner-revisionen, som også står på hvert verdict.
+  - Fejlet opdatering: den gamle scanner bliver, alarmer udløses, og 24-timersgrænsen stopper
+    `safe`.
+  - Detaljer i `docs/08b` §21.7 og B-027. De to [AFKLARES]-punkter fra I5 (sidecar/taskrolle og
+    signaturforsyning) er lukket.
+  - Deploymentforudsætninger, når kontoen findes: ECR, VPC/subnets/endpoints, Cloud Map, roller,
+    GitHub OIDC og alarmtopic.
 - En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
   evidens kan ikke blive production.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af

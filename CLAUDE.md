@@ -13,10 +13,11 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 8C — Copilot klar til brug (B-019). Specifikationen for 8B er godkendt og låst 2026-10-03
 (`docs/08b-production-foundation.md`, B-020). 8B implementeres i deltrin, som hver kræver
 eksplicit godkendelse. Deltrin 8B-I1 (evalueringsframework og gates), 8B-I2 (production
-embedding og reranking, ikke koblet på appen), 8B-I2.5 (ekstern AI-datagrænse) og 8B-I3
-(workerens databaseidentitet og databasefunktioner) og 8B-I4 (workerens runtime) er gennemført og
-godkendt. Deltrin 8B-I5 (upload-sikkerhed, karantæne og malware-scanning) er implementeret og
-afventer godkendelse. Resten af 8B er ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
+embedding og reranking, ikke koblet på appen), 8B-I2.5 (ekstern AI-datagrænse), 8B-I3
+(workerens databaseidentitet og databasefunktioner), 8B-I4 (workerens runtime) og 8B-I5
+(upload-sikkerhed, karantæne og malware-scanning) er gennemført og godkendt. 8B-I5.5
+(scanner-isolation og signaturforsyning), som lukker I5 endeligt, er gennemført. Resten af 8B er
+ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -91,7 +92,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3 og 8B-I4 gennemført, 8B-I5 implementeret (afventer godkendelse), resten ikke påbegyndt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5 og 8B-I5.5 gennemført, resten ikke påbegyndt |
 | 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |

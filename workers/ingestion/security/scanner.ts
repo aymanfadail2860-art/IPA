@@ -3,8 +3,9 @@ import { connect } from "node:net";
 import type { RuntimeEnv } from "../../../src/lib/knowledge/core/grade.ts";
 
 /**
- * Malware scanning (docs/08b §7.2, §21.6): ClamAV's clamd, running as a sidecar container in the
- * same Fargate task, spoken to over TCP on 127.0.0.1:3310 with the clamd protocol:
+ * Malware scanning (docs/08b §7.2, §21.6–21.7): ClamAV's clamd, running as its own ECS service
+ * (8B-I5.5), spoken to over the private network (clamav.ipa-worker.internal:3310) with the
+ * clamd protocol:
  *
  *   zVERSION\0              → "ClamAV <engine>/<signature version>/<signature date>"
  *   zINSTREAM\0 + chunks     → "stream: OK" | "stream: <signature> FOUND" | "… ERROR"
@@ -29,6 +30,8 @@ export interface MalwareScanner {
 }
 
 const CHUNK = 64 * 1024;
+/** The service cannot be reached: refused, no DNS answer (also temporarily), no route, reset. */
+const UNAVAILABLE = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNRESET", "ETIMEDOUT"]);
 const SIGNATURE_NAME = /^[A-Za-z0-9._:/-]{1,120}$/;
 
 /** "ClamAV 1.4.1/27420/Sun Oct  5 08:20:00 2026" (UTC in the container). */
@@ -69,7 +72,7 @@ function exchange(host: string, port: number, send: (write: (data: Uint8Array) =
     });
     socket.on("end", () => finish(reply ? { reply } : { error: "invalid_response" }));
     socket.on("error", (error: NodeJS.ErrnoException) =>
-      finish({ error: done ? "scanner_error" : error.code === "ECONNREFUSED" || error.code === "ENOTFOUND" || error.code === "EHOSTUNREACH" ? "scanner_unavailable" : "scanner_error" }),
+      finish({ error: UNAVAILABLE.has(error.code ?? "") ? "scanner_unavailable" : "scanner_error" }),
     );
   });
 }

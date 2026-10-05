@@ -21,7 +21,7 @@ import { clamdScanner, developmentFixtureScanner, type MalwareScanner } from "./
  *
  * Production: postgres.js through Supavisor (transaction mode, TLS) as the active blue/green
  * login role, originals through one-time storage tickets. The service-role key is refused.
- * Every upload is examined in quarantine first (scan jobs: structure, ClamAV in the sidecar,
+ * Every upload is examined in quarantine first (scan jobs: structure, the ClamAV service,
  * PDF security); processing passes the database's release gate (8B-I5).
  *
  * Local/test: the same path against the local database, or the development-only service-role
@@ -97,7 +97,7 @@ for (const model of models) {
   }
 }
 
-// The scanner's state at startup (not fatal: the sidecar may still be loading signatures —
+// The scanner's state at startup (not fatal: the scanner service may be redeploying —
 // every scan checks again and fails closed).
 const info = await scanner.info();
 log(

@@ -10,6 +10,50 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-027 — ClamAV som separat service uden taskrolle, Cloud Map-endpoint og planlagt signaturimage (8B-I5.5)
+
+**Dato:** 6. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.7, `deploy/clamav/`, `deploy/ingestion-worker/`,
+`.github/workflows/clamav-signatures.yml`, `scripts/verify-clamav-scanner.ts`, `workers/ingestion/config.ts`,
+`supabase/migrations/20261006000100_scanner_revision.sql`, `docs/07` (konsistensrettelse)
+
+**Beslutning:**
+- **ClamAV kører som egen ECS-service** (`ipa-clamav`), ikke som sidecar. Den har ingen
+  taskrolle, ingen secrets, intet miljø, ingen offentlig IP, ingen ECS Exec og ingen
+  internetadgang. Execution-rollen (ECS' egen) kan kun hente scanner-imaget og skrive dets logs.
+- **Netværk:** kun workerens security group må forbinde, og kun på TCP 3310. Udgående trafik
+  går kun via HTTPS til VPC-endpoints for ECR, logs og S3.
+- **Service discovery:** Cloud Map med privat DNS `clamav.ipa-worker.internal`, hvor kun sunde
+  tasks registreres. Workeren accepterer i produktion kun dette faste endpoint.
+- **Signaturforsyning:** et planlagt workflow hver 6. time. Det bygger imaget med officielle
+  signaturer (pinned ClamAV 1.4.3) og verificerer kandidaten: frisk (højst 8 t), EICAR findes, en
+  ren fil er ren. Derefter pushes det med et uforanderligt tag lig scanner-revisionen, og der
+  udrulles med digest. Den kørende scanner henter intet.
+- **Fejlet opdatering:** den gamle scanner bliver, alarmerne udløses (workflow,
+  `SERVICE_DEPLOYMENT_FAILED`, signaturalder over 18 t, tekniske scanfejl), og 24-timersgrænsen
+  stopper `safe` af sig selv. Der findes intet flag til at ignorere forældede signaturer.
+- **Sporbarhed:** `security_verdicts.scanner_revision` afledes af engine og signaturversion og er
+  lig med ECR-tagget.
+- **`docs/07`** er rettet snævert, så upload/storage-flowet viser intake → sikkerhedskontrol →
+  originals. Fase 7 er ikke genåbnet.
+
+**Overvejede alternativer:**
+- *Sidecar (B-026).* Fravalgt: en ECS-taskrolle gælder hele tasken.
+- *ECS Service Connect.* Fravalgt: proxy-container i begge tasks.
+- *Intern NLB.* Fravalgt: flere dele og omkostninger uden ny sikkerhed.
+- *freshclam i den kørende container, også via et privat spejl.* Fravalgt: kræver udgående
+  trafik fra den komponent, der parser fjendtligt input.
+- *Opdatering hver 12. time.* Fravalgt: én mislykket kørsel kunne efterlade over 24 timer gamle
+  signaturer. Seks timer tåler én fejl.
+- *Scanner-revision fra workerens miljø.* Fravalgt: workeren og scanneren udrulles uafhængigt.
+  Revisionen afledes i stedet af det, scanneren selv rapporterer.
+
+**Begrundelse:** Den komponent, der læser fjendtlige filer, har nu ingen AWS-credentials og ingen
+vej ud. Signaturernes friskhed sikres af en kontrolleret pipeline og håndhæves stadig af
+24-timersgrænsen i worker og database.
+
+---
+
 ## B-026 — Upload-sikkerhed: karantæne-bucket, verdict afledt i databasen, checksum-binding og ClamAV som sidecar (8B-I5)
 
 **Dato:** 5. oktober 2026
@@ -49,8 +93,8 @@ er ikke omskrevet, fordi loggen er historik.
   ville gå over VPC-netværket (clamd har ingen TLS), og du angav sidecar. **Åben konflikt:** en
   ECS-taskrolle gælder hele tasken, så sidecaren deler workerens taskrolle (i dag kun
   `bedrock:InvokeModel` på Embed v4) og taskens udgående 443. Kravet "ingen unødvendige
-  task-rolle-rettigheder" kan derfor ikke opfyldes fuldt med en sidecar. Afgøres før produktion
-  [AFKLARES].
+  task-rolle-rettigheder" kan derfor ikke opfyldes fuldt med en sidecar. **Løst i B-027:** ClamAV
+  er flyttet til en separat service uden taskrolle.
 
 **Begrundelse:** En fil når kun parser, chunker og embedder, hvis databasen har frigivet netop de
 bytes, der blev scannet, under den aktive politik. Hver beslutning, der kan gøre en fil sikker,

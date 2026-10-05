@@ -1,0 +1,29 @@
+{
+  "GroupName": "ipa-clamav",
+  "Description": "ClamAV service: only the ingestion worker may connect (TCP 3310); no internet egress",
+  "Ingress": [
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 3310,
+      "ToPort": 3310,
+      "SourceSecurityGroupId": "${WORKER_SECURITY_GROUP_ID}",
+      "Description": "clamd from the ingestion worker's security group only"
+    }
+  ],
+  "Egress": [
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 443,
+      "ToPort": 443,
+      "DestinationSecurityGroupId": "${VPC_ENDPOINT_SECURITY_GROUP_ID}",
+      "Description": "ECR api/dkr and CloudWatch Logs interface endpoints (image pull and logs by the Fargate agent)"
+    },
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 443,
+      "ToPort": 443,
+      "DestinationPrefixListId": "${S3_GATEWAY_PREFIX_LIST_ID}",
+      "Description": "S3 gateway endpoint (ECR image layers)"
+    }
+  ]
+}

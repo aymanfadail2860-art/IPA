@@ -6,7 +6,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(115);
+select plan(117);
 
 -- Kun testens jobs er klar.
 update knowledge.ingestion_jobs set next_attempt_at = now() + interval '1 day' where status = 'queued';
@@ -227,6 +227,11 @@ select is(knowledge.security_block_reason(pg_temp.v(1), null), 'not_released', '
 select is((select final_verdict || '/' || scanner_engine || '/' || signature_version || '/' || policy_version || '/' || checksum_sha256
            from knowledge.security_verdicts where document_version_id = pg_temp.v(1)),
   'safe/ClamAV/27790/pdf-v1/' || pg_temp.sha(1), 'verdict registrerer scanner, signaturversion, politik og checksum');
+-- 8B-I5.5: scanner-revisionen (ECR-tagget) afledes af verdictets egne felter og kan ikke sættes.
+select is((select scanner_revision from knowledge.security_verdicts where document_version_id = pg_temp.v(1)), 'ipa-clamav:1.4.3-27790',
+  'verdict kan spores til scanner-revisionen (ipa-clamav:<engine>-<signaturversion>)');
+select throws_ok($$ update knowledge.security_verdicts set scanner_revision = 'ipa-clamav:falsk' $$, '428C9', null,
+  'scanner-revisionen kan ikke sættes — den afledes');
 
 do $$ begin perform set_config('t.rel1', pg_temp.ticket(1, 'release_original'), true); end $$;
 select throws_ok($$ select pg_temp.ticket(1, 'release_original') $$, '55006', null,

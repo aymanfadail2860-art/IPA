@@ -19,7 +19,7 @@ import { examineOriginal } from "./security/scan.ts";
  *
  * Nothing in this job parses the document for ingestion, chunks or embeds: pdfjs, the chunker
  * and the embedders are not reachable from here (architecture test). The bytes never leave the
- * process except to the ClamAV sidecar and the inspection child process, and are never logged.
+ * process except to the ClamAV service and the inspection child process, and are never logged.
  */
 
 const TECHNICAL_FAILURE = "Sikkerhedsscanningen kunne ikke gennemføres. Der forsøges igen automatisk.";
@@ -69,7 +69,19 @@ export async function runScanJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
     }
     const measurements = await step("security_examination", () => examineOriginal(bytes, context, deps.scan!));
     const recorded = await step("security_verdict", () => db.recordSecurityVerdict(job.job_id, measurements));
-    log({ job: job.job_id, version: job.version_id, step: "security_verdict", final: recorded.final, failure_code: recorded.failure_code, verdict: recorded.verdict_id });
+    // The scanner's identity and the signature age go to the log for the alarms (deploy/clamav/alarms.json).
+    const signatureTime = measurements.scanner.signature_time ? Date.parse(measurements.scanner.signature_time) : NaN;
+    log({
+      job: job.job_id,
+      version: job.version_id,
+      step: "security_verdict",
+      final: recorded.final,
+      failure_code: recorded.failure_code,
+      verdict: recorded.verdict_id,
+      scanner_version: measurements.scanner.engine_version,
+      signature_version: measurements.scanner.signature_version,
+      ...(Number.isFinite(signatureTime) ? { signature_age_s: Math.round((Date.now() - signatureTime) / 1000) } : {}),
+    });
 
     if (recorded.next === "release") {
       const moved = await step("release", () => deps.originals.move(job, "release_original"));

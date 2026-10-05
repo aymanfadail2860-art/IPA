@@ -5,7 +5,7 @@
   ],
   "networkMode": "awsvpc",
   "cpu": "1024",
-  "memory": "4096",
+  "memory": "2048",
   "runtimePlatform": {
     "cpuArchitecture": "X86_64",
     "operatingSystemFamily": "LINUX"
@@ -18,9 +18,6 @@
   "volumes": [
     {
       "name": "tmp"
-    },
-    {
-      "name": "clamav-tmp"
     }
   ],
   "containerDefinitions": [
@@ -94,7 +91,7 @@
         },
         {
           "name": "IPA_CLAMD_HOST",
-          "value": "127.0.0.1"
+          "value": "clamav.ipa-worker.internal"
         },
         {
           "name": "IPA_CLAMD_PORT",
@@ -134,62 +131,6 @@
           "awslogs-stream-prefix": "worker",
           "mode": "non-blocking",
           "max-buffer-size": "4m"
-        }
-      },
-      "memory": 2048,
-      "dependsOn": [
-        {
-          "containerName": "clamav",
-          "condition": "HEALTHY"
-        }
-      ]
-    },
-    {
-      "name": "clamav",
-      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/ipa-clamav:${CLAMAV_IMAGE_TAG}",
-      "essential": true,
-      "memory": 2048,
-      "user": "10001:10001",
-      "readonlyRootFilesystem": true,
-      "privileged": false,
-      "linuxParameters": {
-        "initProcessEnabled": true,
-        "capabilities": {
-          "drop": [
-            "ALL"
-          ]
-        }
-      },
-      "stopTimeout": 30,
-      "mountPoints": [
-        {
-          "sourceVolume": "clamav-tmp",
-          "containerPath": "/tmp",
-          "readOnly": false
-        }
-      ],
-      "environment": [],
-      "healthCheck": {
-        "command": [
-          "CMD",
-          "clamdscan",
-          "--config-file=/etc/clamav/clamd.conf",
-          "--ping",
-          "1"
-        ],
-        "interval": 15,
-        "timeout": 5,
-        "retries": 3,
-        "startPeriod": 120
-      },
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ipa/ingestion-worker",
-          "awslogs-region": "eu-central-1",
-          "awslogs-stream-prefix": "clamav",
-          "mode": "non-blocking",
-          "max-buffer-size": "1m"
         }
       }
     }

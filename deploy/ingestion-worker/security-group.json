@@ -1,9 +1,28 @@
 {
   "GroupName": "ipa-ingestion-worker",
-  "Description": "Ingestion worker tasks: no inbound traffic; outbound only HTTPS and Supavisor transaction mode",
+  "Description": "Ingestion worker tasks: no inbound traffic; outbound only HTTPS, Supavisor transaction mode and the ClamAV service",
   "Ingress": [],
   "Egress": [
-    { "IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "0.0.0.0/0", "Description": "HTTPS: Edge Function worker-storage, Bedrock, ECR, CloudWatch Logs, Secrets Manager (via NAT or VPC endpoints)" },
-    { "IpProtocol": "tcp", "FromPort": 6543, "ToPort": 6543, "CidrIp": "0.0.0.0/0", "Description": "Supavisor transaction mode (Supabase Postgres); the pooler only accepts the NAT IP (Network Restrictions)" }
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 443,
+      "ToPort": 443,
+      "CidrIp": "0.0.0.0/0",
+      "Description": "HTTPS: Edge Function worker-storage, Bedrock, ECR, CloudWatch Logs, Secrets Manager (via NAT or VPC endpoints)"
+    },
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 6543,
+      "ToPort": 6543,
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Supavisor transaction mode (Supabase Postgres); the pooler only accepts the NAT IP (Network Restrictions)"
+    },
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 3310,
+      "ToPort": 3310,
+      "SourceSecurityGroupId": "${CLAMAV_SECURITY_GROUP_ID}",
+      "Description": "clamd on the ClamAV service (8B-I5.5); only this security group, never a CIDR"
+    }
   ]
 }

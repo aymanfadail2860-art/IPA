@@ -53,6 +53,8 @@ kildebærende tekstuddrag. Hvordan en AI-model bruger evidensen, bygges i en sen
 
 Der ændres ikke i nogen tabel eller funktion fra fase 6. Fase 7 tilføjer skemaet `knowledge`,
 udvidelserne `vector` (pgvector) og `btree_gist` samt Storage-bucket'en `knowledge-originals`.
+Fra 8B-I5 er der yderligere to private buckets: `knowledge-intake` (karantæne for nye uploads)
+og `knowledge-quarantine` (afviste filer). *Sikkerhedsstramning implementeret i 8B-I5 (`docs/08b` §21.6–21.7, `docs/decisions.md` B-026 og B-027). Fase 7 er ikke genåbnet, og princippet om menneskelig godkendelse og publicering er uændret.*
 
 ### 1.2 Entiteter i skemaet `knowledge`
 
@@ -458,6 +460,11 @@ her, så den ikke forveksles i koden (§17, B-09).
   serveren udsteder efter permission-tjek. Store PDF'er passerer derfor ikke gennem en
   Vercel-funktion. Derefter registrerer en server action versionen, og jobbet oprettes i samme
   transaktion.
+  - **Fra 8B-I5:** upload → `knowledge-intake` (karantæne, kan ikke læses) → sikkerhedskontrol
+    (scan-job: filvalidering, ClamAV, PDF-inspektion) → `knowledge-originals` efter godkendt
+    frigivelse → behandlingsjob (trin 1–10 nedenfor). En afvist fil flyttes til
+    `knowledge-quarantine` og behandles aldrig. Det første job er derfor scan-jobbet;
+    behandlingsjobbet oprettes ved frigivelsen. *Sikkerhedsstramning implementeret i 8B-I5 (`docs/08b` §21.6–21.7, `docs/decisions.md` B-026 og B-027). Fase 7 er ikke genåbnet, og princippet om menneskelig godkendelse og publicering er uændret.*
 
 ### 5.2 Trin
 
@@ -922,9 +929,9 @@ fil → checksum → godkender) ligger i selve datamodellen, ikke i audit.
 | **Team-scopes** | Kun teammedlemskab tæller (§4.3). Lederscope giver ingen vidensadgang |
 | **Admin-permissions** | `write`: forvaltning; `publish`: faglig autoritet; `system.settings.manage`: embedding-model. Administrator-rollen giver ingen genvej ud over de permissions, den faktisk har |
 | **Server-side** | `authorize()` i hver side og server action, RLS som andet lag, retrieval kun server-side (`server-only`). Guardrail-tests sikrer, at `src/lib/knowledge/retrieval*` aldrig importeres i klientkomponenter |
-| **Storage** | Privat bucket `knowledge-originals` (aldrig public). Stien er `{document_id}/{version_id}/original.pdf`, aldrig brugerens filnavn. Bucket-grænser: `allowed_mime_types = application/pdf`, filstørrelsesgrænse (fx 50 MiB, konfiguration). Storage-RLS: upload kun med `write`, læsning kun med `write`/`publish` |
+| **Storage** | Privat bucket `knowledge-originals` (aldrig public). Stien er `{document_id}/{version_id}/original.pdf`, aldrig brugerens filnavn. Bucket-grænser: `allowed_mime_types = application/pdf`, filstørrelsesgrænse (fx 50 MiB, konfiguration). Storage-RLS: upload kun med `write`, læsning kun med `write`/`publish`. **Fra 8B-I5:** upload kun til `knowledge-intake` (ingen læsning for nogen); `knowledge-originals` rummer kun frigivne filer og kan kun læses for frigivne versioner; ingen klient-upload dertil. Afviste filer ligger i `knowledge-quarantine` uden politikker. *Sikkerhedsstramning implementeret i 8B-I5 (`docs/08b` §21.6–21.7, `docs/decisions.md` B-026 og B-027). Fase 7 er ikke genåbnet, og princippet om menneskelig godkendelse og publicering er uændret.* |
 | **Signerede URL'er** | Upload-URL'er og download-URL'er udstedes af serveren efter permission-tjek og har kort levetid (fx 60 sek.). Download auditeres |
-| **Upload-validering** | Klientvalidering er kun for brugeroplevelsen. Workeren validerer magic bytes, MIME, størrelse, sidetal, kryptering og checksum. PDF-indhold eksekveres aldrig: tekstudtræk kører uden scripts, og indlejrede filer ignoreres. Virusscanning **[AFKLARES]** (§17, B-26) |
+| **Upload-validering** | Klientvalidering er kun for brugeroplevelsen. Workeren validerer magic bytes, MIME, størrelse, sidetal, kryptering og checksum. PDF-indhold eksekveres aldrig: tekstudtræk kører uden scripts, og indlejrede filer ignoreres. Virusscanning: afgjort i 8B-I5 — ClamAV som egen tjeneste, filvalidering og afvisning af aktivt indhold, før nogen parser ser filen (`docs/08b` §21.6–21.7). *Sikkerhedsstramning implementeret i 8B-I5 (`docs/08b` §21.6–21.7, `docs/decisions.md` B-026 og B-027). Fase 7 er ikke genåbnet, og princippet om menneskelig godkendelse og publicering er uændret.* |
 | **Secrets** | Service-role-nøglen: se §14.1. Nøglen til embedding-udbyderen er en server-secret i app og worker, aldrig med `NEXT_PUBLIC_`-prefix. `.env.example` får tomme pladsholdere. Ingen nøgler i repoet |
 | **Fejlbeskeder** | Et dokument, man ikke har adgang til, svarer som "findes ikke". Eksistens lækkes ikke. Den eneste undtagelse er den neutrale konfliktindikator i §11.4, som ikke identificerer kilden (B-20) |
 | **Misbrug** | Forespørgselslængde begrænses. Rate limiting hører til AI Gateway (`docs/03` §9) og kommer med den |
@@ -1049,7 +1056,7 @@ server-side.
 | # | Beslutning | Hvornår |
 |---|------------|---------|
 | B-25 | Oprydning af embeddings fra udfasede modeller | Ved første modelskifte |
-| B-26 | Virusscanning af uploads | Før rigtige dokumenter |
+| B-26 | Virusscanning af uploads | ✅ Afgjort i 8B-I5/I5.5 (`docs/08b` §21.6–21.7) |
 | B-27 | Tilstanden "hvad vidste systemet på tidspunkt T" i retrieval | Når Advise/audit kræver det |
 | B-28 | Produktkatalog og kategoritaksonomi. Fase 7 har `category` som nullable fritekst og blokeres ikke | Når produktkataloget fastlægges i en senere fase |
 | B-29 | Evalueringssæt med rigtige dokumenter (`docs/03` §13) | Før AI-moduler tages i brug |
@@ -1305,7 +1312,7 @@ brugerfladen for tilstanden kan ses og bygges. Værktøjet:
 
 ### 20.6 Ikke afgjort (videreført til 8B — Produktionsgrundlag)
 
-- Virusscanning af uploads **[AFKLARES]** (B-26).
+- Virusscanning af uploads (B-26) — ✅ afgjort i 8B-I5/I5.5 (`docs/08b` §21.6–21.7).
 - Workerens adgang er development-only (§14.1, B-16).
 - Embedding- og reranking-udbyder er ikke valgt (§17.4).
 - Validering af retrieval-tallene med et evalueringssæt (§20.4, B-008).

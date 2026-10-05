@@ -1,0 +1,57 @@
+{
+  "MetricFilters": [
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-scanner-signature-age",
+      "filterPattern": "{ $.step = \"security_verdict\" && $.signature_age_s > 0 }",
+      "metricTransformations": [{ "metricName": "ScannerSignatureAgeSeconds", "metricNamespace": "IPA/Scanner", "metricValue": "$.signature_age_s" }]
+    },
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-scanner-technical-failures",
+      "filterPattern": "{ $.step = \"security_verdict\" && $.final = \"scan_failed\" }",
+      "metricTransformations": [{ "metricName": "ScannerTechnicalFailures", "metricNamespace": "IPA/Scanner", "metricValue": "1", "defaultValue": 0 }]
+    }
+  ],
+  "Alarms": [
+    {
+      "AlarmName": "ipa-scanner-signatures-ageing",
+      "AlarmDescription": "ClamAV signatures older than 18 h: the scheduled refresh has failed at least twice. At 24 h no file can be released.",
+      "Namespace": "IPA/Scanner",
+      "MetricName": "ScannerSignatureAgeSeconds",
+      "Statistic": "Maximum",
+      "Period": 900,
+      "EvaluationPeriods": 1,
+      "Threshold": 64800,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "TreatMissingData": "notBreaching",
+      "AlarmActions": ["${ALARM_TOPIC_ARN}"]
+    },
+    {
+      "AlarmName": "ipa-scanner-technical-failures",
+      "AlarmDescription": "Scans end as technical failures (scanner unavailable, timeout, stale or unknown signatures). Nothing is released while this lasts.",
+      "Namespace": "IPA/Scanner",
+      "MetricName": "ScannerTechnicalFailures",
+      "Statistic": "Sum",
+      "Period": 900,
+      "EvaluationPeriods": 1,
+      "Threshold": 0,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "TreatMissingData": "notBreaching",
+      "AlarmActions": ["${ALARM_TOPIC_ARN}"]
+    }
+  ],
+  "EventRules": [
+    {
+      "Name": "ipa-clamav-deployment-failed",
+      "Description": "A new scanner revision did not become healthy; ECS rolled back to the running scanner.",
+      "EventPattern": {
+        "source": ["aws.ecs"],
+        "detail-type": ["ECS Deployment State Change"],
+        "resources": ["arn:aws:ecs:eu-central-1:${AWS_ACCOUNT_ID}:service/${ECS_CLUSTER}/ipa-clamav"],
+        "detail": { "eventName": ["SERVICE_DEPLOYMENT_FAILED"] }
+      },
+      "Targets": [{ "Id": "alarm-topic", "Arn": "${ALARM_TOPIC_ARN}" }]
+    }
+  ]
+}
