@@ -320,14 +320,18 @@ describe("IAM (8B-I4)", () => {
 });
 
 describe("boundaries that I4 must not move", () => {
-  it("Bedrock is still not registered in the application's retrieval registry", () => {
+  it("Bedrock is not in the fail-closed registry; the application reaches it only through the configuration in service (8B-I6)", () => {
     const registry = stripComments(read("src/lib/knowledge/core/registry.ts"));
     expect(registry).not.toMatch(/bedrock|catalog|cohere/i);
     const appFiles = readdirSync(path.join(root, "src"), { recursive: true }).map(String).filter((file) => /\.(ts|tsx)$/.test(file) && !file.startsWith("tests"));
+    const users: string[] = [];
     for (const file of appFiles) {
       if (file.startsWith(path.join("lib", "knowledge", "providers"))) continue;
-      expect(stripComments(read(path.join("src", file))), file).not.toMatch(/providers\/catalog|providers\/bedrock/);
+      const text = stripComments(read(path.join("src", file)));
+      expect(text, file).not.toMatch(/providers\/catalog|providers\/bedrock/);
+      if (/providers\/configured/.test(text)) users.push(file.split(path.sep).join("/"));
     }
+    expect(users.sort()).toEqual(["lib/knowledge/retrieval-availability.ts", "lib/knowledge/retrieval.ts"]);
   });
 
   it("the Edge Function receives only the ticket and returns no credential", () => {

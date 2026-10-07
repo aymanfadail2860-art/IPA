@@ -1216,8 +1216,9 @@ implementeret.**
 | **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-025). Gaten blev erstattet af I5's release-gate |
 | **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), fuldt lukket med 8B-I5.5 og 8B-I5.6 |
 | **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført og godkendt 2026-10-06 (B-027) |
-| **8B-I5.6** | ClamAV-patchversion: production på ClamAV 1.4.6 (LTS 1.4), godkendte engine-versioner i databasen, signaturopdatering adskilt fra engine-opgradering (§21.8) | ✅ Gennemført 2026-10-06 (B-028). I5, I5.5 og I5.6 er fuldt lukket |
-| Øvrige | Register og `evaluation_publisher`, P1–P9, evalueringsmiljø, baseline, kundedataspærre, observability, aktivering | Ikke påbegyndt |
+| **8B-I5.6** | ClamAV-patchversion: production på ClamAV 1.4.6 (LTS 1.4), godkendte engine-versioner i databasen, signaturopdatering adskilt fra engine-opgradering (§21.8) | ✅ Gennemført og godkendt 2026-10-07 (B-028). I5, I5.5 og I5.6 er fuldt lukket. Kandidatkørslen mod 1.4.6 er en deploymentforudsætning |
+| **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført 2026-10-07 (B-029). Venter på din godkendelse |
+| Øvrige | Evalueringsmiljø og CI-publicering, baseline, observability og regression (I7), aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -2309,4 +2310,158 @@ Den ældre version trækkes tilbage (`revoked_at`), når den nye kører. Intet e
 **Base-digest:** det officielle `clamav/clamav:1.4.6_base` (indeks-digest
 `sha256:90effb79…`) blev slået op i registret 2026-10-06. Kandidat-workflowet (B) køres mod
 1.4.6, før den første production-bygning udrulles. Det kræver kontoen (deploymentforudsætning).
+
+### 21.9 8B-I6 — Register over retrieval-konfigurationer og ProductionEvidenceSet
+
+**Leveret (B-029):** migrationen `20261007000100_retrieval_configuration_registry.sql`, evidensmodellen
+schemaVersion 2 med P1–P9 og publisheren i `evals/engine/publication.ts`.
+
+**Registret (§10.1):**
+
+- `knowledge.retrieval_configurations`. Det fingeraftrykte materiale (`material`) er den eneste
+  definerende kilde. Embedding-udbyder, model, versionsetiket, dimension, indstillinger og
+  behandlingsprofil, reranker-id og -version, algoritmeversion, parametre og de tilladte
+  chunker-versioner er genererede kolonner af materialet og kan derfor ikke afvige. Desuden:
+  `label` og `version`, `embedding_model_id`, status, godkendelsens kørsel, gate-sæt og tier,
+  samt tidspunkter og aktører for oprettelse, godkendelse, aktivering, suspendering og udfasning.
+- `knowledge.evaluation_runs`: append-only. Gemmer rapport-, resultat-, sæt- og
+  gate-sæt-checksum, erklæret og runtime-fingeraftryk, korpus-checksum, de evaluerede
+  dokumenttyper, rapportformat (`report_schema`) og motorversion, metrics, hårde og
+  kvalitetsgates, minimum pr. type, tier, afgørelse, gyldighed og hele rapporten.
+- `knowledge.evaluation_gate_sets`: registreres af publisheren, godkendes af et menneske og
+  ændres aldrig.
+- `knowledge.retrieval_configuration_transitions`: append-only statushistorik med aktør, kørsel,
+  begrundelse og årsagsnoter.
+- Ingen app-rolle, administrator eller service_role har skriverettigheder. Triggere kræver
+  funktionernes markering, holder materialet uforanderligt, håndhæver tilstandsmaskinen og
+  forbyder sletning og tømning, også for ejeren.
+
+**Tilstandsmaskine:** candidate → approved → active → suspended/retired; suspended → retired;
+suspended og retired → approved (kun med en ny bestået kørsel, registreret efter statusskiftet).
+Et partielt unikt indeks tillader højst én konfiguration i drift (active eller suspended).
+Aktivering sker under en advisory lock i én transaktion, med modelskifte ved behov (§2.5) og
+udfasning af den hidtidige konfiguration.
+
+**evaluation_publisher (D-18):** gruppen `evaluation_publisher` (NOLOGIN, kun EXECUTE på
+`record_evaluation_run` og `register_evaluation_gate_set`) og login-rollen
+`evaluation_publisher_login` (oprettes NOLOGIN uden password; `ops.evaluation_publisher_prepare`,
+`_deactivate`, `_status`, `_set_api`).
+
+`record_evaluation_run` genberegner i SQL og afviser alt, der ikke stemmer:
+- rapportens og resultaternes checksum (kanonisk JSON identisk med TypeScript);
+- begge fingeraftryk fra materialet;
+- metrics fra observationerne, Wilson-intervaller, H1–H7, Q1–Q7 mod det godkendte gate-sæt,
+  minimum pr. type, tier og afgørelse;
+- formatet (`reportSchema` 3), `production.eligible = false`, H7, test-embedder eller `none` og en
+  ukendt embedding-model.
+
+Konfigurationen oprettes som kandidat. En fejlet hård gate for den aktive konfiguration
+suspenderer den i samme transaktion (D-8).
+
+**Menneskelige beslutninger (system.settings.manage):** `approve_evaluation_gate_set`,
+`approve_retrieval_configuration`, `activate_retrieval_configuration`,
+`suspend_retrieval_configuration` og `retire_retrieval_configuration`.
+
+Godkendelse og aktivering efterprøver:
+- kørslen tilhører netop konfigurationen og er dens seneste;
+- fingeraftrykket er identisk;
+- hårde gates og kvalitetsgates er bestået, minimum pr. type er opfyldt, og afgørelsen er
+  `pass`;
+- miljøet er evalueringsmiljøet, og gate-sættet er godkendt;
+- udbyderne er ikke udviklingsimplementeringer, og modellen findes;
+- der er en årsagsnote (mindst 10 tegn) for hver fejl i rapporten;
+- scope og chunker-versioner (se nedenfor).
+
+Ingen ny permission er indført. `activate_embedding_model` kræver nu en godkendt konfiguration
+for modellen (§2.7).
+
+**P1–P9 (§9)** afgøres i `src/lib/knowledge/core/production-conditions.ts` ved hvert
+`issueEvidenceSet`. Graden er aldrig et input.
+
+| | Afgøres af |
+|---|---|
+| P1 | Embedderen er en rigtig production-implementering (runtime-bevis: kun Bedrock-adapterne registrerer sig), dens beskrivelse er den aktive model, og den aktive model er konfigurationens |
+| P2 | Rerankeren er en rigtig production-implementering, ikke `none`, og er konfigurationens |
+| P3 | `knowledge.retrieval_context()`: status `active`, præcis én aktiv, bestået registreret kørsel, godkendt gate-sæt, modellen og de evaluerede dokumenttyper |
+| P4 | Runtime-fingeraftrykket beregnes fra de konstruerede implementeringers beskrivelser, kodens algoritmeversion og de faktisk brugte parametre (inkl. et topK fra requesten). Det skal være identisk med konfigurationens |
+| P5 | Hvert element er publiceret, ikke tilbagetrukket, gyldigt på datoen og for tilstanden, og der er én version pr. dokument |
+| P6 | Konteksten læses med samme klient som søgningen, og databasen melder rollen `authenticated` og en bruger |
+| P7 | Hvert elements `chunkerVersion` (fra `search_chunks`/`evidence_chunks`) er blandt konfigurationens |
+| P8 | Ingen `devOverride`. Sættet er udstedt og frosset |
+| P9 | `retrieval.configuration = { id, fingerprint, algorithmVersion }`, schemaVersion 2, og algoritmeversionen er kodens |
+
+- Et tjek, der ikke kan afgøres, er falsk.
+- `requireProductionEvidence` kræver den registrerede vurdering (WeakMap) med alle ni opfyldt og
+  efterprøver P2, P7, P8 og P9 på sættet.
+- Konteksten læses efter søgningen, så en suspendering eller udskiftning undervejs kun kan sænke
+  graden.
+
+**Udbydere:** `providers/configured.ts` vælger implementeringerne ud fra konfigurationen i drift.
+
+- En kandidat eller en godkendt, men ikke aktiv konfiguration vælger aldrig en udbyder.
+- En suspenderet konfiguration beholder sine udbydere uden fallback. Evidensen bliver
+  `development`, og retrieval kører videre.
+- Uden konfiguration bruges det fail-closed register som før. `IPA_RERANKER` kan ikke vælge
+  Bedrock.
+
+Admin viser konfigurationen og årsagen, når production-evidens er utilgængelig ("Konfigurationen
+er ikke godkendt", suspenderet, scope).
+
+**Udledt (fortolkninger, til din bekræftelse):**
+
+1. **Scope for godkendelsen (pilot-regel 5, §9).** Rapporten (nu `reportSchema` 3) bærer det
+   evaluerede korpus' dokumenttyper fra manifestet. Indeholder det publicerede korpus en anden
+   dokumenttype, afvises aktiveringen, og P3 er ikke opfyldt, indtil der er en ny kørsel.
+   Reglen gælder alle tiers, fordi §9 siger det generelt. Produkter er ikke bundet; det siger
+   specifikationen ikke.
+2. **H6 bedømmer implementeringerne, ikke P1–P9-graden.** En konfiguration under evaluering er
+   per definition ikke aktiv, så dens evidens kan aldrig opfylde P3. I1's H6-tjek af det samlede
+   sæts grad er erstattet af tjek af implementeringernes grad, `devOverride`, model, reranker,
+   fingeraftryk og chunker-version. Det svarer til H6's tekst i §4.4.
+3. **H6 og H7 ved registrering.** H7 afvises altid. H6 kan kun registreres for den aktive
+   konfiguration (som regression, der suspenderer).
+4. **Genaktivering** af en suspenderet eller udfaset konfiguration kræver en ny bestået kørsel,
+   registreret efter statusskiftet, og en ny godkendelse.
+5. **Chunker-versioner i P4:** retrieval chunker ikke selv. Runtime-materialet bruger derfor
+   konfigurationens chunker-sæt, og beviset pr. element er P7 (§9 nævner chunker under P7, ikke
+   P4).
+6. **Den evaluerede kørsel skal være konfigurationens seneste**, så en nyere kørsel ikke kan
+   springes over. Der er ingen tidsbaseret forældelse; specifikationen har ingen.
+
+**Åbent spørgsmål — kræver din beslutning før baseline (§20 trin 5):**
+- Med de låste tærskler (gates-v1) og Wilson-reglen er en pilot på 30–50 spørgsmål altid
+  `uncertain` på Q1, også ved 100 %. 35 af 35 giver et nedre interval på 0,901, under 0,95.
+- Fordi `uncertain` ikke er `pass`, kan en pilot på den størrelse ikke godkendes. Det kræver
+  mindst ca. 73 besvarbare spørgsmål. Den beståede fixture-rapport har 99 spørgsmål (83
+  besvarbare, 16 afvisende).
+- Mulige veje: et større pilotsæt, eller en eksplicit beslutning om, hvordan `uncertain` håndteres
+  for en pilot. Ingen af dem er valgt.
+
+**Tests:**
+
+| Lag | Hvad |
+|---|---|
+| pgTAP | `retrieval_configuration_registry` (117): roller og mindste rettigheder, TypeScript/SQL-lighed, gate-sæt, genberegning og afvisninger, direkte skrivning, godkendelse, aktivering med modelskifte og scope, udskiftning, suspendering, genaktivering, chunker, I5-invarianten |
+| Enhed | `production-evidence` (47): positiv end-to-end-fixture og negativer for hver af P1–P9 samt adversarielle tilfælde. `evaluation-publisher` (14). Opdaterede guardrail-tests |
+| Integration | `retrieval-configuration` (12) mod den lokale database. Publisheren logger ind med egen rolle. Bruger, administrator og service_role kan ikke publicere. Usikker kørsel og manglende årsagsnoter afvises. Godkendelse og aktivering, P1–P9 end to end som indlogget bruger, P4 og P6 negativt, samtidige aktiveringer, suspendering og regression-suspendering samt audit uden dokumenttekst |
+| Mutation | 39/39 fanget: 18 i TypeScript, 19 i SQL og 2 via integration |
+
+**Housekeeping:** testkørsler sætter `IPA_RUNTIME_ENV=test` eksplicit i begge Vitest-konfigurationer.
+En test, der kræver et andet eller manglende miljø, sætter det selv (`fixtures/runtime-env.ts`).
+
+**Ikke implementeret (bevidst):**
+- I7: observability, planlagt regression, rate limiting.
+- 8C og en rigtig Copilot-model.
+- Lagring af EvidenceSet pr. svar.
+
+Publiceringens CI-transport er heller ikke koblet på. Kontrakten og `sqlPublisherConnection`
+findes, men `postgres` må kun bruges i `workers/` (D-19), og evalueringsmiljøet er §20 trin 4.
+
+**Ingen rigtig konfiguration er aktiveret:** ingen AWS, ingen Bedrock og ingen
+produktionsdatabase. Testene opretter en production-grad fixture-konfiguration, som altid ruller
+tilbage eller bliver udfaset.
+
+**Fortsat åbne forudsætninger:** AWS-konto og -ressourcer, VPC/NAT/EIP, kandidatkørsel af ClamAV
+1.4.6, Å-1 (kvoter), Å-2 (databehandleraftaler), et rigtigt pilotsæt (30–50 spørgsmål, se det
+åbne spørgsmål ovenfor) samt Å-3 til Å-6.
 

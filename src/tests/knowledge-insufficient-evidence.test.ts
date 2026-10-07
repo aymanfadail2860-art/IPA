@@ -10,6 +10,7 @@ import { createReranker } from "@/lib/knowledge/core/registry";
 import type { Reranker } from "@/lib/knowledge/core/reranker";
 import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type KnowledgeRpcClient, type SearchRow } from "@/lib/knowledge/retrieval-core";
 import { INSUFFICIENT_TITLE, presentRetrieval } from "@/lib/knowledge/result-presentation";
+import { withRuntimeEnv } from "./fixtures/runtime-env";
 
 /**
  * The most important path of the Knowledge Engine: when there is no adequate documentation,
@@ -57,6 +58,7 @@ function candidate(id: string, text: string): SearchRow {
     lexical_rank: 1,
     lexical_score: 0.01,
     lexical_terms: [],
+    chunker_version: "structure/1",
   };
 }
 
@@ -152,7 +154,7 @@ describe("development tool: force 'insufficient' (B-009) — never a production 
 
   it("is refused when IPA_RUNTIME_ENV is missing, unknown or production (fail-closed)", async () => {
     for (const value of [undefined, "production", "staging"]) {
-      expect(forceInsufficientAllowed(runtimeEnv(value)), String(value)).toBe(false);
+      expect(withRuntimeEnv(value, () => forceInsufficientAllowed(runtimeEnv())), String(value)).toBe(false);
       await expect(
         withEnv(value, () => runRetrieval({ query: "x" }, { db: db([]), embedding: null, reranker: createReranker("none", "test"), devForceInsufficient: true })),
       ).rejects.toMatchObject({ code: "invalid_request" });

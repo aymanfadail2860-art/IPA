@@ -422,9 +422,16 @@ describe("each hard-gate check stands on its own (one breach, one precise explan
     expect((await explanations(excluded, "ex-hist-002", "H3")).some((text) => /ansvar-tillaeg, som facit udelukker/.test(text))).toBe(true);
   });
 
-  it("H6: development grade alone is a breach", async () => {
-    const development = productionDouble(fixture, { transform: (set) => ({ ...set, retrieval: { ...set.retrieval, grade: "development" } }) });
-    expect(await explanations(development, "ex-direct-001", "H6")).toEqual(['Evidensen har graden "development".']);
+  it("H6: a development-grade implementation alone is a breach", async () => {
+    const development = productionDouble(fixture, {
+      transform: (set) => ({ ...set, retrieval: { ...set.retrieval, reranker: { ...set.retrieval.reranker, grade: "development" } } }),
+    });
+    expect(await explanations(development, "ex-direct-001", "H6")).toEqual(['Rerankeren har graden "development".']);
+  });
+
+  it("H6 judges the implementations, not P1–P9: a configuration under evaluation is not active yet (8B-I6)", async () => {
+    const candidate = productionDouble(fixture, { transform: (set) => ({ ...set, retrieval: { ...set.retrieval, grade: "development", unmet: ["P3"] } }) });
+    expect(await explanations(candidate, "ex-direct-001", "H6")).toEqual([]);
   });
 
   it('H6: the "none" reranker is a breach even if it claims to be production and is the declared one', async () => {

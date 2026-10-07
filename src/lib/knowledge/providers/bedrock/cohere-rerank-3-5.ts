@@ -1,4 +1,5 @@
 import { authorizeEgress, type EgressLog } from "../../../egress/policy.ts";
+import { markProductionImplementation } from "../../core/production-implementation.ts";
 import { ProviderError, withRetry, type RerankingProviderDescriptor, type RetryDeps, type RetryPolicy } from "../../core/provider.ts";
 import type { RerankInput, RerankOutput, RerankingProvider } from "../../core/reranker.ts";
 
@@ -87,7 +88,8 @@ export function createCohereRerank35(options: CohereRerank35Options): RerankingP
   }
   const retry = options.retry ?? RERANK_RETRY_POLICY;
 
-  return Object.freeze({
+  // Recorded as a production implementation only when its descriptor is production (P1/P2).
+  const implementation = Object.freeze({
     id: descriptor.id,
     version: descriptor.version,
     grade: descriptor.grade,
@@ -145,4 +147,5 @@ export function createCohereRerank35(options: CohereRerank35Options): RerankingP
       };
     },
   });
+  return descriptor.grade === "production" ? markProductionImplementation(implementation) : implementation;
 }

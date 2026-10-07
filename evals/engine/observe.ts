@@ -255,7 +255,11 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
 export function developmentEvidence(caseId: string, run: RetrievalRun, configuration: ConfigurationInput): Violation[] {
   const reasons: string[] = [];
   const retrieval = run.set.retrieval;
-  if (retrieval.grade !== "production") reasons.push(`Evidensen har graden "${retrieval.grade}".`);
+  // H6 judges the IMPLEMENTATIONS, not the set's P1–P9 grade (8B-I6): a configuration under
+  // evaluation is by definition not yet active, so its evidence can never meet P3 — the grade
+  // would make every evaluation fail. Development implementations, devOverride, another
+  // embedding model or reranker, the runtime fingerprint (runner.ts) and chunker versions are
+  // all checked here.
   if (retrieval.devOverride) reasons.push("Evidensen er fremtvunget af et udviklingsværktøj.");
   if (retrieval.reranker.id === "none") reasons.push('Rerankeren er "none".');
   if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);

@@ -63,6 +63,7 @@ function row(overrides: Partial<SearchRow> & Pick<SearchRow, "chunk_id">): Searc
     lexical_rank: null,
     lexical_score: null,
     lexical_terms: [],
+    chunker_version: "structure/1",
     ...overrides,
   };
 }
@@ -235,7 +236,8 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
       { query: " gradvis forurening ", mode: "as_of", asOf: "2024-06-01", productIds: [PRODUCT], documentTypes: ["terms"] },
       deps(db),
     );
-    expect(calls).toHaveLength(1);
+    // The search, then the retrieval context read with the same client (8B-I6, P1–P9).
+    expect(calls.map((call) => call.fn)).toEqual(["search_chunks", "retrieval_context"]);
     const { fn, args } = calls[0]!;
     expect(fn).toBe("search_chunks");
     expect(args).toMatchObject({
@@ -282,12 +284,15 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
     ]);
     const set = await runRetrieval({ query: "gradvis forurening" }, deps(db));
 
-    expect(set.schemaVersion).toBe(1);
+    expect(set.schemaVersion).toBe(2);
     expect(set.query).toEqual({ text: "gradvis forurening", mode: "current", asOf: "2026-10-01", language: "da", filters: {} });
     expect(set.retrieval).toEqual({
       grade: "development",
       embeddingModel: { id: "test:test-hash-embedder@1", grade: "development" },
       reranker: { id: "none", version: "1", grade: "development" },
+      // No configuration in service (the fake database has none): P1–P9 cannot be established.
+      configuration: null,
+      unmet: ["P1", "P2", "P3", "P4", "P6", "P7", "P9"],
       candidateCount: 2,
       generatedAt: "2026-10-01T08:00:00.000Z",
     });
@@ -297,6 +302,7 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
     expect(first).toMatchObject({
       chunkId: "11111111-0000-4000-8000-000000000001",
       chunkIds: ["11111111-0000-4000-8000-000000000001"],
+      chunkerVersion: "structure/1",
       documentVersionId: VERSION_A,
       product: { id: PRODUCT, name: "Testprodukt Ansvar (fiktiv)" },
       document: { title: "Testbetingelser Ansvar (fiktiv)", type: "terms", versionLabel: "2", language: "da" },

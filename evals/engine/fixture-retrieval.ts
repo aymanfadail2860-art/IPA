@@ -214,6 +214,7 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
         lexical_rank: ranks.lexical_rank ?? null,
         lexical_score: ranks.lexical_score ?? null,
         lexical_terms: ranks.lexical_terms ?? [],
+        chunker_version: FIXTURE_CHUNKER_VERSION,
       };
     };
 

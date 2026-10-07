@@ -187,7 +187,7 @@ describe("a run is not a published result (D-7, D-18)", () => {
     expect(mutate((report) => report.cases[0]!.violations.push({ gate: "H1", caseId: report.cases[0]!.caseId, explanation: "x" }))).toMatch(/hårde gates/);
     expect(mutate((report) => (report.metrics.mrr_at_k.value = 0.99))).toMatch(/Metrikkerne kan ikke genberegnes/);
     expect(mutate((report) => (report.cases[3]!.empty = true))).toMatch(/Metrikkerne kan ikke genberegnes/);
-    expect(mutate((report) => ((report.production as { eligible: boolean }).eligible = true))).toMatch(/aldrig være production-egnet/);
+    expect(mutate((report) => ((report.production as { eligible: boolean }).eligible = true))).toMatch(/aldrig selv erklære sig production-egnet/);
     expect(mutate((report) => (report.tier = "pilot"))).toMatch(/Tier stemmer ikke/);
     const copy = structuredClone(base);
     copy.runId = "00000000-0000-4000-8000-0000000000ff"; // Harmless on its own, but the checksum no longer matches.

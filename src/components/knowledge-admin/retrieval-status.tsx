@@ -22,7 +22,11 @@ export function RetrievalStatus({ availability }: { availability: RetrievalAvail
         <span className="font-medium text-fg-primary">Retrieval er tilgængelig.</span>{" "}
         <span className="text-fg-secondary">
           Reranker: {availability.reranker.id} · embedding-model: {availability.embeddingModel?.label ?? "ingen aktiv model (kun leksikalsk søgning)"}
+          {availability.configuration
+            ? ` · konfiguration: ${availability.configuration.label} v${availability.configuration.version} (${availability.configuration.status === "active" ? "aktiv" : "suspenderet"}${availability.configuration.tier === "pilot" ? ", pilot-godkendelse" : ""}, ${availability.configuration.fingerprint.slice(0, 12)}…)`
+            : " · ingen retrieval-konfiguration i drift"}
         </span>
+        {availability.productionUnavailable ? <span className="block text-fg-secondary">{availability.productionUnavailable}</span> : null}
       </span>
       {availability.grade === "development" ? (
         <StatusBadge status="warning" label="Udviklingsgrad — ikke produktionsevidens" />

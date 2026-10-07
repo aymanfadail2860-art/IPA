@@ -70,7 +70,7 @@ const ROW: SearchRow = {
   heading_path: ["§ 2 Behandlingsskade"], section_number: "2", page_start: 1, page_end: 1, char_start: 0, char_end: 56, overlap_chars: 0,
   version_id: "v", version_label: "1", language: "da", valid_from: "2025-01-01", valid_to: null, approved_at: null, superseded_by: null,
   document_id: "d", document_title: "Testbetingelser (fiktiv)", document_type: "terms", product_id: "p", product_name: "Testprodukt (fiktiv)",
-  source_type: "manual_upload", temporal_status: "current", vector_rank: 1, vector_score: 0.9, lexical_rank: 1, lexical_score: 1, lexical_terms: ["reparation"],
+  source_type: "manual_upload", temporal_status: "current", vector_rank: 1, vector_score: 0.9, lexical_rank: 1, lexical_score: 1, lexical_terms: ["reparation"], chunker_version: "structure/1",
 };
 const db: KnowledgeRpcClient = { rpc: async (fn) => ({ data: fn === "search_chunks" ? [ROW] : [], error: null }) };
 

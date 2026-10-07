@@ -1,6 +1,7 @@
 import type { ClassifiedText } from "../../../egress/classification.ts";
 import { authorizeEgress, type EgressLog } from "../../../egress/policy.ts";
 import { modelLabel, type EmbedOptions, type EmbeddingProvider } from "../../core/embedding.ts";
+import { markProductionImplementation } from "../../core/production-implementation.ts";
 import { ProviderError, withRetry, type EmbeddingProviderDescriptor, type RetryDeps, type RetryPolicy } from "../../core/provider.ts";
 
 import { BEDROCK_PROVIDER, type BedrockTransport } from "./transport.ts";
@@ -134,7 +135,8 @@ export function createCohereEmbedV4(options: CohereEmbedV4Options): EmbeddingPro
   const retry = options.retry ?? EMBED_RETRY_POLICY;
   const id = modelLabel({ provider: descriptor.provider, model_name: descriptor.model, model_version: descriptor.modelVersion });
 
-  return Object.freeze({
+  // Recorded as a production implementation only when its descriptor is production (P1/P2).
+  const implementation = Object.freeze({
     id,
     grade: descriptor.grade,
     dimensions: descriptor.dimensions,
@@ -178,4 +180,5 @@ export function createCohereEmbedV4(options: CohereEmbedV4Options): EmbeddingPro
       return vectors;
     },
   });
+  return descriptor.grade === "production" ? markProductionImplementation(implementation) : implementation;
 }

@@ -168,6 +168,15 @@ function Result({ set }: { set: EvidenceSet }) {
           <span className="text-fg-secondary">Reranker:</span> {retrieval.reranker.id} {retrieval.reranker.version} ({retrieval.reranker.grade})
         </p>
         <p>
+          <span className="text-fg-secondary">Konfiguration:</span>{" "}
+          {retrieval.configuration ? `${retrieval.configuration.id} (${retrieval.configuration.fingerprint.slice(0, 12)}…, ${retrieval.configuration.algorithmVersion})` : "ingen i drift"}
+        </p>
+        {retrieval.unmet.length > 0 ? (
+          <p>
+            <span className="text-fg-secondary">Ikke opfyldt (P1–P9):</span> {retrieval.unmet.join(", ")}
+          </p>
+        ) : null}
+        <p>
           <span className="text-fg-secondary">Gyldig på:</span> {set.query.asOf} ({set.query.mode === "current" ? "gældende" : "historisk opslag"})
         </p>
         <p>

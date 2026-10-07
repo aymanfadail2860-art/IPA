@@ -1,7 +1,7 @@
-import { checksumOf, gateSetChecksum } from "./checksum.ts";
+import { checksumOf, configurationFingerprint, gateSetChecksum } from "./checksum.ts";
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "./gates.ts";
 import { computeMetrics } from "./metrics.ts";
-import { reportChecksum, type EvaluationReport } from "./runner.ts";
+import { REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport } from "./runner.ts";
 import { HARD_GATE_IDS, type GateSet, type HardGateId, type Violation } from "./types.ts";
 
 /**
@@ -9,14 +9,19 @@ import { HARD_GATE_IDS, type GateSet, type HardGateId, type Violation } from "./
  * D-7, D-18).
  *
  * A report is a file anyone can write. It only becomes a published result when the separate
- * identity `evaluation_publisher` registers it through `knowledge.record_evaluation_run`, which
- * recomputes every gate from the report's own observations and refuses a report that does not
- * add up. An administrator can neither insert nor change a run.
+ * identity `evaluation_publisher` registers it through `knowledge.record_evaluation_run`
+ * (8B-I6). Both sides re-verify it:
  *
- * 8B-I1 implements the CONTRACT and the recomputation, not the identity: the database role,
- * `knowledge.evaluation_runs` and the SQL function belong with the configuration register
- * (docs/08b §10, §20 step 3) and are deferred to that step. Until then there is no publisher,
- * and nothing can obtain a PublishedEvaluationRun.
+ *   * here, before anything is sent: verifyForPublication recomputes every metric from the
+ *     report's own observations, every gate from the gate set, and checks checksums, the
+ *     fingerprint, the environment and that no development implementation is involved;
+ *   * in the database, independently: record_evaluation_run recomputes checksums, fingerprints,
+ *     metrics, gates, minimums, tier and verdict in SQL and refuses anything that does not add
+ *     up. An administrator can neither insert nor change a run.
+ *
+ * Publishing never approves or activates a configuration — that takes a human with
+ * system.settings.manage (§10.2). The connection runs as evaluation_publisher_login and is
+ * injected (D-19: the postgres driver lives only in workers/; CI passes its own client).
  */
 
 declare const published: unique symbol;
@@ -29,25 +34,74 @@ export type PublishedEvaluationRun = { readonly runId: string; readonly reportCh
 export interface EvaluationPublisher {
   /**
    * Registers a report as a published run. An implementation MUST run as the
-   * evaluation_publisher identity, re-verify the report with verifyReport and refuse it on any
-   * problem. It never approves or activates a configuration — that takes a human (§10.2).
+   * evaluation_publisher identity, re-verify the report with verifyForPublication and refuse it
+   * on any problem. It never approves or activates a configuration — that takes a human (§10.2).
    */
   publish(report: EvaluationReport, gates: GateSet): Promise<PublishedEvaluationRun>;
 }
 
 export class PublisherUnavailableError extends Error {
   constructor() {
-    super("Der findes ingen evaluation_publisher endnu (8B-I1). En evalueringskørsel kan ikke publiceres eller registreres.");
+    super("Der er ingen forbindelse som evaluation_publisher. En evalueringskørsel kan ikke publiceres eller registreres.");
     this.name = "PublisherUnavailableError";
   }
 }
 
-/** The only publisher in 8B-I1: it refuses everything. */
+export class PublicationRefusedError extends Error {
+  readonly problems: string[];
+  constructor(problems: string[]) {
+    super(`Rapporten kan ikke publiceres: ${problems.join(" ")}`);
+    this.name = "PublicationRefusedError";
+    this.problems = problems;
+  }
+}
+
+/** Without a connection as evaluation_publisher, nothing can be published. */
 export const unavailablePublisher: EvaluationPublisher = Object.freeze({
   async publish(): Promise<PublishedEvaluationRun> {
     throw new PublisherUnavailableError();
   },
 });
+
+/** The two database functions evaluation_publisher may call — nothing else. */
+export interface PublisherConnection {
+  /** knowledge.register_evaluation_gate_set (idempotent). Returns the gate set's id. */
+  registerGateSet(gates: GateSet): Promise<string>;
+  /** knowledge.record_evaluation_run. Returns the registered run's id and time. */
+  recordRun(report: EvaluationReport): Promise<{ id: string; registeredAt: string }>;
+}
+
+/** The minimal SQL client the connection needs (e.g. postgres.js `sql.unsafe`). */
+export interface SqlClient {
+  unsafe(query: string, parameters?: unknown[]): PromiseLike<readonly Record<string, unknown>[]>;
+}
+
+export function sqlPublisherConnection(sql: SqlClient): PublisherConnection {
+  return Object.freeze({
+    async registerGateSet(gates: GateSet) {
+      const rows = await sql.unsafe("select knowledge.register_evaluation_gate_set($1::text::jsonb) as id", [JSON.stringify(gates)]);
+      return String(rows[0]?.id);
+    },
+    async recordRun(report: EvaluationReport) {
+      const rows = await sql.unsafe("select knowledge.record_evaluation_run($1::text::jsonb) as id, now() as registered_at", [JSON.stringify(report)]);
+      const registeredAt = rows[0]?.registered_at;
+      return { id: String(rows[0]?.id), registeredAt: registeredAt instanceof Date ? registeredAt.toISOString() : String(registeredAt) };
+    },
+  });
+}
+
+/** The publisher (8B-I6): verify here, then register as evaluation_publisher, where it is verified again. */
+export function createEvaluationPublisher(connection: PublisherConnection): EvaluationPublisher {
+  return Object.freeze({
+    async publish(report: EvaluationReport, gates: GateSet): Promise<PublishedEvaluationRun> {
+      const verification = verifyForPublication(report, gates);
+      if (!verification.ok) throw new PublicationRefusedError(verification.problems);
+      await connection.registerGateSet(gates);
+      const row = await connection.recordRun(report);
+      return Object.freeze({ runId: row.id, reportChecksum: report.checksums.report, registeredAt: row.registeredAt }) as PublishedEvaluationRun;
+    },
+  });
+}
 
 export type VerificationResult = { ok: true } | { ok: false; problems: string[] };
 
@@ -62,7 +116,7 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
 
   if (report.checksums.report !== reportChecksum(report)) problems.push("Rapportens checksum stemmer ikke med indholdet.");
   if (gateSetChecksum(gates) !== report.gateSet.checksum) problems.push("Rapporten er ikke lavet med dette gate-sæt.");
-  if (report.production.eligible !== false) problems.push("En rapport fra 8B-I1 kan aldrig være production-egnet.");
+  if (report.production.eligible !== false) problems.push("En rapport kan aldrig selv erklære sig production-egnet.");
   if (report.configuration.declaredFingerprint !== report.configuration.runtimeFingerprint && report.configuration.matches) {
     problems.push("Rapporten påstår, at fingeraftrykkene matcher, men det gør de ikke.");
   }
@@ -97,5 +151,45 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
   const verdict = valid ? decision.verdict : "fail";
   if (report.valid !== valid || report.verdict !== verdict) problems.push(`Afgørelsen stemmer ikke: rapporten siger "${report.verdict}", genberegnet "${verdict}".`);
 
+  return problems.length === 0 ? { ok: true } : { ok: false, problems };
+}
+
+/** A configuration with the test embedder or the "none" reranker can never be approved (§3.4, §10.2). */
+export function isDevelopmentConfiguration(configuration: EvaluationReport["configuration"]["declared"]): boolean {
+  return configuration.embedding === null || configuration.embedding.provider === "test" || configuration.reranker.id === "none" || configuration.reranker.model === "none";
+}
+
+/**
+ * verifyReport plus what publication requires: the current report format, an unchanged result
+ * checksum, the evaluation environment, a runtime that is exactly the declared configuration,
+ * the evaluated corpus's document types, and no development implementation. A development or
+ * fixture report can therefore never be published as a production approval.
+ */
+export function verifyForPublication(report: EvaluationReport, gates: GateSet): VerificationResult {
+  const verified = verifyReport(report, gates);
+  const problems = verified.ok ? [] : [...verified.problems];
+  if (report.reportSchema !== REPORT_SCHEMA_VERSION || report.kind !== "retrieval-evaluation") problems.push(`Rapporten har ikke formatet reportSchema ${REPORT_SCHEMA_VERSION}.`);
+  const results = {
+    metrics: report.metrics,
+    rerankerComparison: report.rerankerComparison,
+    hardGates: report.hardGates,
+    qualityGates: report.qualityGates,
+    minimums: report.minimums,
+    tier: report.tier,
+    verdict: report.verdict,
+    valid: report.valid,
+    invalidReasons: report.invalidReasons,
+    failures: report.failures,
+    cases: report.cases,
+  };
+  if (report.checksums.results !== checksumOf(results)) problems.push("Resultaternes checksum stemmer ikke.");
+  if (report.configuration.environment !== "evaluation") problems.push(`Kørslen er ikke foretaget i evalueringsmiljøet (miljø: "${report.configuration.environment}").`);
+  if (configurationFingerprint(report.configuration.declared) !== report.configuration.declaredFingerprint) problems.push("Det erklærede fingeraftryk stemmer ikke med konfigurationen.");
+  if (configurationFingerprint(report.configuration.runtime) !== report.configuration.runtimeFingerprint) problems.push("Runtime-fingeraftrykket stemmer ikke med runtime-konfigurationen.");
+  if (!report.configuration.matches || report.configuration.declaredFingerprint !== report.configuration.runtimeFingerprint) problems.push("Runtime er ikke den erklærede konfiguration.");
+  if (isDevelopmentConfiguration(report.configuration.declared)) problems.push("Konfigurationen bruger en udviklingsimplementering (test-embedder eller \"none\").");
+  const types = report.corpus.documentTypes;
+  if (!Array.isArray(types) || types.length === 0 || types.join("\u0000") !== [...new Set(types)].sort().join("\u0000")) problems.push("Korpussets dokumenttyper mangler.");
+  if (report.corpus.checksumBefore !== report.corpus.checksumAfter) problems.push("Korpusset ændrede sig under kørslen.");
   return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }

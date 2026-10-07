@@ -697,7 +697,9 @@ kommentar eller en regel i CLAUDE.md, men af fire mekanismer i koden:
 3. **EvidenceSet'et bærer sin grad.** `retrieveEvidence` beregner `grade` ud fra de faktisk
    anvendte implementeringer: `production` kun hvis både embedder og reranker er
    `production`, ellers `development`. Feltet sættes af retrieval-laget og kan ikke angives i
-   requesten.
+   requesten. Fra 8B er betingelserne udvidet til P1–P9 (`docs/08b` §9, K-1, B-008): "kun hvis"
+   gælder fortsat, men der kræves også bl.a. en aktiv, godkendt retrieval-konfiguration og
+   retrieval som den indloggede bruger.
 4. **Typesystem og en kontrolfunktion.** `requireProductionEvidence(set)` er den eneste måde at
    få typen `ProductionEvidenceSet` på (branded type). Funktionen kaster en fejl, hvis
    `grade !== "production"` eller `reranker.id === "none"`. Fase 7 definerer funktionen og
@@ -714,6 +716,11 @@ AI-fase ikke kan omgå den ved en fejl (§17, B-18).
 Et standardiseret og versioneret format (`schemaVersion`), som senere AI-moduler og citations
 bygger på. Det indeholder aldrig storage-stier, interne filnavne eller data om andre
 brugeres adgang.
+
+Fra 8B er `schemaVersion` 2 (K-4, D-14): `retrieval.configuration = { id, fingerprint,
+algorithmVersion }` (den konfiguration, der var i drift, eller `null`), `retrieval.unmet` (de af
+P1–P9, der ikke var opfyldt) og `chunkerVersion` på hvert element. Eksemplet nedenfor viser
+fase 7's version 1; tilføjelserne er additive (`docs/08b` §11, §21.9).
 
 ```jsonc
 {

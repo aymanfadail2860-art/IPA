@@ -16,6 +16,7 @@ import {
 } from "./core/evidence";
 import { DEFAULT_RRF_K, fuse } from "./core/fusion";
 import { rerankDocumentText, type RankReason, type Reranker } from "./core/reranker";
+import { parseRetrievalContext, type RetrievalContext } from "./core/retrieval-context";
 import { mergeExcerpt, selectChunks, type SelectableChunk } from "./core/selection";
 import { isUuid } from "./upload-validation";
 
@@ -148,6 +149,8 @@ export interface SearchRow {
   lexical_rank: number | null;
   lexical_score: number | null;
   lexical_terms: string[];
+  /** The chunker version of the chunk's document version (P7). */
+  chunker_version: string | null;
 }
 
 interface NormalizedRequest {
@@ -216,8 +219,11 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
     if (!forceInsufficientAllowed()) throw new RetrievalError("invalid_request", "Udviklingsværktøjet kan kun bruges lokalt og i test.");
     return issueEvidenceSet({
       query: queryBlock(normalized, now),
-      embedder: deps.embedding?.embedder ?? null,
+      embedding: deps.embedding,
       reranker: deps.reranker,
+      context: null,
+      algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
+      params: { ...config, topK: normalized.topK },
       candidateCount: 0,
       generatedAt: now.toISOString(),
       items: [],
@@ -302,10 +308,18 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
 
   const items = drafts.map((draft, i) => toItem(draft, i, drafts));
 
+  // The database's retrieval context, read with the same client and AFTER the search, so a
+  // configuration suspended or replaced meanwhile can only lower the grade (P1, P3, P6, P9).
+  const context = await readRetrievalContext(deps.db);
+
   return issueEvidenceSet({
     query: queryBlock(normalized, now),
-    embedder: deps.embedding?.embedder ?? null,
+    embedding: deps.embedding,
     reranker: deps.reranker,
+    context,
+    algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
+    // The parameters that actually ran: a per-request topK is part of the runtime (P4).
+    params: { ...config, topK: normalized.topK },
     candidateCount: rows.length,
     generatedAt: now.toISOString(),
     items,
@@ -324,6 +338,16 @@ function queryBlock(normalized: NormalizedRequest, now: Date): EvidenceQuery {
       ...(normalized.documentTypes ? { documentTypes: normalized.documentTypes } : {}),
     },
   };
+}
+
+/** knowledge.retrieval_context() for this client. Unreadable or malformed → null (fail-closed). */
+export async function readRetrievalContext(db: KnowledgeRpcClient): Promise<RetrievalContext | null> {
+  try {
+    const { data, error } = await db.rpc("retrieval_context", {});
+    return error ? null : parseRetrievalContext(data);
+  } catch {
+    return null;
+  }
 }
 
 async function rpcRows<T>(db: KnowledgeRpcClient, fn: string, args: Record<string, unknown>): Promise<T[]> {
@@ -490,6 +514,8 @@ function toItem(draft: Draft, index: number, drafts: Draft[]): EvidenceItem {
     chunkId: first.chunk_id,
     chunkIds: group.map((chunk) => chunk.chunkId),
     chunkIndex: first.chunk_index,
+    // All chunks of an item come from one document version and share its chunker version.
+    chunkerVersion: group.every((chunk) => chunk.row.chunker_version === first.chunker_version) ? (first.chunker_version ?? null) : null,
     product: { id: first.product_id, name: first.product_name },
     document: { title: first.document_title, type: first.document_type, versionLabel: first.version_label, language: first.language },
     location: { pageStart, pageEnd, sectionNumber: first.section_number, heading: first.heading, headingPath: first.heading_path },

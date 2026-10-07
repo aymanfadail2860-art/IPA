@@ -10,6 +10,49 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-029 — Register over retrieval-konfigurationer, evaluation_publisher og P1–P9 (8B-I6)
+
+**Dato:** 7. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §9–§11 og §21.9,
+`supabase/migrations/20261007000100_retrieval_configuration_registry.sql`,
+`src/lib/knowledge/core/production-conditions.ts`, `src/lib/knowledge/core/evidence.ts`,
+`evals/engine/publication.ts`
+
+**Beslutning:**
+- **Register:** materialet er konfigurationens eneste definerende kilde. De beskrivende kolonner
+  er genereret af det. Konfigurationer, kørsler, gate-sæt og statushistorik ændres og slettes
+  aldrig. Status ændres kun gennem funktioner efter en streng tilstandsmaskine, med højst én
+  konfiguration i drift.
+- **Publicering (D-18):** kun `evaluation_publisher_login`, med medlemskab af gruppen
+  `evaluation_publisher`, kan registrere. Både TypeScript-publisheren og databasen genberegner
+  rapporten fra observationerne. Databasen bruger samme kanoniske JSON.
+- **Menneskelig beslutning:** godkendelse, aktivering, suspendering og udfasning kræver
+  `system.settings.manage`. Der er ingen nye permissions. En godkendelse kræver afgørelsen
+  `pass` (`uncertain` er ikke `pass`) og en årsagsnote for hver fejl.
+- **P1–P9:** graden afledes ved hvert retrieval af de faktisk konstruerede implementeringer (med
+  et runtime-bevis for production-implementeringer), databasens retrieval-kontekst og de
+  faktiske parametre og elementer. EvidenceSet schemaVersion 2 (D-14).
+- **Fortolkninger (§21.9):** scope på dokumenttyper, H6 bedømmer implementeringerne, krav om ny
+  kørsel ved genaktivering, og chunker-bevis via P7.
+
+**Overvejede alternativer:**
+- *Genberegning kun i TypeScript.* Fravalgt: en kompromitteret eller fejlbehæftet klient ville
+  kunne registrere et forkert resultat.
+- *Graden som kolonne eller indstilling.* Fravalgt: forbudt af §9.
+- *Automatisk fallback til en tidligere konfiguration ved suspendering.* Fravalgt: §10.2 og
+  brugerens krav.
+- *Ny permission til registret.* Fravalgt: `system.settings.manage` er den, specifikationen
+  nævner.
+
+**Begrundelse:** en administrator kan kun gøre evidens production gennem en bestået, registreret
+kørsel og en godkendelse (exit-kriterium 12). Alt kan forklares bagefter med id'er, checksums og
+fingeraftryk.
+
+**Åbent:** en pilot på 30–50 spørgsmål er altid `uncertain` med de låste tærskler (§21.9). Det
+kræver din beslutning før baseline.
+
+---
+
 ## B-028 — ClamAV 1.4.6 i production, godkendte engine-versioner og adskilt engine-opgradering (8B-I5.6)
 
 **Dato:** 6. oktober 2026

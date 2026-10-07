@@ -12,11 +12,15 @@ import {
   type ProductionEvidenceSet,
 } from "@/lib/knowledge/core/evidence";
 import { GradeNotAllowedError, runtimeEnv } from "@/lib/knowledge/core/grade";
+import { parseRetrievalContext } from "@/lib/knowledge/core/retrieval-context";
 import { createEmbedder, createReranker, RerankerNotConfiguredError } from "@/lib/knowledge/core/registry";
 import type { Reranker } from "@/lib/knowledge/core/reranker";
 import { TEST_EMBEDDER } from "@/lib/knowledge/core/test-embedder";
-import { runRetrieval, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
+import { DEFAULT_RETRIEVAL_CONFIG, RETRIEVAL_ALGORITHM_VERSION, runRetrieval, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
 import { checkRetrievalConfiguration } from "@/lib/knowledge/retrieval-startup";
+
+import { FIXTURE_MODEL, fixtureContext, productionProviders } from "./fixtures/production-config";
+import { withRuntimeEnv } from "./fixtures/runtime-env";
 
 /**
  * Fase 7 — evidensgrad-guardrailen (docs/07 §9.1, B-18). The most safety-critical rule of
@@ -53,11 +57,15 @@ function fakeReranker(id: string, grade: "development" | "production"): Reranker
   };
 }
 
+/** Issued with the production-grade fixture context (an active, approved configuration). */
 function issue(embedder: Embedder | null, reranker: Reranker): EvidenceSet {
   const input: IssueEvidenceInput = {
     query: { text: "x", mode: "current", asOf: "2026-10-01", language: "da", filters: {} },
-    embedder,
+    embedding: embedder ? { embedder, modelId: FIXTURE_MODEL.id } : null,
     reranker,
+    context: parseRetrievalContext(fixtureContext()),
+    algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
+    params: { ...DEFAULT_RETRIEVAL_CONFIG },
     candidateCount: 0,
     generatedAt: "2026-10-01T08:00:00.000Z",
     items: [],
@@ -89,7 +97,7 @@ describe("1. implementations declare their grade — the caller cannot set it", 
 
 describe("2. the registry is fail-closed", () => {
   it("treats a missing or unknown IPA_RUNTIME_ENV as production", () => {
-    expect(runtimeEnv(undefined)).toBe("production");
+    expect(withRuntimeEnv(undefined, () => runtimeEnv())).toBe("production");
     expect(runtimeEnv("production")).toBe("production");
     expect(runtimeEnv("staging")).toBe("production");
   });
@@ -99,7 +107,7 @@ describe("2. the registry is fail-closed", () => {
       expect(() => createReranker("none", environment)).toThrow(GradeNotAllowedError);
       expect(() => createEmbedder(testModel, environment)).toThrow(GradeNotAllowedError);
     }
-    expect(() => createReranker("none", runtimeEnv(undefined))).toThrow(GradeNotAllowedError);
+    expect(() => createReranker("none", withRuntimeEnv(undefined, () => runtimeEnv()))).toThrow(GradeNotAllowedError);
     expect(createReranker("none", "local").id).toBe("none");
     expect(createReranker("none", "test").id).toBe("none");
   });
@@ -148,11 +156,18 @@ describe("3. the EvidenceSet carries a grade computed from the implementations a
     expect(set.retrieval.grade).toBe("development");
   });
 
-  it("is production only when BOTH the embedder and the reranker are production", () => {
-    expect(issue(fakeEmbedder("production"), fakeReranker("provider-x", "production")).retrieval.grade).toBe("production");
-    expect(issue(fakeEmbedder("development"), fakeReranker("provider-x", "production")).retrieval.grade).toBe("development");
-    expect(issue(fakeEmbedder("production"), fakeReranker("provider-x", "development")).retrieval.grade).toBe("development");
-    expect(issue(null, fakeReranker("provider-x", "production")).retrieval.grade).toBe("development");
+  it("is production only when BOTH the embedder and the reranker are production implementations (P1, P2)", () => {
+    const real = productionProviders();
+    expect(issue(real.embedder, real.reranker).retrieval.grade).toBe("production");
+    expect(issue(fakeEmbedder("development"), real.reranker).retrieval.grade).toBe("development");
+    expect(issue(real.embedder, fakeReranker("provider-x", "development")).retrieval.grade).toBe("development");
+    expect(issue(null, real.reranker).retrieval.grade).toBe("development");
+  });
+
+  it("a test double that only DECLARES production grade is development (8B-I6)", () => {
+    const set = issue(fakeEmbedder("production"), fakeReranker("provider-x", "production"));
+    expect(set.retrieval.grade).toBe("development");
+    expect(set.retrieval.unmet).toEqual(expect.arrayContaining(["P1", "P2", "P4"]));
   });
 
   it("cannot be set through the request", async () => {
@@ -178,7 +193,10 @@ describe("4. requireProductionEvidence is the only way to a ProductionEvidenceSe
   });
 
   it('throws for the "none" reranker, even if it claims to be production', () => {
-    expect(() => requireProductionEvidence(issue(fakeEmbedder("production"), fakeReranker("none", "production")))).toThrow(/rerankeren "none"/);
+    const real = productionProviders();
+    const set = issue(real.embedder, fakeReranker("none", "production"));
+    expect(set.retrieval.unmet).toContain("P2");
+    expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
   });
 
   it("throws for the real phase 7 pipeline output", async () => {
@@ -187,15 +205,17 @@ describe("4. requireProductionEvidence is the only way to a ProductionEvidenceSe
   });
 
   it("throws for evidence the retrieval layer did not issue — a hand-built object or a copy", () => {
-    const issued = issue(fakeEmbedder("production"), fakeReranker("provider-x", "production"));
+    const real = productionProviders();
+    const issued = issue(real.embedder, real.reranker);
     const forged = JSON.parse(JSON.stringify(issued)) as EvidenceSet;
     expect(forged.retrieval.grade).toBe("production");
     expect(() => requireProductionEvidence(forged)).toThrow(/ikke udstedt/);
     expect(() => requireProductionEvidence({ ...issued })).toThrow(/ikke udstedt/);
   });
 
-  it("accepts evidence issued with production implementations (the path a later AI phase takes)", () => {
-    const set = issue(fakeEmbedder("production"), fakeReranker("provider-x", "production"));
+  it("accepts evidence issued with production implementations under an active configuration (the path a later AI phase takes)", () => {
+    const real = productionProviders();
+    const set = issue(real.embedder, real.reranker);
     const production: ProductionEvidenceSet = requireProductionEvidence(set);
     expect(production).toBe(set);
   });
@@ -207,7 +227,7 @@ describe("4. requireProductionEvidence is the only way to a ProductionEvidenceSe
     // @ts-expect-error — neither is a copy of one
     const copied: ProductionEvidenceSet = { ...set };
     // @ts-expect-error — the grade is not an input; it is derived from the implementations
-    const claimed: IssueEvidenceInput = { query: set.query, embedder: null, reranker: createReranker("none", "test"), candidateCount: 0, generatedAt: "", items: [], grade: "production" };
+    const claimed: IssueEvidenceInput = { query: set.query, embedding: null, reranker: createReranker("none", "test"), context: null, algorithmVersion: "", params: { ...DEFAULT_RETRIEVAL_CONFIG }, candidateCount: 0, generatedAt: "", items: [], grade: "production" };
     expect([direct, copied, claimed]).toHaveLength(3);
   });
 });

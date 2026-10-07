@@ -28,13 +28,18 @@ import { CASE_TYPES } from "./types.ts";
  * configuration declared for evaluation and the retrieval under test, and produces a report.
  *
  * The report is data. Nothing here writes to a database, registers a run or changes any
- * configuration: in 8B-I1 there is no register (docs/08b §10), so no report can make retrieval
- * evidence production grade (`production.eligible` is always false — publication.ts).
+ * configuration. A report never declares itself production eligible (`production.eligible` is
+ * always false): only evaluation_publisher can register it, and only a human can then approve
+ * and activate the configuration (publication.ts, docs/08b §10).
  */
 
-/** 2: Passage Recall uses the required passages as a set (no primaryPassageRank). */
-export const REPORT_SCHEMA_VERSION = 2;
-export const ENGINE_VERSION = "8B-I1/2";
+/**
+ * 2: Passage Recall uses the required passages as a set (no primaryPassageRank).
+ * 3: the evaluated corpus names its document types (corpus.documentTypes) — the scope an
+ *    approval is valid for (docs/08b §9, §4.4 pilot rule 5; 8B-I6).
+ */
+export const REPORT_SCHEMA_VERSION = 3;
+export const ENGINE_VERSION = "8B-I6/3";
 
 export interface Failure {
   caseId: string | null;
@@ -72,7 +77,8 @@ export interface EvaluationReport {
     runtimeFingerprint: string;
     matches: boolean;
   };
-  corpus: { checksumBefore: string; checksumAfter: string };
+  /** The evaluated corpus: its checksum before and after the run, and its document types (sorted). */
+  corpus: { checksumBefore: string; checksumAfter: string; documentTypes: string[] };
   metrics: Metrics;
   rerankerComparison: RerankerComparison;
   hardGates: HardGateResult[];
@@ -101,7 +107,7 @@ export interface RunOptions {
 }
 
 export const NOT_PRODUCTION_REASON =
-  "8B-I1 har intet register over retrieval-konfigurationer og ingen evaluation_publisher. En rapport kan ikke godkende eller aktivere en konfiguration, og evidens kan ikke blive production (docs/08b §9–§10).";
+  "En rapport er data og erklærer aldrig sig selv production-egnet. Kun evaluation_publisher kan registrere den (knowledge.record_evaluation_run), og kun et menneske med system.settings.manage kan derefter godkende og aktivere konfigurationen. Evidensens grad afgøres af P1–P9 ved hvert retrieval (docs/08b §9–§10).";
 
 /** Every expected anchor must occur exactly once in its version (docs/08b §5.4). */
 export function validateAnchors(set: EvalSet, retrieval: RetrievalUnderTest): void {
@@ -300,7 +306,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
       runtimeFingerprint,
       matches: declaredFingerprint === runtimeFingerprint,
     },
-    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter },
+    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter, documentTypes: corpusDocumentTypes(set) },
     ...results,
     production: { eligible: false, reason: NOT_PRODUCTION_REASON },
     checksums: { results: checksumOf(results), report: "" },
@@ -309,13 +315,18 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
   return report;
 }
 
+/** The document types of the evaluated corpus (the manifest's documents), sorted and unique. */
+export function corpusDocumentTypes(set: EvalSet): string[] {
+  return [...new Set(set.manifest.documents.map((document) => document.type))].sort();
+}
+
 /** The report checksum covers everything except the checksum itself. */
 export function reportChecksum(report: EvaluationReport): string {
   return checksumOf({ ...report, checksums: { results: report.checksums.results } });
 }
 
 /** Per-question explanations of quality misses, so every failure can be read one by one. */
-function caseQualityFailures(observations: readonly CaseObservation[]): Failure[] {
+export function caseQualityFailures(observations: readonly CaseObservation[]): Failure[] {
   const failures: Failure[] = [];
   for (const observation of observations) {
     if (observation.error !== null) continue;

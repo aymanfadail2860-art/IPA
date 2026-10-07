@@ -112,6 +112,8 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/integration/ai-gateway.integration.test.ts",
       "src/tests/integration/ingestion-worker-lease.integration.test.ts",
       "src/tests/integration/knowledge-helpers.ts",
+      // 8B-I6: proves that service_role can neither publish, approve nor obtain production evidence (test only).
+      "src/tests/integration/retrieval-configuration.integration.test.ts",
       // 8B-I5: tampers with Storage objects in the local stack to test checksum binding (test only).
       "src/tests/integration/upload-security.integration.test.ts",
       "src/tests/integration/worker-runtime.integration.test.ts",

@@ -129,15 +129,18 @@ values ('51000000-0000-4000-a000-000000000002', 'pgtap', 'udaekket', '1', 3, 'ca
 set local role authenticated;
 select throws_ok($$ select knowledge.activate_embedding_model('51000000-0000-4000-a000-000000000002') $$,
   '23514', null, 'en model uden fuld dækning kan ikke aktiveres');
-select lives_ok($$ select knowledge.activate_embedding_model('51000000-0000-4000-a000-000000000001') $$,
-  'en fuldt dækket kandidat aktiveres af en administrator med system.settings.manage');
+select throws_like($$ select knowledge.activate_embedding_model('51000000-0000-4000-a000-000000000001') $$,
+  '%godkendt retrieval-konfiguration%', 'også en fuldt dækket kandidat kræver en godkendt retrieval-konfiguration (8B-I6, docs/08b §2.7)');
 reset role;
+-- Modelskiftet sker med aktiveringen af en godkendt konfiguration (retrieval_configuration_registry.test.sql).
+-- Her aktiveres modellen direkte som postgres, som det lokale seed gør, for at teste resten.
+update knowledge.embedding_models set status = 'active', activated_at = now() where id = '51000000-0000-4000-a000-000000000001';
 select is((select status from knowledge.embedding_models where id = '51000000-0000-4000-a000-000000000001'), 'active',
   'kandidaten er nu den aktive model');
 select is(knowledge.version_has_active_embeddings('54000000-0000-4000-a000-000000000001'), true,
   'versionen har embeddings for den aktive model');
-select ok(exists (select 1 from audit.audit_log where action = 'knowledge.embedding_model.activated'
-                  and entity_id = '51000000-0000-4000-a000-000000000001'), 'modelskiftet auditeres');
+select ok(not exists (select 1 from audit.audit_log where action = 'knowledge.embedding_model.activated'
+                  and entity_id = '51000000-0000-4000-a000-000000000001'), 'et afvist modelskifte auditeres ikke som en aktivering');
 
 -- Med en tildeling ser rådgiveren embeddings for den publicerede version.
 insert into knowledge.document_access_grants (document_id, permission_key, grantee_type)

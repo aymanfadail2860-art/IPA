@@ -12,5 +12,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     exclude: ["src/tests/integration/**", "node_modules/**"],
+    // Explicit, never inherited from the shell (8B-I6 housekeeping): a test that needs another
+    // runtime environment — or none — sets it itself.
+    env: { IPA_RUNTIME_ENV: "test" },
   },
 });

@@ -5,12 +5,10 @@ import { getServerSession } from "@/lib/auth/server-session";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-import type { Embedder, EmbeddingModelSpec } from "./core/embedding";
 import type { EvidenceSet } from "./core/evidence";
-import { createEmbedder, createReranker } from "./core/registry";
-import type { Reranker } from "./core/reranker";
+import { applicationProviderRuntime, providersForContext } from "./providers/configured";
 import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
-import { DEFAULT_RETRIEVAL_CONFIG, RetrievalError, runRetrieval, type ClassifiedRetrievalRequest, type RetrievalRequest } from "./retrieval-core";
+import { DEFAULT_RETRIEVAL_CONFIG, readRetrievalContext, RetrievalError, runRetrieval, type ClassifiedRetrievalRequest, type RetrievalRequest } from "./retrieval-core";
 import type { RetrievalOutcome } from "./result-presentation";
 
 /**
@@ -22,46 +20,25 @@ import type { RetrievalOutcome } from "./result-presentation";
  *     and the access filter in knowledge.search_chunks). There is no way to search as someone
  *     else, and no admin shortcut. Advisors and leaders reach knowledge only through document
  *     grants (docs/07 §4.3), so no role permission is required here — the database decides.
- *   * The embedder and the reranker come from the fail-closed registry (docs/07 §9.1). They are
- *     never parameters, so a caller cannot choose a reranker or set the evidence grade.
+ *   * The embedder, the reranker and the parameters come from the retrieval configuration in
+ *     service (knowledge.retrieval_context(), 8B-I6) — or, without one, from the fail-closed
+ *     registry (docs/07 §9.1). They are never parameters, so a caller cannot choose a provider
+ *     or set the evidence grade. The grade is derived from P1–P9 for every set (docs/08b §9).
  *   * The query is not stored or logged.
  */
 
-let configuredReranker: Reranker | null = null;
-const embedders = new Map<string, Embedder>();
-
-/** The configured reranker (IPA_RERANKER). Throws — fail-closed — when it is not allowed here. */
-export function retrievalReranker(): Reranker {
-  configuredReranker ??= createReranker();
-  return configuredReranker;
-}
-
-function embedderFor(model: EmbeddingModelSpec): Embedder {
-  const cached = embedders.get(model.id);
-  if (cached) return cached;
-  const embedder = createEmbedder(model);
-  embedders.set(model.id, embedder);
-  return embedder;
-}
-
 export { RetrievalError, type ClassifiedRetrievalRequest, type RetrievalAvailability, type RetrievalRequest };
 
-async function activeModel(knowledge: KnowledgeClient): Promise<EmbeddingModelSpec | null | undefined> {
-  const { data, error } = await knowledge.rpc("active_embedding_model");
-  if (error) return undefined;
-  return ((data ?? []) as EmbeddingModelSpec[])[0] ?? null;
-}
-
-type KnowledgeClient = ReturnType<Awaited<ReturnType<typeof createSupabaseServerClient>>["schema"]>;
-
 /**
- * Whether retrieval can run right now (docs/07 §20.2): readable by everything that shows
- * results and by Admin — not only a line in the server log.
+ * Whether retrieval can run right now (docs/07 §20.2), and whether production evidence is
+ * available (docs/08b §10.2): readable by everything that shows results and by Admin — not
+ * only a line in the server log.
  */
 export async function getRetrievalAvailability(): Promise<RetrievalAvailability> {
   if (isDemoMode() || !getSupabaseConfig()) return assessRetrieval({ demo: isDemoMode(), databaseConfigured: false, activeModel: null });
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
-  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: await activeModel(knowledge) });
+  const context = await readRetrievalContext(knowledge);
+  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: context?.activeModel ?? undefined, context, runtime: applicationProviderRuntime });
 }
 
 /** Development tools for one call — refused outside IPA_RUNTIME_ENV=local/test (B-009). */
@@ -77,14 +54,21 @@ export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev:
   if (!(await getServerSession())) throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
 
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
-  const model = await activeModel(knowledge);
-  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: model });
+  const context = await readRetrievalContext(knowledge);
+  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: context?.activeModel ?? undefined, context, runtime: applicationProviderRuntime });
   // Unavailable is a system failure, never an empty (= "insufficient") result.
   if (availability.state === "unavailable") throw new RetrievalError("unavailable", availability.reason);
-
-  const reranker = retrievalReranker();
-  const embedding = model ? { embedder: embedderFor(model), modelId: model.id } : null;
-  return runRetrieval(request, { db: knowledge, embedding, reranker, config: DEFAULT_RETRIEVAL_CONFIG, devForceInsufficient: dev.devForceInsufficient === true });
+  if (!context) throw new RetrievalError("unavailable", "Retrieval-konfigurationen kunne ikke læses fra databasen.");
+  const providers = providersForContext(context, applicationProviderRuntime);
+  // The configuration's own parameters; without one, the defaults (development).
+  const config = context.configuration?.params ?? DEFAULT_RETRIEVAL_CONFIG;
+  return runRetrieval(request, {
+    db: knowledge,
+    embedding: providers.embedding,
+    reranker: providers.reranker,
+    config,
+    devForceInsufficient: dev.devForceInsufficient === true,
+  });
 }
 
 /** retrieveEvidence as an explicit outcome for the UI: a failure is never an empty result. */

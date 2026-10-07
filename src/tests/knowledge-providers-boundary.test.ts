@@ -40,7 +40,7 @@ const ROW: SearchRow = {
   heading_path: ["§ 3 Selvrisiko"], section_number: "3", page_start: 2, page_end: 2, char_start: 0, char_end: 42, overlap_chars: 0,
   version_id: "version-secret-id", version_label: "2", language: "da", valid_from: "2025-07-01", valid_to: null, approved_at: "2026-01-01T00:00:00Z",
   superseded_by: null, document_id: "document-secret-id", document_title: "Fortrolig titel (fiktiv)", document_type: "terms", product_id: "product-secret-id",
-  product_name: "Fiktivt produkt", source_type: "manual_upload", temporal_status: "current", vector_rank: 1, vector_score: 0.9, lexical_rank: 1, lexical_score: 1, lexical_terms: ["selvrisiko"],
+  product_name: "Fiktivt produkt", source_type: "manual_upload", temporal_status: "current", vector_rank: 1, vector_score: 0.9, lexical_rank: 1, lexical_score: 1, lexical_terms: ["selvrisiko"], chunker_version: "structure/1",
 };
 
 

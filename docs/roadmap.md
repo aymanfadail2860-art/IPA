@@ -10,7 +10,8 @@ gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemfør
 8B-I2.5 (ekstern AI-datagrænse), 8B-I3 (workerens databaseidentitet og databasefunktioner) og
 8B-I4 (workerens runtime), 8B-I5 (upload-sikkerhed, karantæne og malware-scanning), 8B-I5.5
 (scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6) er gennemført og
-godkendt — I5 er fuldt lukket.** Resten af 8B
+godkendt — I5 er fuldt lukket. 8B-I6 (register over retrieval-konfigurationer og
+ProductionEvidenceSet) er gennemført og venter på godkendelse.** Resten af 8B
 implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
@@ -46,7 +47,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5 og 8B-I5.6 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -432,13 +433,22 @@ godkendelse.
     signaturforsyning) er lukket.
   - Deploymentforudsætninger, når kontoen findes: ECR, VPC/subnets/endpoints, Cloud Map, roller,
     GitHub OIDC og alarmtopic.
-- **8B-I5.6 — ClamAV-patchversion: ✅ gennemført 2026-10-06.**
+- **8B-I5.6 — ClamAV-patchversion: ✅ gennemført og godkendt 2026-10-07.** Kandidatkørslen mod 1.4.6 er en deploymentforudsætning.
   - Production på ClamAV 1.4.6 (LTS-linje 1.4) via `deploy/clamav/engine.json`.
   - Databasen kender de godkendte engines; en ikke-godkendt engine giver aldrig `safe`.
   - Signaturopdatering (automatisk) og engine-opgradering (manuel kandidat med tests og godkendt
     digest) er adskilt. Detaljer i `docs/08b` §21.8 og B-028.
-- En evalueringsrapport kan endnu ikke registrere, godkende eller aktivere en konfiguration, og
-  evidens kan ikke blive production.
+- **8B-I6 — register over retrieval-konfigurationer og ProductionEvidenceSet: ✅ gennemført
+  2026-10-07, venter på godkendelse.**
+  - Register, append-only kørsler, gate-sæt og statushistorik. `evaluation_publisher` med
+    genberegning i SQL. Godkendelse, aktivering, suspendering og udfasning med
+    `system.settings.manage`.
+  - P1–P9 afleder graden ved hvert retrieval. EvidenceSet schemaVersion 2.
+  - Detaljer i `docs/08b` §21.9 og B-029.
+  - **Åbent spørgsmål før baseline:** en pilot på 30–50 spørgsmål er altid `uncertain` på Q1 med
+    de låste tærskler, og `uncertain` er ikke `pass` [AFKLARES].
+  - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen hører til
+    evalueringsmiljøet (§20 trin 4).
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af
 fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B (B-019). Beslutningerne D-1–D-20 står
 i specifikationens §19, og implementeringsrækkefølgen i §20.

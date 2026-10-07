@@ -39,6 +39,8 @@ describe("retrieval availability is a readable state", () => {
       reranker: { id: "none", grade: "development" },
       embeddingModel: { label: "test:test-hash-embedder@1", grade: "development" },
       grade: "development",
+      configuration: null,
+      productionUnavailable: "Der er ingen aktiv, godkendt retrieval-konfiguration. Evidensen er udviklingsgrad.",
     });
     expect(assessRetrieval({ ...base, activeModel: null, environment: "test" })).toMatchObject({ state: "available", embeddingModel: null, grade: "development" });
   });

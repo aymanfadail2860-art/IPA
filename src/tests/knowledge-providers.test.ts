@@ -381,7 +381,7 @@ describe("fail-closed: no fallback, and no production evidence from 8B-I2 alone"
   it("a reranker failure fails retrieval", async () => {
     const row = { chunk_id: "c0", chunk_index: 0, kind: "prose", text: "Fiktiv tekst.", lead_in: null, heading: null, heading_path: [], section_number: null, page_start: 1, page_end: 1, char_start: 0, char_end: 13, overlap_chars: 0,
       version_id: "v", version_label: "1", language: "da", valid_from: "2025-01-01", valid_to: null, approved_at: null, superseded_by: null, document_id: "d", document_title: "Fiktiv", document_type: "terms",
-      product_id: "p", product_name: "Fiktiv", source_type: "manual_upload", temporal_status: "current", vector_rank: null, vector_score: null, lexical_rank: 1, lexical_score: 1, lexical_terms: ["fiktiv"] } satisfies SearchRow;
+      product_id: "p", product_name: "Fiktiv", source_type: "manual_upload", temporal_status: "current", vector_rank: null, vector_score: null, lexical_rank: 1, lexical_score: 1, lexical_terms: ["fiktiv"], chunker_version: "structure/1" } satisfies SearchRow;
     const db: KnowledgeRpcClient = { rpc: async (fn) => ({ data: fn === "search_chunks" ? [row] : [], error: null }) };
     const { transport } = fakeBedrock(() => ({ results: [] }));
     const failing = runRetrieval({ query: query("fiktiv") }, { db, embedding: null, reranker: createProductionReranker(COHERE_RERANK_35_ID, { bedrock: transport, retryDeps: noSleep }) });

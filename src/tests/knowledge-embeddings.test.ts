@@ -8,6 +8,7 @@ import { createTestEmbedder, hashEmbedding, TEST_EMBEDDER } from "@/lib/knowledg
 
 import { processJob, type ClaimedJob, type IntegrityRow, type WorkerDb } from "../../workers/ingestion/pipeline.ts";
 import { releasedGate, securityDbDefaults, staticOriginals } from "./fixtures/worker-fakes";
+import { withRuntimeEnv } from "./fixtures/runtime-env";
 
 /** Fase 7, trin 4 — embeddings, test-embedder og den fail-closed grad (docs/07 §7, §9.1). */
 
@@ -22,7 +23,7 @@ function cosine(a: number[], b: number[]): number {
 const TEST_GATE = releasedGate();
 describe("runtime environment and grade (docs/07 §9.1)", () => {
   it("treats a missing or unknown IPA_RUNTIME_ENV as production (fail-closed)", () => {
-    expect(runtimeEnv(undefined)).toBe("production");
+    expect(withRuntimeEnv(undefined, () => runtimeEnv())).toBe("production");
     expect(runtimeEnv("")).toBe("production");
     expect(runtimeEnv("staging")).toBe("production");
     expect(runtimeEnv("LOCAL")).toBe("production");
