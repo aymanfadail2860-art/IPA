@@ -191,5 +191,11 @@ export function verifyForPublication(report: EvaluationReport, gates: GateSet): 
   const types = report.corpus.documentTypes;
   if (!Array.isArray(types) || types.length === 0 || types.join("\u0000") !== [...new Set(types)].sort().join("\u0000")) problems.push("Korpussets dokumenttyper mangler.");
   if (report.corpus.checksumBefore !== report.corpus.checksumAfter) problems.push("Korpusset ændrede sig under kørslen.");
+  const scope = report.corpus.scope;
+  if (!Array.isArray(scope) || scope.length === 0 || scope.some((entry) => !entry || typeof entry.product !== "string" || entry.product.trim() !== entry.product || entry.product.length === 0 || typeof entry.documentType !== "string")) {
+    problems.push("Det evaluerede område (produkter og dokumenttyper) mangler.");
+  } else if (Array.isArray(types) && [...new Set(scope.map((entry) => entry.documentType))].sort().join("\u0000") !== types.join("\u0000")) {
+    problems.push("Dokumenttyperne stemmer ikke med det evaluerede område.");
+  }
   return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }

@@ -37,9 +37,11 @@ import { CASE_TYPES } from "./types.ts";
  * 2: Passage Recall uses the required passages as a set (no primaryPassageRank).
  * 3: the evaluated corpus names its document types (corpus.documentTypes) — the scope an
  *    approval is valid for (docs/08b §9, §4.4 pilot rule 5; 8B-I6).
+ * 4: the evaluated corpus names the pairs of product (its name) and document type it held
+ *    (corpus.scope). A pilot approval is valid only for them (8B-I6.1, B-030).
  */
-export const REPORT_SCHEMA_VERSION = 3;
-export const ENGINE_VERSION = "8B-I6/3";
+export const REPORT_SCHEMA_VERSION = 4;
+export const ENGINE_VERSION = "8B-I6.1/4";
 
 export interface Failure {
   caseId: string | null;
@@ -78,7 +80,7 @@ export interface EvaluationReport {
     matches: boolean;
   };
   /** The evaluated corpus: its checksum before and after the run, and its document types (sorted). */
-  corpus: { checksumBefore: string; checksumAfter: string; documentTypes: string[] };
+  corpus: { checksumBefore: string; checksumAfter: string; documentTypes: string[]; scope: ScopeEntry[] };
   metrics: Metrics;
   rerankerComparison: RerankerComparison;
   hardGates: HardGateResult[];
@@ -92,6 +94,12 @@ export interface EvaluationReport {
   cases: CaseObservation[];
   production: { eligible: false; reason: string };
   checksums: { results: string; report: string };
+}
+
+/** One evaluated area: a product (by its name) and a document type. */
+export interface ScopeEntry {
+  product: string;
+  documentType: string;
 }
 
 export interface RunOptions {
@@ -306,7 +314,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
       runtimeFingerprint,
       matches: declaredFingerprint === runtimeFingerprint,
     },
-    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter, documentTypes: corpusDocumentTypes(set) },
+    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter, documentTypes: corpusDocumentTypes(set), scope: corpusScope(set) },
     ...results,
     production: { eligible: false, reason: NOT_PRODUCTION_REASON },
     checksums: { results: checksumOf(results), report: "" },
@@ -318,6 +326,20 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
 /** The document types of the evaluated corpus (the manifest's documents), sorted and unique. */
 export function corpusDocumentTypes(set: EvalSet): string[] {
   return [...new Set(set.manifest.documents.map((document) => document.type))].sort();
+}
+
+/**
+ * The evaluated area: every pair of product (its name, the product's unique identity) and
+ * document type in the manifest, sorted and unique. A pilot approval covers exactly these.
+ */
+export function corpusScope(set: EvalSet): ScopeEntry[] {
+  const names = new Map(set.manifest.products.map((product) => [product.key, product.name]));
+  const pairs = new Map<string, ScopeEntry>();
+  for (const document of set.manifest.documents) {
+    const product = names.get(document.product) ?? document.product;
+    pairs.set(`${product}\u0000${document.type}`, { product, documentType: document.type });
+  }
+  return [...pairs.values()].sort((a, b) => (a.product < b.product ? -1 : a.product > b.product ? 1 : a.documentType < b.documentType ? -1 : a.documentType > b.documentType ? 1 : 0));
 }
 
 /** The report checksum covers everything except the checksum itself. */

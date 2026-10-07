@@ -16,7 +16,17 @@ import { retrievalFingerprint, type RetrievalFingerprintMaterial, type Retrieval
 export type ConfigurationStatus = "active" | "suspended";
 
 /** Why the configuration in service cannot carry production evidence now (from the database). */
-export type NotReadyReason = "suspended" | "active_count" | "evaluation" | "gate_set" | "development" | "model" | "scope";
+export type NotReadyReason = "suspended" | "active_count" | "evaluation" | "gate_set" | "development" | "model";
+
+/** The outcome of the approving run (B-030). Only pass, or pilot pass_with_uncertainty with a human acceptance, can be approved. */
+export type EvaluationOutcome = "pass" | "pass_with_uncertainty" | "insufficient_certainty" | "fail";
+
+/** The area an approval covers (8B-I6.1): for pilot the evaluated pairs, for standard the document types (§9). */
+export interface ApprovedScope {
+  tier: "pilot" | "standard" | null;
+  entries: { product: string; documentType: string }[];
+  documentTypes: string[];
+}
 
 export interface ConfigurationInService {
   id: string;
@@ -33,7 +43,21 @@ export interface ConfigurationInService {
   params: RetrievalParams;
   chunkerVersions: string[];
   tier: "pilot" | "standard" | null;
-  evaluation: { runId: string; reportChecksum: string; gateSetChecksum: string; verdict: string; passed: boolean; evaluatedDocumentTypes: string[] } | null;
+  evaluation: {
+    runId: string;
+    reportChecksum: string;
+    gateSetChecksum: string;
+    verdict: string;
+    outcome: EvaluationOutcome;
+    /** The database's verdict: pass, or pilot pass_with_uncertainty that a human accepted. */
+    approved: boolean;
+    uncertaintyAccepted: boolean;
+    uncertainGates: string[];
+    evaluatedDocumentTypes: string[];
+  } | null;
+  scope: ApprovedScope;
+  /** Published content outside the approved area (information for Admin; enforced per item in P3). */
+  scopeGaps: string[];
   /** The database's own verdict on P3: active, exactly one, approved run passed, not suspended, scope covered. */
   productionReady: boolean;
   notReady: NotReadyReason[];
@@ -48,7 +72,19 @@ export interface RetrievalContext {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX64 = /^[0-9a-f]{64}$/;
-const NOT_READY: readonly NotReadyReason[] = ["suspended", "active_count", "evaluation", "gate_set", "development", "model", "scope"];
+const NOT_READY: readonly NotReadyReason[] = ["suspended", "active_count", "evaluation", "gate_set", "development", "model"];
+const OUTCOMES: readonly EvaluationOutcome[] = ["pass", "pass_with_uncertainty", "insufficient_certainty", "fail"];
+
+function parseScope(value: unknown): ApprovedScope | undefined {
+  if (!isRecord(value) || !Array.isArray(value.entries) || !isStringArray(value.documentTypes)) return undefined;
+  if (value.tier !== null && value.tier !== "pilot" && value.tier !== "standard") return undefined;
+  const entries: ApprovedScope["entries"] = [];
+  for (const entry of value.entries) {
+    if (!isRecord(entry) || !isString(entry.product) || !isString(entry.documentType)) return undefined;
+    entries.push({ product: entry.product, documentType: entry.documentType });
+  }
+  return { tier: value.tier, entries, documentTypes: [...value.documentTypes] };
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -91,7 +127,8 @@ function parseConfiguration(value: unknown): ConfigurationInService | null | und
   let parsedEvaluation: ConfigurationInService["evaluation"] = null;
   if (evaluation !== null) {
     if (!isRecord(evaluation) || !isString(evaluation.runId) || !isString(evaluation.reportChecksum) || !isString(evaluation.gateSetChecksum) ||
-        !isString(evaluation.verdict) || typeof evaluation.passed !== "boolean" || !isStringArray(evaluation.evaluatedDocumentTypes)) {
+        !isString(evaluation.verdict) || !(OUTCOMES as readonly unknown[]).includes(evaluation.outcome) || typeof evaluation.approved !== "boolean" ||
+        typeof evaluation.uncertaintyAccepted !== "boolean" || !isStringArray(evaluation.uncertainGates) || !isStringArray(evaluation.evaluatedDocumentTypes)) {
       return undefined;
     }
     parsedEvaluation = {
@@ -99,10 +136,15 @@ function parseConfiguration(value: unknown): ConfigurationInService | null | und
       reportChecksum: evaluation.reportChecksum,
       gateSetChecksum: evaluation.gateSetChecksum,
       verdict: evaluation.verdict,
-      passed: evaluation.passed,
+      outcome: evaluation.outcome as EvaluationOutcome,
+      approved: evaluation.approved,
+      uncertaintyAccepted: evaluation.uncertaintyAccepted,
+      uncertainGates: [...evaluation.uncertainGates],
       evaluatedDocumentTypes: [...evaluation.evaluatedDocumentTypes],
     };
   }
+  const scope = parseScope(v.scope);
+  if (!scope || !isStringArray(v.scopeGaps)) return undefined;
   let fingerprint: string;
   try {
     fingerprint = retrievalFingerprint(material as unknown as RetrievalFingerprintMaterial);
@@ -126,6 +168,8 @@ function parseConfiguration(value: unknown): ConfigurationInService | null | und
     chunkerVersions: [...v.chunkerVersions],
     tier: v.tier as ConfigurationInService["tier"],
     evaluation: parsedEvaluation,
+    scope,
+    scopeGaps: [...v.scopeGaps],
     productionReady: v.productionReady,
     notReady: [...v.notReady] as NotReadyReason[],
   };

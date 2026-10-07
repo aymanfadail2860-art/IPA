@@ -3,7 +3,7 @@ import type { EvidenceItem, EvidenceQuery } from "./evidence.ts";
 import type { Grade } from "./grade.ts";
 import { isProductionImplementation } from "./production-implementation.ts";
 import { retrievalFingerprint, retrievalFingerprintMaterial, type RetrievalParams } from "./provider.ts";
-import type { RetrievalContext } from "./retrieval-context.ts";
+import type { ApprovedScope, RetrievalContext } from "./retrieval-context.ts";
 import { NONE_RERANKER_ID, type Reranker, type RerankingProvider } from "./reranker.ts";
 
 /**
@@ -75,6 +75,13 @@ function evaluatedChunkerVersions(versions: readonly string[] | undefined): read
   }
 }
 
+/** Does the approved area cover this item? Fail-closed: no tier or an empty scope covers nothing. */
+export function withinApprovedScope(item: EvidenceItem, scope: ApprovedScope): boolean {
+  if (scope.tier === "pilot") return scope.entries.some((entry) => entry.product === item.product.name && entry.documentType === item.document.type);
+  if (scope.tier === "standard") return scope.documentTypes.includes(item.document.type);
+  return false;
+}
+
 function withinValidity(item: EvidenceItem, date: string): boolean {
   const { validFrom, validTo } = item.validity;
   return (validFrom === null || validFrom <= date) && (validTo === null || date < validTo);
@@ -126,12 +133,14 @@ export function assessProduction(input: ProductionAssessmentInput): ProductionAs
         input.reranker.id !== NONE_RERANKER_ID && rerankerDescriptor.id === input.reranker.id && rerankerDescriptor.version === input.reranker.version &&
         input.reranker.id === configuration.rerankerId && input.reranker.version === configuration.rerankerVersion,
     ),
-    // P3: exactly one active configuration with a passed, registered evaluation, not suspended
-    // (the database's verdict, including the evaluated scope).
+    // P3: exactly one active configuration with a passed (for pilot: a human-accepted) registered
+    // evaluation, not suspended — and the evaluation covers every item (8B-I6.1, B-030): for tier
+    // pilot the evaluated pairs of product and document type, for standard the document types.
     P3: decide(
       () =>
         configuration !== null && configuration.status === "active" && configuration.productionReady && configuration.notReady.length === 0 &&
-        configuration.evaluation !== null && configuration.evaluation.passed,
+        configuration.evaluation !== null && configuration.evaluation.approved &&
+        input.items.every((item) => withinApprovedScope(item, configuration.scope)),
     ),
     // P4: the runtime fingerprint is identical to the active configuration's.
     P4: decide(() => configuration !== null && runtimeFingerprint !== null && runtimeFingerprint === configuration.fingerprint),

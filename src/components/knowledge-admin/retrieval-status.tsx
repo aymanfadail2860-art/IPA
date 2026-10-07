@@ -27,6 +27,11 @@ export function RetrievalStatus({ availability }: { availability: RetrievalAvail
             : " · ingen retrieval-konfiguration i drift"}
         </span>
         {availability.productionUnavailable ? <span className="block text-fg-secondary">{availability.productionUnavailable}</span> : null}
+        {availability.configuration && availability.configuration.scopeGaps.length > 0 ? (
+          <span className="block text-fg-secondary">
+            Uden for det godkendte område (giver aldrig produktionsevidens): {availability.configuration.scopeGaps.join(", ")}
+          </span>
+        ) : null}
       </span>
       {availability.grade === "development" ? (
         <StatusBadge status="warning" label="Udviklingsgrad — ikke produktionsevidens" />

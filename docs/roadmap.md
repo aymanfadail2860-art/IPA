@@ -11,8 +11,10 @@ gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemfør
 8B-I4 (workerens runtime), 8B-I5 (upload-sikkerhed, karantæne og malware-scanning), 8B-I5.5
 (scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6) er gennemført og
 godkendt — I5 er fuldt lukket. 8B-I6 (register over retrieval-konfigurationer og
-ProductionEvidenceSet) er gennemført og venter på godkendelse.** Resten af 8B
-implementeres i deltrin, som hver kræver godkendelse. 8C — Copilot
+ProductionEvidenceSet) er gennemført og godkendt. 8B-I6.1 (pilot-politik og pilot-scope) er
+gennemført og venter på godkendelse. 8B-I7 (Evaluation Operations, Monitoring & Regression
+Guardrails) er defineret, men ikke påbegyndt.** Resten af 8B implementeres i deltrin, som hver
+kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
@@ -47,7 +49,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 gennemført, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 og 8B-I6.1 gennemført, 8B-I7 defineret, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -336,7 +338,8 @@ menneskelig godkendelse, publicering, adgang pr. dokument, retrieval og evidens.
 **Status:** 🔨 I gang. Masterfasen er opdelt i tre underfaser (B-019), fordi en rigtig Copilot
 forudsætter et politiklag (8A) og evidens i produktionskvalitet (8B), før den kan tages i brug
 (8C). 8A er gennemført og låst. 8B's specifikation er godkendt og låst (B-020).
-Implementeringen af 8B påbegyndes først efter en særskilt godkendelse. 8C er ikke påbegyndt.
+Implementeringen af 8B er i gang i deltrin, som hver er godkendt særskilt (se 8B nedenfor). 8C er
+ikke påbegyndt.
 
 ### 8A — AI Gateway
 
@@ -438,17 +441,32 @@ godkendelse.
   - Databasen kender de godkendte engines; en ikke-godkendt engine giver aldrig `safe`.
   - Signaturopdatering (automatisk) og engine-opgradering (manuel kandidat med tests og godkendt
     digest) er adskilt. Detaljer i `docs/08b` §21.8 og B-028.
-- **8B-I6 — register over retrieval-konfigurationer og ProductionEvidenceSet: ✅ gennemført
-  2026-10-07, venter på godkendelse.**
+- **8B-I6 — register over retrieval-konfigurationer og ProductionEvidenceSet: ✅ gennemført og
+  godkendt 2026-10-07 (B-029, B-030).**
   - Register, append-only kørsler, gate-sæt og statushistorik. `evaluation_publisher` med
     genberegning i SQL. Godkendelse, aktivering, suspendering og udfasning med
     `system.settings.manage`.
   - P1–P9 afleder graden ved hvert retrieval. EvidenceSet schemaVersion 2.
   - Detaljer i `docs/08b` §21.9 og B-029.
-  - **Åbent spørgsmål før baseline:** en pilot på 30–50 spørgsmål er altid `uncertain` på Q1 med
-    de låste tærskler, og `uncertain` er ikke `pass` [AFKLARES].
-  - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen hører til
-    evalueringsmiljøet (§20 trin 4).
+  - Pilotens `uncertain` er afgjort i B-030 (se 8B-I6.1).
+  - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen hører til I7.
+- **8B-I6.1 — pilot-politik og pilot-scope: ✅ gennemført 2026-10-07, venter på godkendelse.**
+  - En pilot, der består på punktestimatet med usikre Wilson-intervaller
+    (`pass_with_uncertainty`), kan kun godkendes efter en registreret menneskelig accept.
+  - Tier standard er uændret. Hårde gates kan aldrig accepteres.
+  - En pilot-godkendelse gælder kun de evaluerede par af produkt og dokumenttype. Det håndhæves
+    pr. element i P3, så et uevalueret produkt aldrig arver den.
+  - Detaljer i `docs/08b` §21.10 og B-030.
+- **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: defineret (B-030), ikke
+  påbegyndt.** Påbegyndes kun efter eksplicit godkendelse. Indhold:
+  - evalueringsmiljø og sikker publiceringstransport;
+  - reproducerbar baseline og regression;
+  - automatisk suspendering ved hårde gate-brud;
+  - observability og `AlertSink` med en første kanal;
+  - målbare performance-exit-kriterier.
+
+  Definitionen står i `docs/08b` §21.10. Rate limiting, samtalelagring og retention hører til
+  8C.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af
 fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B (B-019). Beslutningerne D-1–D-20 står
 i specifikationens §19, og implementeringsrækkefølgen i §20.
@@ -598,6 +616,15 @@ noget. Samtalelagring er en del af Copilot-modulet, og den kræver retentionsbes
 5. **Generering med en rigtig model:** en production-model bag `Model`-interfacet (Claude API,
    `docs/03` §2), og om EU- og databehandleraftale-kravet også gælder den (`docs/08` Q-7).
 
+**Kontrolleret Copilot-pilot (B-030):** kommer efter 8C og er **ikke** masterfase 18. Den bruger
+kun:
+- godkendt pilot-scope og godkendte dokumenter;
+- navngivne autoriserede brugere;
+- tæt monitorering;
+- guardrails fra 8B og 8C.
+
+Den forudsætter det hostede pilotmiljø (se fase 21).
+
 **Andre kandidater (udledt, til afklaring, når 8C specificeres):** citations-tabellen og om
 administratorers læsning af metadata og videnshuller skal slås til (B-014, `docs/08` Q-10).
 
@@ -694,6 +721,11 @@ rute og mutation). Testisolation og en browserbaseret upload-test er foreslået 
 
 **Status:** ⬜ Ikke påbegyndt — ikke specificeret. Intet bygget.
 
+**Forudsætninger (B-030):**
+- Fasen er uændret. Den kontrollerede Copilot-pilot efter 8C er ikke denne fase.
+- Fasen forudsætter et isoleret, hostet pilotmiljø (se fase 21).
+- Fasen forudsætter et evalueringssæt med mindst 100 spørgsmål med holdout (`docs/08b` §4.4).
+
 ---
 
 ## Fase 19 — Feedback
@@ -721,3 +753,7 @@ brugerflade. Intet gemmes.
 **Hører hertil:** Supabase i produktion i EU (henlagt i fase 6) og koblingen af Vercel-demoen på
 Supabase med fjernelse af demo-tilstanden (B-003). Workerens placering og adgang i produktion
 hører til 8B, fordi production-evidens forudsætter den.
+
+**Pilotmiljø før fase 21 (B-030):** masterfase 21 betyder den endelige produktion og go-live. Et
+isoleret, hostet pilot-/staging-miljø må etableres før. Det er en forudsætning for den
+kontrollerede Copilot-pilot og for masterfase 18. Det omnummererer intet.

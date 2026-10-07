@@ -28,7 +28,16 @@ export type RetrievalAvailability =
       embeddingModel: { label: string; grade: Grade } | null;
       /** Production only when P1–P4, P6 and P9 hold for the runtime (docs/08b §9). */
       grade: Grade;
-      configuration: { id: string; label: string; version: number; fingerprint: string; status: "active" | "suspended"; tier: "pilot" | "standard" | null } | null;
+      configuration: {
+        id: string;
+        label: string;
+        version: number;
+        fingerprint: string;
+        status: "active" | "suspended";
+        tier: "pilot" | "standard" | null;
+        /** Published content outside the approved area: retrieval over it is never production (P3). */
+        scopeGaps: string[];
+      } | null;
       /** Why production evidence is unavailable; null when it is available. */
       productionUnavailable: string | null;
     }
@@ -62,7 +71,9 @@ export function productionUnavailableReason(unmet: readonly ProductionCondition[
     return "Konfigurationen er suspenderet. Production-evidens er utilgængelig, indtil en ny bestået kørsel er godkendt og aktiveret.";
   }
   if (relevant.includes("P4")) return "Konfigurationen er ikke godkendt: runtime matcher ikke den aktive konfigurations fingeraftryk.";
-  if (configuration.notReady.includes("scope")) return "Korpusset indeholder dokumenttyper, den godkendte kørsel ikke evaluerede. Det kræver en ny kørsel.";
+  if (configuration.evaluation?.outcome === "pass_with_uncertainty" && !configuration.evaluation.uncertaintyAccepted) {
+    return "Pilot-kørslens statistiske usikkerhed er ikke accepteret af et menneske.";
+  }
   return `Production-evidens er utilgængelig (ikke opfyldt: ${relevant.join(", ")}).`;
 }
 
@@ -100,7 +111,15 @@ export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability
       embeddingModel: providers.embedding ? { label: providers.embedding.embedder.id, grade: providers.embedding.embedder.grade } : null,
       grade: reason === null ? "production" : "development",
       configuration: configuration
-        ? { id: configuration.id, label: configuration.label, version: configuration.version, fingerprint: configuration.fingerprint, status: configuration.status, tier: configuration.tier }
+        ? {
+            id: configuration.id,
+            label: configuration.label,
+            version: configuration.version,
+            fingerprint: configuration.fingerprint,
+            status: configuration.status,
+            tier: configuration.tier,
+            scopeGaps: [...configuration.scopeGaps],
+          }
         : null,
       productionUnavailable: reason,
     };

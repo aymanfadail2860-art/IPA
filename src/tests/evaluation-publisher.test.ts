@@ -14,7 +14,7 @@ import {
 } from "../../evals/engine/publication.ts";
 import { REPORT_SCHEMA_VERSION, type EvaluationReport } from "../../evals/engine/runner.ts";
 
-import { buildReport, GATES_V1, reseal } from "./fixtures/evaluation-report";
+import { buildReport, GATES_V1, reseal, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "./fixtures/evaluation-report";
 import { fixtureMaterial } from "./fixtures/production-config";
 
 /**
@@ -122,6 +122,15 @@ describe("the publisher refuses before anything is sent", () => {
     expect(calls).toEqual([]);
   });
 
+  it("a report without the evaluated area, or whose document types do not match it (8B-I6.1)", async () => {
+    const noScope = buildReport();
+    (noScope.corpus as { scope: unknown }).scope = [];
+    expect(await refusal(reseal(noScope))).toMatch(/Det evaluerede område \(produkter og dokumenttyper\) mangler/);
+    const mismatch = buildReport();
+    mismatch.corpus.documentTypes = ["guidance", "terms"];
+    expect(await refusal(reseal(mismatch))).toMatch(/stemmer ikke med det evaluerede område/);
+  });
+
   it("a report without the evaluated corpus's document types (pilot scope)", async () => {
     const report = buildReport();
     report.corpus.documentTypes = [];
@@ -167,5 +176,7 @@ describe("the pgTAP fixture is the generated report (no drift between TypeScript
   it("the report and the gate set in the pgTAP file equal buildReport() and gates-v1", () => {
     expect(literal("report")).toEqual(JSON.parse(JSON.stringify(buildReport())));
     expect(literal("gates")).toEqual(JSON.parse(JSON.stringify(GATES_V1)));
+    expect(literal("uncertainpilot")).toEqual(JSON.parse(JSON.stringify(buildReport({ counts: UNCERTAIN_PILOT_COUNTS, runId: "f6000000-0000-4000-8000-0000000000ab" }))));
+    expect(literal("uncertainstandard")).toEqual(JSON.parse(JSON.stringify(buildReport({ counts: UNCERTAIN_STANDARD_COUNTS, runId: "f6000000-0000-4000-8000-0000000000ac" }))));
   });
 });

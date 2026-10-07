@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EmbeddingProvider } from "@/lib/knowledge/core/embedding";
 import { EvidenceGradeError, issueEvidenceSet, requireProductionEvidence, type EvidenceSet, type ProductionEvidenceSet } from "@/lib/knowledge/core/evidence";
-import { assessProduction, PRODUCTION_CONDITIONS, type ProductionCondition } from "@/lib/knowledge/core/production-conditions";
+import { assessProduction, PRODUCTION_CONDITIONS, withinApprovedScope, type ProductionCondition } from "@/lib/knowledge/core/production-conditions";
 import { isProductionImplementation, markProductionImplementation } from "@/lib/knowledge/core/production-implementation";
 import { retrievalFingerprint } from "@/lib/knowledge/core/provider";
 import { createEmbedder, createReranker } from "@/lib/knowledge/core/registry";
@@ -199,6 +199,50 @@ describe("P3 — exactly one active configuration with a passed, registered eval
     const set = await runRetrieval({ query: fixtureQuery() }, { ...deps(), db: fixtureDb({ contextError: true }) });
     expect(set.retrieval.grade).toBe("development");
     expect(set.retrieval.unmet).toEqual(expect.arrayContaining(["P1", "P2", "P3", "P4", "P6", "P7", "P9"]));
+  });
+});
+
+describe("P3 — pilot evaluation policy and approved scope (8B-I6.1, B-030)", () => {
+  it("a pilot run passed only on the point estimate is production only after a human accepted the uncertainty", async () => {
+    expectOnly(await retrieve({ contextOverrides: { outcome: "pass_with_uncertainty", uncertaintyAccepted: false } }), "P3");
+    const accepted = await retrieve({ contextOverrides: { outcome: "pass_with_uncertainty", uncertaintyAccepted: true } });
+    expect(accepted.retrieval.grade).toBe("production");
+  });
+
+  it("an uncertain standard-tier run is never production — the quality bar is unchanged", async () => {
+    expectOnly(await retrieve({ contextOverrides: { tier: "standard", outcome: "insufficient_certainty" } }), "P3");
+  });
+
+  it("pilot: a product that was never evaluated does not inherit the approval, even with the same document type", async () => {
+    const newProduct = fixtureRow(3, { product_name: "Ny, aldrig evalueret produktfamilie", product_id: "fa000000-0000-4000-8000-000000000009" });
+    expectOnly(await retrieve({ rows: [newProduct] }), "P3");
+    // One out-of-scope item makes the whole set development (no mixing).
+    expectOnly(await retrieve({ rows: [fixtureRow(1), newProduct] }), "P3");
+  });
+
+  it("pilot: an evaluated product with a document type that was not evaluated is outside the scope", async () => {
+    expectOnly(await retrieve({ rows: [fixtureRow(1, { document_type: "acceptance_rules" })] }), "P3");
+  });
+
+  it("pilot: content inside the evaluated scope stays production", async () => {
+    const set = await retrieve({ rows: [fixtureRow(1), fixtureRow(2)] });
+    expect(set.retrieval.grade).toBe("production");
+  });
+
+  it("standard: the approval covers the evaluated document types (§9), across products", async () => {
+    const newProduct = fixtureRow(3, { product_name: "Ny produktfamilie", product_id: "fa000000-0000-4000-8000-000000000009" });
+    const standard = await retrieve({ rows: [newProduct], contextOverrides: { tier: "standard" } });
+    expect(standard.retrieval.grade).toBe("production");
+    expectOnly(await retrieve({ rows: [fixtureRow(1, { document_type: "guidance" })], contextOverrides: { tier: "standard" } }), "P3");
+  });
+
+  it("an empty or unknown scope covers nothing (fail-closed)", async () => {
+    expectOnly(await retrieve({ contextOverrides: { scope: [] } }), "P3");
+    // Without a tier (no approved run) no scope covers anything, whatever its entries.
+    const item = evidenceItem(1);
+    const entries = [{ product: item.product.name, documentType: item.document.type }];
+    expect(withinApprovedScope(item, { tier: "pilot", entries, documentTypes: [item.document.type] })).toBe(true);
+    expect(withinApprovedScope(item, { tier: null, entries, documentTypes: [item.document.type] })).toBe(false);
   });
 });
 

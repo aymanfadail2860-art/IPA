@@ -358,11 +358,15 @@ Det første sæt på 30–50 spørgsmål er en **pilot-evaluering**. Det bruges 
    gennemsnitliggøres ikke væk.
 4. **Usikkerheden vises.** Rapporten viser Wilson 95 %-intervallet for hver andel. Gatet
    afgøres på punktestimatet, men et nedre interval under tærsklen markeres som "usikker" i
-   rapporten.
+   rapporten. *Præciseret i B-030:* en pilot-kørsel, der består på punktestimatet med usikre
+   intervaller (`pass_with_uncertainty`), kan kun godkendes efter en eksplicit, registreret
+   menneskelig accept af usikkerheden. Tier standard er uændret, og hårde gates kan aldrig
+   accepteres (§21.10).
 5. **Godkendelsen er en pilot-godkendelse.** Under 100 spørgsmål (`tier: pilot`) står det i
    konfigurationen og i Admin. Den gælder det korpus, der blev evalueret (offentlige
    betingelser). Når korpusset udvides med nye dokumenttyper (fx acceptregler), kræves en ny
-   kørsel med spørgsmål til dem.
+   kørsel med spørgsmål til dem. *Præciseret i B-030:* området er de evaluerede par af produkt og
+   dokumenttype, så et produkt, der ikke er evalueret, arver ikke godkendelsen (§21.10).
 6. **Ingen tilpasning til sættet.** Tærsklen kalibreres efter en fast procedure, der skrives i
    evalueringens README før baseline. Fra ca. 100 spørgsmål bruges holdout (§5.6).
 7. **Sættet skal vokse.** Målet er mindst 100 spørgsmål med holdout, før masterfase 18
@@ -1217,8 +1221,10 @@ implementeret.**
 | **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), fuldt lukket med 8B-I5.5 og 8B-I5.6 |
 | **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført og godkendt 2026-10-06 (B-027) |
 | **8B-I5.6** | ClamAV-patchversion: production på ClamAV 1.4.6 (LTS 1.4), godkendte engine-versioner i databasen, signaturopdatering adskilt fra engine-opgradering (§21.8) | ✅ Gennemført og godkendt 2026-10-07 (B-028). I5, I5.5 og I5.6 er fuldt lukket. Kandidatkørslen mod 1.4.6 er en deploymentforudsætning |
-| **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført 2026-10-07 (B-029). Venter på din godkendelse |
-| Øvrige | Evalueringsmiljø og CI-publicering, baseline, observability og regression (I7), aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
+| **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført og godkendt 2026-10-07 (B-029, B-030) |
+| **8B-I6.1** | Pilot-politik for statistisk usikkerhed med menneskelig accept, pilot-scope på produkt og dokumenttype (§21.10) | ✅ Gennemført 2026-10-07 (B-030). Venter på din godkendelse |
+| **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails (definition i §21.10) | Defineret (B-030). Ikke påbegyndt — kræver din eksplicitte godkendelse |
+| Øvrige | Baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -2352,7 +2358,7 @@ udfasning af den hidtidige konfiguration.
 - begge fingeraftryk fra materialet;
 - metrics fra observationerne, Wilson-intervaller, H1–H7, Q1–Q7 mod det godkendte gate-sæt,
   minimum pr. type, tier og afgørelse;
-- formatet (`reportSchema` 3), `production.eligible = false`, H7, test-embedder eller `none` og en
+- formatet (`reportSchema` 3, fra I6.1 4), `production.eligible = false`, H7, test-embedder eller `none` og en
   ukendt embedding-model.
 
 Konfigurationen oprettes som kandidat. En fejlet hård gate for den aktive konfiguration
@@ -2405,15 +2411,14 @@ for modellen (§2.7).
   Bedrock.
 
 Admin viser konfigurationen og årsagen, når production-evidens er utilgængelig ("Konfigurationen
-er ikke godkendt", suspenderet, scope).
+er ikke godkendt", suspenderet). Indhold uden for det godkendte område vises fra I6.1 (§21.10).
 
-**Udledt (fortolkninger, til din bekræftelse):**
+**Udledt (fortolkninger, godkendt i B-030):**
 
-1. **Scope for godkendelsen (pilot-regel 5, §9).** Rapporten (nu `reportSchema` 3) bærer det
-   evaluerede korpus' dokumenttyper fra manifestet. Indeholder det publicerede korpus en anden
-   dokumenttype, afvises aktiveringen, og P3 er ikke opfyldt, indtil der er en ny kørsel.
-   Reglen gælder alle tiers, fordi §9 siger det generelt. Produkter er ikke bundet; det siger
-   specifikationen ikke.
+1. **Scope for godkendelsen (pilot-regel 5, §9).** *Erstattet i 8B-I6.1 (§21.10):* scope er nu
+   par af produkt og dokumenttype for pilot og håndhæves pr. element i P3 i stedet for ved
+   aktiveringen. I I6 bar rapporten (`reportSchema` 3) kun dokumenttyperne, og et korpus med en
+   anden dokumenttype blokerede aktiveringen.
 2. **H6 bedømmer implementeringerne, ikke P1–P9-graden.** En konfiguration under evaluering er
    per definition ikke aktiv, så dens evidens kan aldrig opfylde P3. I1's H6-tjek af det samlede
    sæts grad er erstattet af tjek af implementeringernes grad, `devOverride`, model, reranker,
@@ -2428,14 +2433,14 @@ er ikke godkendt", suspenderet, scope).
 6. **Den evaluerede kørsel skal være konfigurationens seneste**, så en nyere kørsel ikke kan
    springes over. Der er ingen tidsbaseret forældelse; specifikationen har ingen.
 
-**Åbent spørgsmål — kræver din beslutning før baseline (§20 trin 5):**
+**Åbent spørgsmål før baseline (§20 trin 5) — afgjort i B-030 (§21.10):**
 - Med de låste tærskler (gates-v1) og Wilson-reglen er en pilot på 30–50 spørgsmål altid
   `uncertain` på Q1, også ved 100 %. 35 af 35 giver et nedre interval på 0,901, under 0,95.
 - Fordi `uncertain` ikke er `pass`, kan en pilot på den størrelse ikke godkendes. Det kræver
   mindst ca. 73 besvarbare spørgsmål. Den beståede fixture-rapport har 99 spørgsmål (83
   besvarbare, 16 afvisende).
-- Mulige veje: et større pilotsæt, eller en eksplicit beslutning om, hvordan `uncertain` håndteres
-  for en pilot. Ingen af dem er valgt.
+- Mulige veje var et større pilotsæt eller en eksplicit beslutning om, hvordan `uncertain`
+  håndteres for en pilot. Den sidste blev valgt i B-030.
 
 **Tests:**
 
@@ -2450,7 +2455,8 @@ er ikke godkendt", suspenderet, scope).
 En test, der kræver et andet eller manglende miljø, sætter det selv (`fixtures/runtime-env.ts`).
 
 **Ikke implementeret (bevidst):**
-- I7: observability, planlagt regression, rate limiting.
+- I7: evalueringsdrift, observability og regression (defineret i §21.10). Rate limiting hører
+  til 8C, ikke I7.
 - 8C og en rigtig Copilot-model.
 - Lagring af EvidenceSet pr. svar.
 
@@ -2462,6 +2468,129 @@ produktionsdatabase. Testene opretter en production-grad fixture-konfiguration, 
 tilbage eller bliver udfaset.
 
 **Fortsat åbne forudsætninger:** AWS-konto og -ressourcer, VPC/NAT/EIP, kandidatkørsel af ClamAV
-1.4.6, Å-1 (kvoter), Å-2 (databehandleraftaler), et rigtigt pilotsæt (30–50 spørgsmål, se det
-åbne spørgsmål ovenfor) samt Å-3 til Å-6.
+1.4.6, Å-1 (kvoter), Å-2 (databehandleraftaler), et rigtigt pilotsæt (30–50 spørgsmål, B-030)
+samt Å-3 til Å-6.
 
+
+### 21.10 8B-I6.1 — Pilot-politik, pilot-scope og definitionen af 8B-I7
+
+**Leveret (B-030):**
+- migrationen `20261007000200_pilot_evaluation_policy.sql`;
+- rapportformat `reportSchema` 4 med `corpus.scope` (`evals/engine/runner.ts`);
+- scope-tjekket pr. element i P3 (`production-conditions.ts`);
+- visningen i Admin.
+
+**Udfaldet af en kørsel** (`evaluation_runs.outcome`) er en genereret kolonne. Den afledes af den
+genberegnede afgørelse og kan ikke sættes:
+
+| Udfald | Hvornår | Kan bære en godkendelse |
+|---|---|---|
+| `pass` | Alle hårde gates og kvalitetsgates bestået med sikre intervaller, minimum opfyldt | Ja |
+| `pass_with_uncertainty` | Tier pilot: alle gates bestået på punktestimatet, mindst ét interval usikkert | Kun efter menneskelig accept |
+| `insufficient_certainty` | Tier standard: samme situation | Nej. Q1 forbliver 0,95, og der er ingen manuel vej |
+| `fail` | Et hårdt brud, en fejlet kvalitetsgate, manglende minimum eller en ugyldig kørsel | Nej. H1–H7 kan aldrig accepteres |
+
+- De usikre gates gemmes på kørslen (`uncertain_gates`). Wilson-intervallerne gemmes fortsat i
+  metrics.
+- `knowledge.evaluation_run_approvable(run)` er den ene regel, som godkendelse,
+  skrivetriggeren og retrieval-konteksten bruger.
+
+**Menneskelig accept:** `knowledge.accept_evaluation_uncertainty(run, begrundelse)`.
+- Kræver `system.settings.manage` og en begrundelse på 20–2.000 tegn.
+- Virker kun for `pass_with_uncertainty` og kun én gang pr. kørsel.
+- Tabellen `knowledge.evaluation_uncertainty_acceptances` gemmer:
+  - kørsel og konfiguration;
+  - tier;
+  - det evaluerede område;
+  - de usikre gates med metric, sammenligning, tærskel, værdi og interval;
+  - begrundelsen;
+  - hvem og hvornår.
+- Tabellen er append-only, også for ejeren, og kan ikke tømmes. Accepten auditeres
+  (`knowledge.evaluation_run.uncertainty_accepted`).
+- Accepten gør kun kørslen godkendelsesbar. Godkendelse og aktivering er fortsat to særskilte
+  menneskelige handlinger.
+- Exit-kriterium 3 (§17) læses for en pilot sådan, at kvalitetsgates er bestået på
+  punktestimatet, og at usikkerheden er accepteret.
+
+**Pilot-scope:**
+- Rapporten bærer `corpus.scope`: de unikke par `{ product, documentType }` fra
+  evalueringskorpusset. Produktet angives ved sit eksakte, unikke navn.
+- `record_evaluation_run` afviser et tomt område, et navn med omgivende mellemrum, en ukendt
+  dokumenttype og dubletter. Den afviser også dokumenttyper, der ikke svarer til området.
+- Området gemmes på kørslen (`evaluated_scope`).
+- P3 kræver, at **hvert** element ligger inden for det godkendte område:
+  - for pilot: elementets produktnavn og dokumenttype er et evalueret par;
+  - for standard: dokumenttypen er evalueret (§9).
+
+  Ét element udenfor gør hele sættet `development`, også når det kommer med som modpart i en
+  konflikt.
+- En produktfamilie, der aldrig er evalueret, arver derfor aldrig pilot-godkendelsen. Det samme
+  gælder et omdøbt produkt (fail-closed).
+- Der bindes ikke til chunk-id'er.
+- Aktiveringen afvises ikke længere på grund af indhold uden for området (ændret fra §21.9
+  fortolkning 1). Konteksten viser det i `scopeGaps`, og Admin viser "Uden for det godkendte
+  område (giver aldrig produktionsevidens)".
+
+**Tidlig Copilot-pilot og miljøer (B-030):**
+- Den kontrollerede Copilot-pilot kommer efter 8C og er ikke masterfase 18. Den bruger kun:
+  - godkendt pilot-scope;
+  - godkendte dokumenter;
+  - navngivne autoriserede brugere;
+  - tæt monitorering;
+  - guardrails fra 8B og 8C.
+- Et isoleret, hostet pilot-/staging-miljø må etableres før masterfase 21. Det er en
+  forudsætning for den kontrollerede pilot og for masterfase 18. Masterfase 21 er den endelige
+  produktion og go-live.
+- Roadmappen 1–21 er uændret.
+
+**Tests:**
+
+| Lag | Hvad |
+|---|---|
+| pgTAP | `retrieval_configuration_registry` (148). Udfald, usikre gates og intervaller. Accept med rettigheder, begrundelse, én gang, append-only og audit. Godkendelse og aktivering efter accept. Direkte skrivning afvist uden accept. Konteksten falder uden accept. Standard-usikkerhed og hårde brud kan ikke accepteres. Validering af området. Scope-huller som produkt/type |
+| Enhed | `production-evidence` (54): accept/ikke-accept, standard, nyt produkt, anden dokumenttype, inden for området, standard på tværs af produkter, tomt område og ingen tier. `evaluation-publisher` (15): område mangler eller passer ikke, og fixtures uden drift mod pgTAP |
+| Integration | `retrieval-configuration` (14): accept → godkendelse → aktivering. Standard-usikkerhed afvist. Et uevalueret produkt med samme dokumenttype giver `unmet: ["P3"]`, alene og blandet; det evaluerede produkt forbliver production |
+| Mutation | 60/60 fanget: 26 i TypeScript, 32 i SQL og 2 via integration |
+
+**Ikke implementeret (bevidst):**
+- I7 (nedenfor);
+- 8C, rate limiting, samtalehistorik og en rigtig LLM;
+- Learn, Practice og Advise;
+- en Admin-knap til accept.
+
+Godkendelse sker også i I6 via databasefunktionerne.
+
+#### 8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails (definition, ikke påbegyndt)
+
+Defineret i B-030. Påbegyndes kun efter din eksplicitte godkendelse. Uden for I7: rate limiting,
+samtalelagring og retention (8C) samt enterprise-dashboards.
+
+1. **Evalueringsdrift (§20 trin 4):**
+   - et separat evalueringsmiljø;
+   - sikker transport fra I1-motoren til `evaluation_publisher` (`evaluation_publisher_login`
+     med en kortlivet credential fra secret-håndteringen), uden almindelige
+     applikationscredentials;
+   - reproducerbare baseline- og regressionskørsler: samme sæt, gate-sæt, konfiguration og
+     korpus-checksum;
+   - versionerede rapporter med checksums;
+   - manuel og planlagt regression.
+2. **Regressionskontrol (§10.2, D-8):**
+   - En regression med et hårdt gate-brud suspenderer automatisk, uden fallback. Mekanismen i
+     `record_evaluation_run` findes allerede.
+   - En kvalitetsregression giver alarm og vurdering.
+   - Hændelsen indeholder evalueringssæt (id, version, checksum), gate-sæt (id, version,
+     checksum) og runtime-fingeraftrykket.
+3. **Observability (§14), mindst:**
+   - retrieval-latency pr. trin;
+   - fejl hos udbyder, embedding, reranking, retrieval, ingestion og scanner;
+   - kø- og job-sundhed;
+   - den aktive konfiguration og suspenderingsstatus;
+   - evaluerings- og regressionsstatus;
+   - performance-metrics.
+4. **Alarmer (D-15):** `AlertSink` implementeres med `log` og én enkel første kanal. Valget af
+   kanal og modtager (Å-5) forbliver en deploymentbeslutning.
+5. **Målbare performance-exit-kriterier (§12, §17 pkt. 10):**
+   - p50 og p95 måles pr. trin over en defineret kørsel: hele kæden, embedding af forespørgsel,
+     databasesøgning, reranking af 30 kandidater og ingestion af et dokument på 50 sider;
+   - målingen sammenholdes med målene i §12 og registreres med konfigurationens fingeraftryk;
+   - en afvigelse kræver en dokumenteret godkendelse.

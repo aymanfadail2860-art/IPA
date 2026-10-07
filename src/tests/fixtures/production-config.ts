@@ -27,6 +27,11 @@ export const FIXTURE_MODEL = Object.freeze({
 export const FIXTURE_CONFIGURATION_ID = "f6000000-0000-4000-8000-000000000002";
 export const FIXTURE_CHUNKER_VERSION = "structure/1";
 export const FIXTURE_USER = "f6000000-0000-4000-8000-000000000003";
+/** The evaluated area of the fixture configuration: the fixture products' terms (8B-I6.1). */
+export const FIXTURE_SCOPE: readonly { product: string; documentType: string }[] = Object.freeze([
+  { product: "Fiktivt erhvervsansvar", documentType: "terms" },
+  { product: "Testprodukt (fiktiv)", documentType: "terms" },
+]);
 
 export function fixtureMaterial(overrides: Partial<RetrievalFingerprintMaterial> = {}): RetrievalFingerprintMaterial {
   return {
@@ -64,6 +69,11 @@ export interface ContextOverrides {
   productionReady?: boolean;
   notReady?: string[];
   passed?: boolean;
+  /** Approving run's outcome (B-030); default "pass". */
+  outcome?: "pass" | "pass_with_uncertainty" | "insufficient_certainty" | "fail";
+  uncertaintyAccepted?: boolean;
+  tier?: "pilot" | "standard";
+  scope?: { product: string; documentType: string }[];
 }
 
 /** knowledge.retrieval_context() as the database returns it for the fixture configuration. */
@@ -85,15 +95,30 @@ export function fixtureContext(overrides: ContextOverrides = {}): Record<string,
           algorithmVersion: material.algorithmVersion,
           params: material.params,
           chunkerVersions: material.chunkerVersions,
-          tier: "pilot",
-          evaluation: {
-            runId: "f6000000-0000-4000-8000-000000000004",
-            reportChecksum: "a".repeat(64),
-            gateSetChecksum: "b".repeat(64),
-            verdict: overrides.passed === false ? "fail" : "pass",
-            passed: overrides.passed ?? true,
-            evaluatedDocumentTypes: ["terms"],
+          tier: overrides.tier ?? "pilot",
+          evaluation: (() => {
+            const outcome = overrides.outcome ?? (overrides.passed === false ? "fail" : "pass");
+            const accepted = overrides.uncertaintyAccepted ?? false;
+            return {
+              runId: "f6000000-0000-4000-8000-000000000004",
+              reportChecksum: "a".repeat(64),
+              gateSetChecksum: "b".repeat(64),
+              verdict: outcome === "pass" ? "pass" : outcome === "fail" ? "fail" : "uncertain",
+              passed: outcome === "pass",
+              outcome,
+              // As knowledge.evaluation_run_approvable decides it.
+              approved: outcome === "pass" || (outcome === "pass_with_uncertainty" && accepted),
+              uncertaintyAccepted: accepted,
+              uncertainGates: outcome === "pass" ? [] : ["Q1"],
+              evaluatedDocumentTypes: [...new Set((overrides.scope ?? FIXTURE_SCOPE).map((entry) => entry.documentType))].sort(),
+            };
+          })(),
+          scope: {
+            tier: overrides.tier ?? "pilot",
+            entries: (overrides.scope ?? FIXTURE_SCOPE).map((entry) => ({ ...entry })),
+            documentTypes: [...new Set((overrides.scope ?? FIXTURE_SCOPE).map((entry) => entry.documentType))].sort(),
           },
+          scopeGaps: [],
           productionReady: overrides.productionReady ?? (overrides.status !== "suspended" && (overrides.notReady ?? []).length === 0),
           notReady: overrides.notReady ?? (overrides.status === "suspended" ? ["suspended"] : []),
         };

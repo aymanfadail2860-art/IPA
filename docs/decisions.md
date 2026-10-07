@@ -10,6 +10,81 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-030 — Pilot-usikkerhed, pilot-scope, tidlig Copilot-pilot, hostet pilotmiljø og definitionen af 8B-I7 (8B-I6.1)
+
+**Dato:** 7. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §4.4 og §21.9–§21.10, `docs/roadmap.md` (fase 8,
+8C, 18 og 21), `supabase/migrations/20261007000200_pilot_evaluation_policy.sql`,
+`src/lib/knowledge/core/production-conditions.ts`, `evals/engine/runner.ts`
+
+**Beslutning:**
+- **8B-I6 er godkendt** i grundarkitektur og implementering (B-029). Fortolkningerne i §21.9 er
+  godkendt: H6 bedømmer implementering og udbyderkvalitet, ikke P1–P9. En kandidat oprettes ved
+  registreringen. `activate_embedding_model` kræver en godkendt konfiguration. CI-transporten fra
+  evalueringsmotoren til `evaluation_publisher` hører til I7.
+- **Hårde gates H1–H7** har nul tolerance i alle tiers og kan aldrig accepteres manuelt.
+- **Tier pilot:** kvalitetsgates afgøres på punktestimatet mod de låste tærskler. Wilson-
+  intervallerne beregnes, vises, gemmes og markeres fortsat. Består punktestimatet, men er et
+  interval usikkert, får kørslen udfaldet `pass_with_uncertainty`. Den kan først bære en
+  godkendelse og dermed aktiveres, når et menneske med `system.settings.manage` eksplicit har
+  accepteret usikkerheden med en skriftlig begrundelse. Accepten sker aldrig automatisk.
+  Accepten registrerer:
+  - hvem og hvornår;
+  - kørslen og konfigurationen;
+  - det evaluerede område;
+  - de usikre gates med værdi, tærskel og interval;
+  - begrundelsen.
+
+  Accepten er append-only og auditeres.
+- **Tier standard er uændret:** Q1 forbliver 0,95. En usikker standard-kørsel
+  (`insufficient_certainty`) kan hverken godkendes eller accepteres. Der er ingen manuel vej. Målet
+  er fortsat mindst 100 spørgsmål med holdout før masterfase 18.
+- **Pilot-scope:** en pilot-godkendelse gælder kun de par af produkt og dokumenttype, som
+  evalueringskorpusset indeholdt.
+  - Produktet identificeres ved sit eksakte, unikke navn. En omdøbning falder derfor ud af
+    området (fail-closed).
+  - Der bindes ikke til chunk-id'er.
+  - Hvert element i et EvidenceSet skal ligge inden for området (P3). Ellers er hele sættet
+    `development`.
+  - En produktfamilie, der aldrig er evalueret, arver derfor aldrig pilot-godkendelsen, heller
+    ikke med samme dokumenttype.
+  - Tier standard binder fortsat dokumenttyperne (§9).
+  - Indhold uden for området blokerer ikke aktiveringen, men vises i Admin.
+- **Kontrolleret Copilot-pilot:** den kommer efter 8C og er **ikke** masterfase 18. Den må kun
+  bruge:
+  - godkendt pilot-scope;
+  - godkendte dokumenter;
+  - navngivne autoriserede brugere;
+  - tæt monitorering;
+  - guardrails fra 8B og 8C.
+
+  Masterfase 18 (Pilotversion) er uændret.
+- **Hostet pilot-/staging-miljø:** et isoleret, hostet pilotmiljø må etableres før masterfase 21.
+  Det er en forudsætning for den kontrollerede Copilot-pilot og for masterfase 18. Masterfase 21
+  betyder den endelige produktion og go-live.
+- **8B-I7 = "Evaluation Operations, Monitoring & Regression Guardrails"** er defineret i
+  `docs/08b` §21.10, men ikke påbegyndt. Rate limiting, samtalelagring og retention hører
+  fortsat til 8C, ikke I7.
+- **Roadmap 1–21 er uændret** (B-019). Intet omnummereres, og der indsættes ingen masterfase.
+
+**Overvejede alternativer:**
+- *Sænke Q1 for pilot.* Fravalgt: tærsklerne er låst (D-6). Usikkerheden skal ses, ikke skjules.
+- *Automatisk godkendelse af `uncertain` for pilot.* Fravalgt: usikkerheden skal være en bevidst
+  menneskelig beslutning.
+- *Binde scope til chunk-id'er eller dokument-id'er.* Fravalgt: det er for skrøbeligt, fordi hver
+  ny version ville bryde det. Produkt og dokumenttype er den enkleste robuste model.
+- *Afvise aktivering, når korpusset indeholder noget uden for området.* Fravalgt: det låser en
+  afgrænset pilot, så snart der ligger andre produkter i korpusset. Håndhævelsen pr. element
+  giver samme sikkerhed: indhold uden for området bliver aldrig production.
+- *Lade den tidlige pilot være masterfase 18.* Fravalgt: roadmappen er låst (B-019).
+
+**Begrundelse:** en lille pilot kan aldrig blive statistisk sikker med de låste tærskler (35 af
+35 giver et nedre interval på 0,901). Beslutningen gør det muligt at starte en afgrænset pilot
+uden at sænke standarden. Det sker kun med en navngiven menneskelig accept og kun på det område,
+der faktisk er evalueret.
+
+---
+
 ## B-029 — Register over retrieval-konfigurationer, evaluation_publisher og P1–P9 (8B-I6)
 
 **Dato:** 7. oktober 2026
@@ -48,8 +123,8 @@ er ikke omskrevet, fordi loggen er historik.
 kørsel og en godkendelse (exit-kriterium 12). Alt kan forklares bagefter med id'er, checksums og
 fingeraftryk.
 
-**Åbent:** en pilot på 30–50 spørgsmål er altid `uncertain` med de låste tærskler (§21.9). Det
-kræver din beslutning før baseline.
+**Åbent:** en pilot på 30–50 spørgsmål er altid `uncertain` med de låste tærskler (§21.9). —
+*Afgjort i B-030.*
 
 ---
 

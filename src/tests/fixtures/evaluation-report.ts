@@ -8,10 +8,10 @@ import { caseQualityFailures, ENGINE_VERSION, NOT_PRODUCTION_REASON, REPORT_SCHE
 import { validateGateSet } from "../../../evals/engine/schema.ts";
 import { CASE_TYPES, type CaseObservation, type CaseType, type ConfigurationInput, type GateSet, type RerankerComparison, type Violation } from "../../../evals/engine/types.ts";
 
-import { fixtureMaterial } from "./production-config";
+import { FIXTURE_SCOPE, fixtureMaterial } from "./production-config";
 
 /**
- * ⚠ TEST FIXTURE — an evaluation report in the REAL I1 format (runner.ts, reportSchema 3) for a
+ * ⚠ TEST FIXTURE — an evaluation report in the REAL I1 format (runner.ts, reportSchema 4) for a
  * production-grade fixture configuration, assembled with the engine's own functions so that
  * verifyReport and knowledge.record_evaluation_run both recompute it exactly (8B-I6).
  *
@@ -36,6 +36,12 @@ export const PASSING_COUNTS: Readonly<Record<CaseType, number>> = Object.freeze(
   filter: 0,
 });
 
+/** The pilot minimum per type (36 questions): every gate passes on the point estimate, Q1, Q4 and Q5 are uncertain. */
+export const UNCERTAIN_PILOT_COUNTS: Partial<Record<CaseType, number>> = Object.freeze({ direct: 20, historical: 3, conflict: 2, distractor: 3, unanswerable: 5, permission: 3 });
+
+/** 100 questions (tier standard): Q1 is certain, but 8 abstaining questions leave Q4 uncertain. */
+export const UNCERTAIN_STANDARD_COUNTS: Partial<Record<CaseType, number>> = Object.freeze({ direct: 84, historical: 3, conflict: 2, distractor: 3, unanswerable: 5, permission: 3 });
+
 const ABSTAINING: readonly CaseType[] = ["unanswerable", "permission"];
 
 export interface ReportOptions {
@@ -44,7 +50,8 @@ export interface ReportOptions {
   label?: string;
   runId?: string;
   environment?: "evaluation" | "fixture";
-  documentTypes?: string[];
+  /** The evaluated area (product name + document type). Default: the fixture products' terms. */
+  scope?: { product: string; documentType: string }[];
   counts?: Partial<Record<CaseType, number>>;
   gates?: GateSet;
   startedAt?: string;
@@ -79,6 +86,9 @@ export function buildReport(options: ReportOptions = {}): EvaluationReport {
   const declaredFingerprint = configurationFingerprint(declared);
   const runtimeFingerprint = configurationFingerprint(runtime);
   const environment = options.environment ?? "evaluation";
+  const scope = [...new Map((options.scope ?? FIXTURE_SCOPE).map((entry) => [`${entry.product}\u0000${entry.documentType}`, { ...entry }])).values()].sort((a, b) =>
+    a.product < b.product ? -1 : a.product > b.product ? 1 : a.documentType < b.documentType ? -1 : a.documentType > b.documentType ? 1 : 0,
+  );
 
   const runViolations: Violation[] = [...(options.violations ?? [])];
   if (runtimeFingerprint !== declaredFingerprint) runViolations.push({ gate: "H6", caseId: null, explanation: "Runtime-fingeraftrykket matcher ikke den evaluerede konfiguration." });
@@ -144,7 +154,12 @@ export function buildReport(options: ReportOptions = {}): EvaluationReport {
       runtimeFingerprint,
       matches: declaredFingerprint === runtimeFingerprint,
     },
-    corpus: { checksumBefore: "d".repeat(64), checksumAfter: "d".repeat(64), documentTypes: [...new Set(options.documentTypes ?? ["terms"])].sort() },
+    corpus: {
+      checksumBefore: "d".repeat(64),
+      checksumAfter: "d".repeat(64),
+      documentTypes: [...new Set(scope.map((entry) => entry.documentType))].sort(),
+      scope,
+    },
     ...results,
     verdict: results.verdict,
     production: { eligible: false, reason: NOT_PRODUCTION_REASON },

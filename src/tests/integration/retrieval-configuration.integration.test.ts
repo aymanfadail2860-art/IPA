@@ -10,7 +10,7 @@ import { userText } from "@/lib/egress/classification";
 import { EvidenceGradeError, requireProductionEvidence } from "@/lib/knowledge/core/evidence";
 import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
 
-import { buildReport, GATES_V1 } from "../fixtures/evaluation-report";
+import { buildReport, GATES_V1, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "../fixtures/evaluation-report";
 import { buildPdf } from "../fixtures/knowledge-pdfs";
 import { fixtureMaterial, productionProviders } from "../fixtures/production-config";
 
@@ -52,14 +52,16 @@ describe.skipIf(!configured)("retrieval configuration register against the local
   let serviceClient: SupabaseClient;
   let bedrockModelId: string;
   let testModelId: string | null;
-  let documentTypes: string[];
+  let scope: { product: string; documentType: string }[];
+  let registerProductId: string;
+  let otherProductId: string;
   const configurations: Record<string, string> = {};
   let startedAt: Date;
 
   const knowledge = (client: SupabaseClient) => client.schema("knowledge");
   const publish = (report: EvaluationReport) => createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(report, GATES_V1);
   const report = (label: string, options: Parameters<typeof buildReport>[0] = {}) =>
-    buildReport({ runId: randomUUID(), label, documentTypes, ...options });
+    buildReport({ runId: randomUUID(), label, scope, ...options });
   const configurationOf = async (fingerprint: string) => (await admin<{ id: string }[]>`select id from knowledge.retrieval_configurations where fingerprint = ${fingerprint}`)[0]!.id;
   const latestRun = async (configurationId: string) =>
     (await admin<{ id: string }[]>`select id from knowledge.evaluation_runs where configuration_id = ${configurationId} order by registered_at desc limit 1`)[0]!.id;
@@ -73,7 +75,8 @@ describe.skipIf(!configured)("retrieval configuration register against the local
   const retrieve = (client: SupabaseClient, request: Partial<RetrievalRequest> = {}) => {
     const providers = productionProviders();
     return runRetrieval(
-      { query: userText(`Dækker forsikringen ${marker}?`, { caseBound: false, redacted: true }), ...request },
+      // The evaluated product only — the corpus of other suites is outside the approved scope.
+      { query: userText(`Dækker forsikringen ${marker}?`, { caseBound: false, redacted: true }), productIds: [registerProductId], ...request },
       { db: knowledge(client), embedding: { embedder: providers.embedder, modelId: bedrockModelId }, reranker: providers.reranker, config: DEFAULT_RETRIEVAL_CONFIG },
     );
   };
@@ -101,17 +104,30 @@ describe.skipIf(!configured)("retrieval configuration register against the local
 
     // A published document of our own (chunker structure/1).
     const productId = await runProduct(adminClient, "Register");
+    registerProductId = productId;
     const version = await uploadVersion(adminClient, await buildPdf([{ lines: [{ text: `Registerbetingelser ${RUN}`, size: 16, bold: true }, { text: "§ 1 Dækning", size: 13, bold: true, spaceBefore: 10 }, { text: `Forsikringen dækker fiktiv skade ${marker}.`, spaceBefore: 4 }] }]), {
       title: `Registerbetingelser ${RUN}`,
       productId,
       documentType: "terms",
       validFrom: "2020-01-01",
     });
+    // A product that is never evaluated: same document type, other product family (8B-I6.1). Other
+    // wording than ours, so it is not linked as duplicate content (a conflict counterpart is an item).
+    otherProductId = await runProduct(adminClient, "Uevalueret");
+    const other = await uploadVersion(adminClient, await buildPdf([{ lines: [{ text: `Uevaluerede betingelser ${RUN}`, size: 16, bold: true }, { text: "§ 1 Dækning", size: 13, bold: true, spaceBefore: 10 }, { text: `Den uevaluerede produktfamilie dækker også fiktiv skade ${marker}.`, spaceBefore: 4 }] }]), {
+      title: `Uevaluerede betingelser ${RUN}`,
+      productId: otherProductId,
+      documentType: "terms",
+      validFrom: "2020-01-01",
+    });
     await runWorkerOnce();
-    let error = await rpc(adminClient, "start_review", { p_version_id: version.versionId });
-    if (error) throw error;
-    error = await rpc(adminClient, "approve_version", { p_version_id: version.versionId, p_acknowledged_warnings: ["predecessor_superseded", "no_grants"] });
-    if (error) throw error;
+    let error: Awaited<ReturnType<typeof rpc>> = null;
+    for (const versionId of [version.versionId, other.versionId]) {
+      error = await rpc(adminClient, "start_review", { p_version_id: versionId });
+      if (error) throw error;
+      error = await rpc(adminClient, "approve_version", { p_version_id: versionId, p_acknowledged_warnings: ["predecessor_superseded", "no_grants"] });
+      if (error) throw error;
+    }
 
     // Nothing from earlier runs in service; the local test model is remembered for the restore.
     await takeOutOfService();
@@ -134,10 +150,8 @@ describe.skipIf(!configured)("retrieval configuration register against the local
       where v.status in ('processed', 'under_review', 'rejected', 'published')
         and not exists (select 1 from knowledge.chunk_embeddings e where e.chunk_id = c.id and e.embedding_model_id = ${bedrockModelId})`;
 
-    // The evaluated document types cover the local corpus (pilot scope).
-    documentTypes = (await admin<{ t: string }[]>`
-      select distinct d.document_type as t from knowledge.document_versions v join knowledge.documents d on d.id = v.document_id
-      where v.status = 'published' order by 1`).map((row) => row.t);
+    // The evaluated area: our own product's terms only (pilot scope, 8B-I6.1).
+    scope = [{ product: `Testprodukt Register ${RUN} (fiktiv)`, documentType: "terms" }];
 
     // The gate set: registered by the publisher, approved by a human (idempotent across runs).
     const gateSetId = await sqlPublisherConnection(publisherSql).registerGateSet(GATES_V1);
@@ -190,13 +204,34 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     await expect(publisherSql`select knowledge.record_evaluation_run(${publisherSql.json(JSON.parse(JSON.stringify(tampered)))})`).rejects.toThrow(/report_checksum/);
   });
 
-  it("'uncertain' is not 'pass': a 36-question pilot cannot be approved", async () => {
-    const small = report("it-config-uncertain", { configuration: material({ minScore: 0.15 }), counts: { direct: 20, historical: 3, conflict: 2, distractor: 3, unanswerable: 5, permission: 3 } });
+  it("pilot: 'uncertain' is never converted automatically — it needs an explicit human acceptance (B-030)", async () => {
+    const small = report("it-config-uncertain", { configuration: material({ minScore: 0.15 }), counts: UNCERTAIN_PILOT_COUNTS });
     expect(small.verdict).toBe("uncertain");
+    expect(small.tier).toBe("pilot");
     await publish(small);
     const id = await configurationOf(small.configuration.declaredFingerprint);
-    const error = await approve(id, await latestRun(id));
-    expect(error?.message).toMatch(/afgørelsen er "uncertain"/);
+    const run = await latestRun(id);
+    const [registered] = await admin<{ outcome: string; uncertain_gates: string[] }[]>`select outcome, uncertain_gates from knowledge.evaluation_runs where id = ${run}`;
+    expect(registered).toEqual({ outcome: "pass_with_uncertainty", uncertain_gates: ["Q1", "Q4", "Q5"] });
+    expect((await approve(id, run))?.message).toMatch(/ikke accepteret af et menneske/);
+    expect((await rpc(advisorClient, "accept_evaluation_uncertainty", { p_run_id: run, p_justification: "Rådgiverens forsøg på at acceptere usikkerheden." }))?.code).toBe("42501");
+    expect(await rpc(adminClient, "accept_evaluation_uncertainty", { p_run_id: run, p_justification: "Fiktiv accept: begrænset pilot med tæt opfølgning." })).toBeNull();
+    const [acceptance] = await admin<{ accepted_by: string; scope: unknown; gates: string[] }[]>`
+      select accepted_by, scope, (select array_agg(g ->> 'id' order by g ->> 'id') from jsonb_array_elements(uncertain_gates) g) as gates
+      from knowledge.evaluation_uncertainty_acceptances where run_id = ${run}`;
+    expect(acceptance).toMatchObject({ scope, gates: ["Q1", "Q4", "Q5"] });
+    expect(acceptance!.accepted_by).toBeTruthy();
+    expect(await approve(id, run)).toBeNull();
+  });
+
+  it("standard: an uncertain run can neither be approved nor accepted — the quality bar is unchanged", async () => {
+    const wide = report("it-config-standard-uncertain", { configuration: material({ minScore: 0.16 }), counts: UNCERTAIN_STANDARD_COUNTS });
+    expect(wide).toMatchObject({ verdict: "uncertain", tier: "standard" });
+    await publish(wide);
+    const id = await configurationOf(wide.configuration.declaredFingerprint);
+    const run = await latestRun(id);
+    expect((await approve(id, run))?.message).toMatch(/statistisk sikre/);
+    expect((await rpc(adminClient, "accept_evaluation_uncertainty", { p_run_id: run, p_justification: "Forsøg på at acceptere standard-usikkerhed." }))?.message).toMatch(/not_uncertain/);
   });
 
   it("every failure needs a written root-cause note before approval (pilot rule 3)", async () => {
@@ -241,6 +276,21 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(set.items.some((item) => item.excerpt.text.includes(marker))).toBe(true);
     expect(set.items.every((item) => item.chunkerVersion === "structure/1")).toBe(true);
     expect(requireProductionEvidence(set)).toBe(set);
+  });
+
+  it("pilot scope: a never-evaluated product with the same document type does not inherit production grade (P3)", async () => {
+    const outside = await retrieve(adminClient, { productIds: [otherProductId] });
+    expect(outside.items.length).toBeGreaterThan(0);
+    expect(outside.items.every((item) => item.document.type === "terms")).toBe(true);
+    expect(outside.retrieval.grade).toBe("development");
+    expect(outside.retrieval.unmet).toEqual(["P3"]);
+    expect(() => requireProductionEvidence(outside)).toThrow(EvidenceGradeError);
+    // Both products together: one item outside the scope makes the whole set development.
+    const mixed = await retrieve(adminClient, { productIds: [registerProductId, otherProductId] });
+    expect(new Set(mixed.items.map((item) => item.product.id)).size).toBe(2);
+    expect(mixed.retrieval.unmet).toEqual(["P3"]);
+    // The evaluated product stays production.
+    expect((await retrieve(adminClient)).retrieval.grade).toBe("production");
   });
 
   it("falls to development with a changed parameter (P4) and is never production as service_role (P6)", async () => {
