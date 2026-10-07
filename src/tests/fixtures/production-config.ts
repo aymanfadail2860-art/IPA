@@ -27,10 +27,19 @@ export const FIXTURE_MODEL = Object.freeze({
 export const FIXTURE_CONFIGURATION_ID = "f6000000-0000-4000-8000-000000000002";
 export const FIXTURE_CHUNKER_VERSION = "structure/1";
 export const FIXTURE_USER = "f6000000-0000-4000-8000-000000000003";
+/** A scope entry: the product's stable id, its name at evaluation time, a document type (8B-I6.2). */
+export interface FixtureScopeEntry {
+  documentType: string;
+  productId: string;
+  productName: string;
+}
+/** The fixture products (stable ids). */
+export const FIXTURE_PRODUCT_ID = "fa000000-0000-4000-8000-000000000001";
+export const FIXTURE_TEST_PRODUCT_ID = "fa000000-0000-4000-8000-000000000002";
 /** The evaluated area of the fixture configuration: the fixture products' terms (8B-I6.1). */
-export const FIXTURE_SCOPE: readonly { product: string; documentType: string }[] = Object.freeze([
-  { product: "Fiktivt erhvervsansvar", documentType: "terms" },
-  { product: "Testprodukt (fiktiv)", documentType: "terms" },
+export const FIXTURE_SCOPE: readonly FixtureScopeEntry[] = Object.freeze([
+  { documentType: "terms", productId: FIXTURE_PRODUCT_ID, productName: "Fiktivt erhvervsansvar" },
+  { documentType: "terms", productId: FIXTURE_TEST_PRODUCT_ID, productName: "Testprodukt (fiktiv)" },
 ]);
 
 export function fixtureMaterial(overrides: Partial<RetrievalFingerprintMaterial> = {}): RetrievalFingerprintMaterial {
@@ -73,7 +82,7 @@ export interface ContextOverrides {
   outcome?: "pass" | "pass_with_uncertainty" | "insufficient_certainty" | "fail";
   uncertaintyAccepted?: boolean;
   tier?: "pilot" | "standard";
-  scope?: { product: string; documentType: string }[];
+  scope?: FixtureScopeEntry[];
 }
 
 /** knowledge.retrieval_context() as the database returns it for the fixture configuration. */
@@ -154,7 +163,7 @@ export function fixtureRow(n: number, overrides: Partial<SearchRow> = {}): Searc
     document_id: `f9000000-0000-4000-8000-00000000000${n}`,
     document_title: `Fiktive betingelser ${n}`,
     document_type: "terms",
-    product_id: "fa000000-0000-4000-8000-000000000001",
+    product_id: FIXTURE_PRODUCT_ID,
     product_name: "Fiktivt erhvervsansvar",
     source_type: "manual_upload",
     temporal_status: "current",

@@ -10,6 +10,48 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-031 — Stabil produktidentitet i pilot-scope (8B-I6.2); 8B-I6 lukket
+
+**Dato:** 7. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.11,
+`supabase/migrations/20261007000300_stable_pilot_scope.sql`,
+`src/lib/knowledge/core/production-conditions.ts`, `evals/engine/runner.ts`
+
+**Beslutning:**
+- **8B-I6.1 er godkendt** (B-030).
+- **Identitet:** pilot-scope binder til produktets stabile id (`knowledge.products.id`) og
+  dokumenttypen, ikke til produktets navn.
+- **Scope-element:** et element er `{ productId, productName, documentType }` (`reportSchema` 5).
+  Kun `productId` og `documentType` afgør P3 og scope-hullerne. `productName` er navnet på
+  evalueringstidspunktet og findes, så rapporten kan læses senere.
+- **Omdøbning:** et omdøbt, evalueret produkt forbliver i området. Et nyt produkt med samme navn
+  har et andet id og arver aldrig production-grad.
+- **Historik:** kørslen (`evaluated_scope` og hele rapporten) og accepten er append-only og
+  bevarer id og navn fra evalueringen. En omdøbning omskriver dem ikke.
+- **Ikke ændret:** pilotreglen for usikkerhed, Q-tærskler, H1–H7, P1–P9, beslutningen om den
+  tidlige pilot og definitionen af I7.
+- **8B-I6 er lukket** med I6.1 og I6.2, når denne beslutning godkendes. Masterfase 8B er fortsat
+  under implementering, fordi I7 mangler.
+
+**Overvejede alternativer:**
+- *Navnet som identitet (I6.1).* Fravalgt: det er fail-closed, men skrøbeligt. En omdøbning
+  fjerner godkendelsen, og et genbrugt navn er kun spærret, så længe navnet er unikt.
+- *En ny forretningsnøgle på produkter.* Fravalgt: id'et findes allerede og er stabilt. En ny
+  nøgle ville kræve ændringer i den låste domænemodel.
+- *Opdatere gamle kørsler til id'er.* Fravalgt: kørslerne er append-only, og en oversættelse fra
+  navn til id ville være et gæt. Migrationen stopper i stedet, hvis sådanne kørsler findes. Der
+  findes ingen uden for lokale tests.
+
+**Begrundelse:** et produkts identitet må ikke afhænge af en tekst, som en administrator kan
+ændre. Med id'et følger godkendelsen netop det produkt, der blev evalueret, og rapporten kan
+stadig forklare, hvad det hed dengang.
+
+**Udledt (til bekræftelse):** evalueringsmiljøets korpus skal bære produktionens produkt-id'er,
+for eksempel som en kopi med samme id'er. Ellers er intet indhold i scope (fail-closed, P3).
+Bindingen hører til evalueringsmiljøet i I7.
+
+---
+
 ## B-030 — Pilot-usikkerhed, pilot-scope, tidlig Copilot-pilot, hostet pilotmiljø og definitionen af 8B-I7 (8B-I6.1)
 
 **Dato:** 7. oktober 2026
@@ -42,7 +84,8 @@ er ikke omskrevet, fordi loggen er historik.
 - **Pilot-scope:** en pilot-godkendelse gælder kun de par af produkt og dokumenttype, som
   evalueringskorpusset indeholdt.
   - Produktet identificeres ved sit eksakte, unikke navn. En omdøbning falder derfor ud af
-    området (fail-closed).
+    området (fail-closed). *Ændret i B-031: identiteten er produktets stabile id, og navnet er
+    et øjebliksbillede.*
   - Der bindes ikke til chunk-id'er.
   - Hvert element i et EvidenceSet skal ligge inden for området (P3). Ellers er hele sættet
     `development`.

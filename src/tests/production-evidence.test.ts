@@ -236,11 +236,35 @@ describe("P3 — pilot evaluation policy and approved scope (8B-I6.1, B-030)", (
     expectOnly(await retrieve({ rows: [fixtureRow(1, { document_type: "guidance" })], contextOverrides: { tier: "standard" } }), "P3");
   });
 
+  it("stable identity: a renamed evaluated product stays inside the approved scope (8B-I6.2)", async () => {
+    const renamed = fixtureRow(1, { product_name: "Erhvervsansvar — nyt navn" });
+    expect((await retrieve({ rows: [renamed, fixtureRow(2, { product_name: "Erhvervsansvar — nyt navn" })] })).retrieval.grade).toBe("production");
+  });
+
+  it("stable identity: a new product carrying an evaluated product's name does not inherit the approval (8B-I6.2)", async () => {
+    const sameName = fixtureRow(3, { product_name: "Fiktivt erhvervsansvar", product_id: "fa000000-0000-4000-8000-00000000000a" });
+    expectOnly(await retrieve({ rows: [sameName] }), "P3");
+    expectOnly(await retrieve({ rows: [fixtureRow(1), sameName] }), "P3");
+  });
+
+  it("a scope entry without a stable product id makes the context untrustworthy — development, never a name match (8B-I6.2)", async () => {
+    const byName = [{ documentType: "terms", productId: "Fiktivt erhvervsansvar", productName: "Fiktivt erhvervsansvar" }];
+    expect(parseRetrievalContext(fixtureContext({ scope: byName }))).toBeNull();
+    expect((await retrieve({ contextOverrides: { scope: byName } })).retrieval.grade).toBe("development");
+  });
+
+  it("the product name in the scope is a snapshot only: it never decides coverage (8B-I6.2)", () => {
+    const item = evidenceItem(1);
+    const scope = (entries: { productId: string; productName: string; documentType: string }[]) => ({ tier: "pilot" as const, entries, documentTypes: ["terms"] });
+    expect(withinApprovedScope(item, scope([{ productId: item.product.id, productName: "Et helt andet navn", documentType: "terms" }]))).toBe(true);
+    expect(withinApprovedScope(item, scope([{ productId: "fa000000-0000-4000-8000-00000000000b", productName: item.product.name, documentType: "terms" }]))).toBe(false);
+  });
+
   it("an empty or unknown scope covers nothing (fail-closed)", async () => {
     expectOnly(await retrieve({ contextOverrides: { scope: [] } }), "P3");
     // Without a tier (no approved run) no scope covers anything, whatever its entries.
     const item = evidenceItem(1);
-    const entries = [{ product: item.product.name, documentType: item.document.type }];
+    const entries = [{ productId: item.product.id, productName: item.product.name, documentType: item.document.type }];
     expect(withinApprovedScope(item, { tier: "pilot", entries, documentTypes: [item.document.type] })).toBe(true);
     expect(withinApprovedScope(item, { tier: null, entries, documentTypes: [item.document.type] })).toBe(false);
   });

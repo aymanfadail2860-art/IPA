@@ -126,6 +126,12 @@ describe("the publisher refuses before anything is sent", () => {
     const noScope = buildReport();
     (noScope.corpus as { scope: unknown }).scope = [];
     expect(await refusal(reseal(noScope))).toMatch(/Det evaluerede område \(produkter og dokumenttyper\) mangler/);
+    // The product name is never the identity: a name-only entry, or an id that is not one, is refused (8B-I6.2).
+    for (const entry of [{ product: "Fiktivt erhvervsansvar", documentType: "terms" }, { documentType: "terms", productId: "Fiktivt erhvervsansvar", productName: "Fiktivt erhvervsansvar" }]) {
+      const report = buildReport();
+      (report.corpus as { scope: unknown }).scope = [entry];
+      expect(await refusal(reseal(report))).toMatch(/Det evaluerede område \(produkter og dokumenttyper\) mangler/);
+    }
     const mismatch = buildReport();
     mismatch.corpus.documentTypes = ["guidance", "terms"];
     expect(await refusal(reseal(mismatch))).toMatch(/stemmer ikke med det evaluerede område/);

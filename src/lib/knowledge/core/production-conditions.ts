@@ -75,9 +75,14 @@ function evaluatedChunkerVersions(versions: readonly string[] | undefined): read
   }
 }
 
-/** Does the approved area cover this item? Fail-closed: no tier or an empty scope covers nothing. */
+/**
+ * Does the approved area cover this item? For pilot the product's stable id and the document type
+ * must be an evaluated pair — the name is never compared, so a renamed product stays covered and
+ * a new product with an evaluated product's name does not (8B-I6.2). Fail-closed: no tier or an
+ * empty scope covers nothing.
+ */
 export function withinApprovedScope(item: EvidenceItem, scope: ApprovedScope): boolean {
-  if (scope.tier === "pilot") return scope.entries.some((entry) => entry.product === item.product.name && entry.documentType === item.document.type);
+  if (scope.tier === "pilot") return scope.entries.some((entry) => entry.productId === item.product.id && entry.documentType === item.document.type);
   if (scope.tier === "standard") return scope.documentTypes.includes(item.document.type);
   return false;
 }

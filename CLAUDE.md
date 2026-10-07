@@ -17,9 +17,9 @@ embedding og reranking, ikke koblet på appen), 8B-I2.5 (ekstern AI-datagrænse)
 (workerens databaseidentitet og databasefunktioner), 8B-I4 (workerens runtime) og 8B-I5
 (upload-sikkerhed, karantæne og malware-scanning) er gennemført og godkendt og fuldt lukket med
 8B-I5.5 (scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6). 8B-I6
-(register over retrieval-konfigurationer og ProductionEvidenceSet) er gennemført og godkendt.
-8B-I6.1 (pilot-politik for statistisk usikkerhed og pilot-scope, B-030) er gennemført og venter på
-godkendelse. 8B-I7 (Evaluation Operations, Monitoring & Regression Guardrails) er defineret, men
+(register over retrieval-konfigurationer og ProductionEvidenceSet) er gennemført, godkendt og
+endeligt lukket med 8B-I6.1 (pilot-politik for statistisk usikkerhed og pilot-scope, B-030) og
+8B-I6.2 (stabil produktidentitet i pilot-scope, B-031). 8B-I7 (Evaluation Operations, Monitoring & Regression Guardrails) er defineret, men
 ikke påbegyndt. Resten af 8B er ikke påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
@@ -95,7 +95,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 og 8B-I6.1 gennemført, 8B-I7 defineret, resten ikke påbegyndt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 defineret, resten ikke påbegyndt |
 | 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |

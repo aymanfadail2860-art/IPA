@@ -4,14 +4,14 @@ import path from "node:path";
 import { checksumOf, configurationFingerprint, gateSetChecksum } from "../../../evals/engine/checksum.ts";
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "../../../evals/engine/gates.ts";
 import { computeMetrics } from "../../../evals/engine/metrics.ts";
-import { caseQualityFailures, ENGINE_VERSION, NOT_PRODUCTION_REASON, REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport, type Failure } from "../../../evals/engine/runner.ts";
+import { caseQualityFailures, compareScope, ENGINE_VERSION, NOT_PRODUCTION_REASON, REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport, type Failure } from "../../../evals/engine/runner.ts";
 import { validateGateSet } from "../../../evals/engine/schema.ts";
 import { CASE_TYPES, type CaseObservation, type CaseType, type ConfigurationInput, type GateSet, type RerankerComparison, type Violation } from "../../../evals/engine/types.ts";
 
-import { FIXTURE_SCOPE, fixtureMaterial } from "./production-config";
+import { FIXTURE_SCOPE, fixtureMaterial, type FixtureScopeEntry } from "./production-config";
 
 /**
- * ⚠ TEST FIXTURE — an evaluation report in the REAL I1 format (runner.ts, reportSchema 4) for a
+ * ⚠ TEST FIXTURE — an evaluation report in the REAL I1 format (runner.ts, reportSchema 5) for a
  * production-grade fixture configuration, assembled with the engine's own functions so that
  * verifyReport and knowledge.record_evaluation_run both recompute it exactly (8B-I6).
  *
@@ -50,8 +50,8 @@ export interface ReportOptions {
   label?: string;
   runId?: string;
   environment?: "evaluation" | "fixture";
-  /** The evaluated area (product name + document type). Default: the fixture products' terms. */
-  scope?: { product: string; documentType: string }[];
+  /** The evaluated area (product id + name snapshot + document type). Default: the fixture products' terms. */
+  scope?: FixtureScopeEntry[];
   counts?: Partial<Record<CaseType, number>>;
   gates?: GateSet;
   startedAt?: string;
@@ -86,9 +86,7 @@ export function buildReport(options: ReportOptions = {}): EvaluationReport {
   const declaredFingerprint = configurationFingerprint(declared);
   const runtimeFingerprint = configurationFingerprint(runtime);
   const environment = options.environment ?? "evaluation";
-  const scope = [...new Map((options.scope ?? FIXTURE_SCOPE).map((entry) => [`${entry.product}\u0000${entry.documentType}`, { ...entry }])).values()].sort((a, b) =>
-    a.product < b.product ? -1 : a.product > b.product ? 1 : a.documentType < b.documentType ? -1 : a.documentType > b.documentType ? 1 : 0,
-  );
+  const scope = [...new Map((options.scope ?? FIXTURE_SCOPE).map((entry) => [`${entry.productId}\u0000${entry.documentType}`, { documentType: entry.documentType, productId: entry.productId, productName: entry.productName }])).values()].sort(compareScope);
 
   const runViolations: Violation[] = [...(options.violations ?? [])];
   if (runtimeFingerprint !== declaredFingerprint) runViolations.push({ gate: "H6", caseId: null, explanation: "Runtime-fingeraftrykket matcher ikke den evaluerede konfiguration." });

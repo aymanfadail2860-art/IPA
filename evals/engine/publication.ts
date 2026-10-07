@@ -165,6 +165,20 @@ export function isDevelopmentConfiguration(configuration: EvaluationReport["conf
  * the evaluated corpus's document types, and no development implementation. A development or
  * fixture report can therefore never be published as a production approval.
  */
+const SCOPE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** A scope entry: the product's stable id (the identity), its name then (a snapshot), a document type (8B-I6.2). */
+function validScopeEntry(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null) return false;
+  const { productId, productName, documentType } = entry as Record<string, unknown>;
+  return (
+    Object.keys(entry).sort().join(",") === "documentType,productId,productName" &&
+    typeof productId === "string" && SCOPE_UUID.test(productId) &&
+    typeof productName === "string" && productName.length > 0 && productName.trim() === productName &&
+    typeof documentType === "string" && documentType.length > 0
+  );
+}
+
 export function verifyForPublication(report: EvaluationReport, gates: GateSet): VerificationResult {
   const verified = verifyReport(report, gates);
   const problems = verified.ok ? [] : [...verified.problems];
@@ -192,7 +206,7 @@ export function verifyForPublication(report: EvaluationReport, gates: GateSet): 
   if (!Array.isArray(types) || types.length === 0 || types.join("\u0000") !== [...new Set(types)].sort().join("\u0000")) problems.push("Korpussets dokumenttyper mangler.");
   if (report.corpus.checksumBefore !== report.corpus.checksumAfter) problems.push("Korpusset ændrede sig under kørslen.");
   const scope = report.corpus.scope;
-  if (!Array.isArray(scope) || scope.length === 0 || scope.some((entry) => !entry || typeof entry.product !== "string" || entry.product.trim() !== entry.product || entry.product.length === 0 || typeof entry.documentType !== "string")) {
+  if (!Array.isArray(scope) || scope.length === 0 || scope.some((entry) => !validScopeEntry(entry)) || new Set(scope.map((entry) => `${entry.productId}\u0000${entry.documentType}`)).size !== scope.length) {
     problems.push("Det evaluerede område (produkter og dokumenttyper) mangler.");
   } else if (Array.isArray(types) && [...new Set(scope.map((entry) => entry.documentType))].sort().join("\u0000") !== types.join("\u0000")) {
     problems.push("Dokumenttyperne stemmer ikke med det evaluerede område.");

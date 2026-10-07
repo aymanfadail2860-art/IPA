@@ -90,6 +90,18 @@ describe("the evaluation run", () => {
     expect(report.configuration).toMatchObject({ declaredFingerprint: doubleFingerprint, runtimeFingerprint: doubleFingerprint, matches: true, environment: "evaluation" });
     expect(report.corpus.checksumBefore).toBe(report.corpus.checksumAfter);
     expect(report.cases.map((observation) => observation.caseId)).not.toContain("ex-retired-001");
+    // The evaluated area names each product by its bound (stable) id; the name is a snapshot (8B-I6.2).
+    const binding = fixture.binding();
+    expect(report.corpus.scope.length).toBeGreaterThan(0);
+    for (const entry of report.corpus.scope) {
+      const product = inputs.set.manifest.products.find((candidate) => binding.products[candidate.key] === entry.productId);
+      expect(product?.name).toBe(entry.productName);
+    }
+  });
+
+  it("refuses to run when a manifest product has no stable id in the corpus binding (8B-I6.2)", async () => {
+    const unbound = { ...fixture, binding: () => ({ ...fixture.binding(), products: {} }) };
+    await expect(run({ retrieval: productionDouble(unbound) })).rejects.toThrow(/intet id i korpusset/);
   });
 
   it("a changed retrieval fingerprint is caught (H6) and recorded", async () => {

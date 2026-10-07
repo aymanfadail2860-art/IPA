@@ -5,7 +5,7 @@ import { parseRetrievalContext } from "@/lib/knowledge/core/retrieval-context";
 import type { Reranker } from "@/lib/knowledge/core/reranker";
 import { DEFAULT_RETRIEVAL_CONFIG, RETRIEVAL_ALGORITHM_VERSION } from "@/lib/knowledge/retrieval-core";
 
-import { FIXTURE_CHUNKER_VERSION, FIXTURE_MODEL, fixtureContext, productionProviders } from "./production-config";
+import { FIXTURE_CHUNKER_VERSION, FIXTURE_MODEL, FIXTURE_TEST_PRODUCT_ID, fixtureContext, productionProviders } from "./production-config";
 
 /**
  * Fictional evidence for the AI Gateway tests (phase 8). Since 8B-I6 production grade is
@@ -32,7 +32,7 @@ export function evidenceItem(n: number, overrides: Partial<EvidenceItem> = {}): 
     chunkIds: [`00000000-0000-4000-8000-00000000020${n}`],
     chunkIndex: 0,
     chunkerVersion: FIXTURE_CHUNKER_VERSION,
-    product: { id: "p", name: "Testprodukt (fiktiv)" },
+    product: { id: FIXTURE_TEST_PRODUCT_ID, name: "Testprodukt (fiktiv)" },
     document: { title: `Testbetingelser ${n} (fiktiv)`, type: "terms", versionLabel: "1", language: "da" },
     location: { pageStart: 1, pageEnd: 1, sectionNumber: `${n}.1`, heading: null, headingPath: [] },
     excerpt: { text: `Forsikringen dækker skade forårsaget af droner i pkt. ${n}.`, leadIn: null },

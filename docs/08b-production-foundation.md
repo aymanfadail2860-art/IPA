@@ -1221,8 +1221,9 @@ implementeret.**
 | **8B-I5** | Upload-sikkerhed, karantæne og malware-scanning: karantæne-bucket, tilstandsmaskine, byteniveau-validering, ClamAV, PDF-inspektion, verdict afledt i databasen, checksum-binding og release-gate (§7, D-11, D-12) | ✅ Gennemført og godkendt 2026-10-06 (B-026), fuldt lukket med 8B-I5.5 og 8B-I5.6 |
 | **8B-I5.5** | Scanner-isolation og signaturforsyning: ClamAV som egen ECS-service uden taskrolle og internet, privat endpoint via Cloud Map, planlagt signaturimage med verifikation, scanner-revision på verdicts (§21.7) | ✅ Gennemført og godkendt 2026-10-06 (B-027) |
 | **8B-I5.6** | ClamAV-patchversion: production på ClamAV 1.4.6 (LTS 1.4), godkendte engine-versioner i databasen, signaturopdatering adskilt fra engine-opgradering (§21.8) | ✅ Gennemført og godkendt 2026-10-07 (B-028). I5, I5.5 og I5.6 er fuldt lukket. Kandidatkørslen mod 1.4.6 er en deploymentforudsætning |
-| **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført og godkendt 2026-10-07 (B-029, B-030) |
-| **8B-I6.1** | Pilot-politik for statistisk usikkerhed med menneskelig accept, pilot-scope på produkt og dokumenttype (§21.10) | ✅ Gennemført 2026-10-07 (B-030). Venter på din godkendelse |
+| **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført og godkendt 2026-10-07 (B-029, B-030). Lukket med I6.1 og I6.2 |
+| **8B-I6.1** | Pilot-politik for statistisk usikkerhed med menneskelig accept, pilot-scope på produkt og dokumenttype (§21.10) | ✅ Gennemført og godkendt 2026-10-07 (B-030) |
+| **8B-I6.2** | Stabil produktidentitet i pilot-scope: produkt-id og dokumenttype, navnet som historisk øjebliksbillede (§21.11) | ✅ Gennemført og godkendt 2026-10-07 (B-031). 8B-I6 er hermed endeligt lukket |
 | **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails (definition i §21.10) | Defineret (B-030). Ikke påbegyndt — kræver din eksplicitte godkendelse |
 | Øvrige | Baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
 
@@ -2513,8 +2514,9 @@ genberegnede afgørelse og kan ikke sættes:
   punktestimatet, og at usikkerheden er accepteret.
 
 **Pilot-scope:**
-- Rapporten bærer `corpus.scope`: de unikke par `{ product, documentType }` fra
-  evalueringskorpusset. Produktet angives ved sit eksakte, unikke navn.
+- Rapporten bærer `corpus.scope`: de unikke par af produkt og dokumenttype fra
+  evalueringskorpusset. I I6.1 blev produktet angivet ved sit eksakte, unikke navn. *Erstattet i
+  8B-I6.2 (§21.11):* identiteten er produktets stabile id, og navnet er et øjebliksbillede.
 - `record_evaluation_run` afviser et tomt område, et navn med omgivende mellemrum, en ukendt
   dokumenttype og dubletter. Den afviser også dokumenttyper, der ikke svarer til området.
 - Området gemmes på kørslen (`evaluated_scope`).
@@ -2524,8 +2526,8 @@ genberegnede afgørelse og kan ikke sættes:
 
   Ét element udenfor gør hele sættet `development`, også når det kommer med som modpart i en
   konflikt.
-- En produktfamilie, der aldrig er evalueret, arver derfor aldrig pilot-godkendelsen. Det samme
-  gælder et omdøbt produkt (fail-closed).
+- En produktfamilie, der aldrig er evalueret, arver derfor aldrig pilot-godkendelsen. Fra I6.2
+  forbliver et omdøbt produkt i området (§21.11).
 - Der bindes ikke til chunk-id'er.
 - Aktiveringen afvises ikke længere på grund af indhold uden for området (ændret fra §21.9
   fortolkning 1). Konteksten viser det i `scopeGaps`, og Admin viser "Uden for det godkendte
@@ -2594,3 +2596,62 @@ samtalelagring og retention (8C) samt enterprise-dashboards.
      databasesøgning, reranking af 30 kandidater og ingestion af et dokument på 50 sider;
    - målingen sammenholdes med målene i §12 og registreres med konfigurationens fingeraftryk;
    - en afvigelse kræver en dokumenteret godkendelse.
+
+### 21.11 8B-I6.2 — Stabil produktidentitet i pilot-scope
+
+**Leveret (B-031):**
+- migrationen `20261007000300_stable_pilot_scope.sql`;
+- rapportformat `reportSchema` 5;
+- P3 på produkt-id.
+
+**Model:**
+- Et element i det evaluerede område er `{ productId, productName, documentType }`.
+  - `productId` er produktets stabile database-id (`knowledge.products.id`). Motoren henter det
+    fra korpusbindingen (`binding.products`). Et produkt uden et id i bindingen stopper kørslen.
+  - `productName` er navnet på evalueringstidspunktet.
+- P3 for tier pilot: elementets `product.id` og dokumenttype skal være et evalueret par.
+  - Navnet sammenlignes aldrig.
+  - Et scope-element uden et gyldigt produkt-id gør retrieval-konteksten ugyldig, så evidensen
+    bliver `development`.
+- `retrieval_scope_gaps` sammenligner på id og viser produktets nuværende navn i Admin.
+- `record_evaluation_run` afviser:
+  - et element uden præcis nøglerne `documentType`, `productId` og `productName`, herunder det
+    gamle format med kun navnet;
+  - et produkt-id, der ikke er et UUID;
+  - et navn med omgivende mellemrum;
+  - en ukendt dokumenttype;
+  - dubletter af samme id og dokumenttype, også med forskellige navne.
+- Tier standard er uændret og binder dokumenttyperne.
+
+**Omdøbning og historik:**
+- Et omdøbt, evalueret produkt beholder sit id og forbliver i området.
+- Et nyt produkt med det gamle navn har et andet id og giver `unmet: ["P3"]`.
+- Kørslen og accepten ændres aldrig (append-only):
+  - `evaluated_scope`;
+  - hele rapporten (`report #> '{corpus,scope}'`);
+  - accepten (`evaluation_uncertainty_acceptances.scope`).
+
+  De bevarer produkt-id, navnet på evalueringstidspunktet og dokumenttypen.
+- Migrationen stopper, hvis der findes kørsler med det gamle område uden id. De kan ikke
+  oversættes sikkert. Der findes ingen uden for lokale tests.
+
+**Uændret:**
+- pilotreglen for usikkerhed og accepten;
+- Q-tærsklerne;
+- H1–H7 og P1–P9;
+- den tidlige pilot;
+- I7-definitionen (§21.10).
+
+**Udledt (til bekræftelse, B-031):** evalueringsmiljøets korpus skal bære produktionens
+produkt-id'er. Ellers er intet indhold i scope (fail-closed). Det hører til evalueringsmiljøet
+i I7.
+
+**Tests:**
+
+| Lag | Hvad |
+|---|---|
+| pgTAP | `retrieval_configuration_registry` (154). Det gamle format med navnet som identitet afvises. Produkt-id, der ikke er et UUID, og dubletter på id. Omdøbning: scope-huller følger id'et, og et nyt produkt med det gamle navn står udenfor. Kørslen, den gemte rapport og accepten bevarer id og det gamle navn |
+| Enhed | `production-evidence` (58): omdøbt produkt forbliver production, nyt id med samme navn giver P3, navnet afgør aldrig dækningen, og et scope uden id gør konteksten ugyldig. `evaluation-publisher` (15): navn-som-identitet og ikke-UUID afvises. `eval-retrieval-runner`: området bærer bindingens id'er, og et produkt uden id stopper kørslen |
+| Integration | `retrieval-configuration` (15): det evaluerede produkt omdøbes og forbliver production. Et andet produkt får det gamle navn og giver `unmet: ["P3"]`. Kørslen og accepten bevarer id og det gamle navn. Admin viser navnefællen som uden for området |
+| Mutation | 68/68 fanget: 30 i TypeScript, 36 i SQL og 2 via integration. Tjekket på produkt-id fanges, også når det erstattes af en sammenligning på navnet (T27), og det samme gælder scope-hullerne på id (S36) og dubletter på id (S37) |
+

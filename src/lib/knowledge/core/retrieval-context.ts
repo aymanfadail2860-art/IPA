@@ -21,10 +21,14 @@ export type NotReadyReason = "suspended" | "active_count" | "evaluation" | "gate
 /** The outcome of the approving run (B-030). Only pass, or pilot pass_with_uncertainty with a human acceptance, can be approved. */
 export type EvaluationOutcome = "pass" | "pass_with_uncertainty" | "insufficient_certainty" | "fail";
 
-/** The area an approval covers (8B-I6.1): for pilot the evaluated pairs, for standard the document types (§9). */
+/**
+ * The area an approval covers (8B-I6.1): for pilot the evaluated pairs, for standard the document
+ * types (§9). A pair names the product by its stable id; the name is the evaluation-time snapshot
+ * and never decides anything (8B-I6.2).
+ */
 export interface ApprovedScope {
   tier: "pilot" | "standard" | null;
-  entries: { product: string; documentType: string }[];
+  entries: { productId: string; productName: string; documentType: string }[];
   documentTypes: string[];
 }
 
@@ -80,8 +84,8 @@ function parseScope(value: unknown): ApprovedScope | undefined {
   if (value.tier !== null && value.tier !== "pilot" && value.tier !== "standard") return undefined;
   const entries: ApprovedScope["entries"] = [];
   for (const entry of value.entries) {
-    if (!isRecord(entry) || !isString(entry.product) || !isString(entry.documentType)) return undefined;
-    entries.push({ product: entry.product, documentType: entry.documentType });
+    if (!isRecord(entry) || !isString(entry.productId) || !UUID.test(entry.productId) || !isString(entry.productName) || !isString(entry.documentType)) return undefined;
+    entries.push({ productId: entry.productId, productName: entry.productName, documentType: entry.documentType });
   }
   return { tier: value.tier, entries, documentTypes: [...value.documentTypes] };
 }

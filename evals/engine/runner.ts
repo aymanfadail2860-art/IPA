@@ -9,6 +9,7 @@ import type {
   CaseObservation,
   CaseType,
   ConfigurationInput,
+  CorpusBinding,
   EvalCase,
   EvalSet,
   GateSet,
@@ -37,11 +38,13 @@ import { CASE_TYPES } from "./types.ts";
  * 2: Passage Recall uses the required passages as a set (no primaryPassageRank).
  * 3: the evaluated corpus names its document types (corpus.documentTypes) — the scope an
  *    approval is valid for (docs/08b §9, §4.4 pilot rule 5; 8B-I6).
- * 4: the evaluated corpus names the pairs of product (its name) and document type it held
- *    (corpus.scope). A pilot approval is valid only for them (8B-I6.1, B-030).
+ * 4: the evaluated corpus names the pairs of product and document type it held (corpus.scope).
+ *    A pilot approval is valid only for them (8B-I6.1, B-030).
+ * 5: a scope entry identifies the product by its stable id; the name is a snapshot for people
+ *    (8B-I6.2).
  */
-export const REPORT_SCHEMA_VERSION = 4;
-export const ENGINE_VERSION = "8B-I6.1/4";
+export const REPORT_SCHEMA_VERSION = 5;
+export const ENGINE_VERSION = "8B-I6.2/5";
 
 export interface Failure {
   caseId: string | null;
@@ -96,10 +99,15 @@ export interface EvaluationReport {
   checksums: { results: string; report: string };
 }
 
-/** One evaluated area: a product (by its name) and a document type. */
+/**
+ * One evaluated area: a product and a document type. `productId` (the product's stable database
+ * id) is the identity the approval binds to; `productName` is the name at evaluation time, kept
+ * only so that people can read the report later (8B-I6.2).
+ */
 export interface ScopeEntry {
-  product: string;
   documentType: string;
+  productId: string;
+  productName: string;
 }
 
 export interface RunOptions {
@@ -314,7 +322,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
       runtimeFingerprint,
       matches: declaredFingerprint === runtimeFingerprint,
     },
-    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter, documentTypes: corpusDocumentTypes(set), scope: corpusScope(set) },
+    corpus: { checksumBefore: corpusBefore, checksumAfter: corpusAfter, documentTypes: corpusDocumentTypes(set), scope: corpusScope(set, retrieval.binding()) },
     ...results,
     production: { eligible: false, reason: NOT_PRODUCTION_REASON },
     checksums: { results: checksumOf(results), report: "" },
@@ -328,18 +336,28 @@ export function corpusDocumentTypes(set: EvalSet): string[] {
   return [...new Set(set.manifest.documents.map((document) => document.type))].sort();
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
- * The evaluated area: every pair of product (its name, the product's unique identity) and
- * document type in the manifest, sorted and unique. A pilot approval covers exactly these.
+ * The evaluated area: every pair of product and document type in the manifest, sorted by product
+ * id and document type, unique. The product id comes from the corpus binding (the product's
+ * database id); a product without a bound id makes the run fail instead of guessing.
  */
-export function corpusScope(set: EvalSet): ScopeEntry[] {
+export function corpusScope(set: EvalSet, binding: CorpusBinding): ScopeEntry[] {
   const names = new Map(set.manifest.products.map((product) => [product.key, product.name]));
   const pairs = new Map<string, ScopeEntry>();
   for (const document of set.manifest.documents) {
-    const product = names.get(document.product) ?? document.product;
-    pairs.set(`${product}\u0000${document.type}`, { product, documentType: document.type });
+    const productId = binding.products[document.product];
+    if (typeof productId !== "string" || !UUID.test(productId)) throw new Error(`Produktet ${document.product} har intet id i korpusset; det evaluerede område kan ikke bestemmes.`);
+    pairs.set(`${productId}\u0000${document.type}`, { documentType: document.type, productId, productName: names.get(document.product) ?? document.product });
   }
-  return [...pairs.values()].sort((a, b) => (a.product < b.product ? -1 : a.product > b.product ? 1 : a.documentType < b.documentType ? -1 : a.documentType > b.documentType ? 1 : 0));
+  return [...pairs.values()].sort((a, b) => compareScope(a, b));
+}
+
+/** Order of scope entries: product id, then document type (the same order the database uses). */
+export function compareScope(a: Pick<ScopeEntry, "productId" | "documentType">, b: Pick<ScopeEntry, "productId" | "documentType">): number {
+  if (a.productId !== b.productId) return a.productId < b.productId ? -1 : 1;
+  return a.documentType < b.documentType ? -1 : a.documentType > b.documentType ? 1 : 0;
 }
 
 /** The report checksum covers everything except the checksum itself. */

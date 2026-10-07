@@ -12,7 +12,7 @@ import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type RetrievalRequest } from "@
 
 import { buildReport, GATES_V1, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "../fixtures/evaluation-report";
 import { buildPdf } from "../fixtures/knowledge-pdfs";
-import { fixtureMaterial, productionProviders } from "../fixtures/production-config";
+import { fixtureMaterial, productionProviders, type FixtureScopeEntry } from "../fixtures/production-config";
 
 import { env, integrationConfigured, signedInClient } from "./helpers";
 import { RUN, runProduct, runWorkerOnce, uploadVersion, workerConfigured } from "./knowledge-helpers";
@@ -52,9 +52,10 @@ describe.skipIf(!configured)("retrieval configuration register against the local
   let serviceClient: SupabaseClient;
   let bedrockModelId: string;
   let testModelId: string | null;
-  let scope: { product: string; documentType: string }[];
+  let scope: FixtureScopeEntry[];
   let registerProductId: string;
   let otherProductId: string;
+  let namesakeProductId: string;
   const configurations: Record<string, string> = {};
   let startedAt: Date;
 
@@ -120,9 +121,17 @@ describe.skipIf(!configured)("retrieval configuration register against the local
       documentType: "terms",
       validFrom: "2020-01-01",
     });
+    // A product that will later carry the evaluated product's old name (8B-I6.2): another stable id.
+    namesakeProductId = await runProduct(adminClient, "Navnefælle");
+    const namesake = await uploadVersion(adminClient, await buildPdf([{ lines: [{ text: `Navnefællens betingelser ${RUN}`, size: 16, bold: true }, { text: "§ 1 Dækning", size: 13, bold: true, spaceBefore: 10 }, { text: `Navnefællens forsikring omfatter ligeledes fiktiv skade ${marker}.`, spaceBefore: 4 }] }]), {
+      title: `Navnefællens betingelser ${RUN}`,
+      productId: namesakeProductId,
+      documentType: "terms",
+      validFrom: "2020-01-01",
+    });
     await runWorkerOnce();
     let error: Awaited<ReturnType<typeof rpc>> = null;
-    for (const versionId of [version.versionId, other.versionId]) {
+    for (const versionId of [version.versionId, other.versionId, namesake.versionId]) {
       error = await rpc(adminClient, "start_review", { p_version_id: versionId });
       if (error) throw error;
       error = await rpc(adminClient, "approve_version", { p_version_id: versionId, p_acknowledged_warnings: ["predecessor_superseded", "no_grants"] });
@@ -151,7 +160,8 @@ describe.skipIf(!configured)("retrieval configuration register against the local
         and not exists (select 1 from knowledge.chunk_embeddings e where e.chunk_id = c.id and e.embedding_model_id = ${bedrockModelId})`;
 
     // The evaluated area: our own product's terms only (pilot scope, 8B-I6.1).
-    scope = [{ product: `Testprodukt Register ${RUN} (fiktiv)`, documentType: "terms" }];
+    // The product is identified by its stable id; the name is the snapshot at evaluation time (8B-I6.2).
+    scope = [{ documentType: "terms", productId: registerProductId, productName: `Testprodukt Register ${RUN} (fiktiv)` }];
 
     // The gate set: registered by the publisher, approved by a human (idempotent across runs).
     const gateSetId = await sqlPublisherConnection(publisherSql).registerGateSet(GATES_V1);
@@ -291,6 +301,47 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(mixed.retrieval.unmet).toEqual(["P3"]);
     // The evaluated product stays production.
     expect((await retrieve(adminClient)).retrieval.grade).toBe("production");
+  });
+
+  it("stable identity: a renamed product stays in scope, a new product with its old name does not; history keeps the old name (8B-I6.2)", async () => {
+    const oldName = `Testprodukt Register ${RUN} (fiktiv)`;
+    const newName = `Testprodukt Register ${RUN} omdøbt (fiktiv)`;
+    const rename = async (id: string, name: string) => {
+      const { error } = await adminClient.schema("knowledge").from("products").update({ name }).eq("id", id);
+      if (error) throw error;
+    };
+    await rename(registerProductId, newName);
+    // The evaluated product keeps its id: still production, under its new name.
+    const renamed = await retrieve(adminClient);
+    expect(renamed.items.length).toBeGreaterThan(0);
+    expect(renamed.items.every((item) => item.product.id === registerProductId && item.product.name === newName)).toBe(true);
+    expect(renamed.retrieval.unmet).toEqual([]);
+    expect(renamed.retrieval.grade).toBe("production");
+
+    // Another product takes over the old name: another id, so it never inherits the approval.
+    await rename(namesakeProductId, oldName);
+    const namesake = await retrieve(adminClient, { productIds: [namesakeProductId] });
+    expect(namesake.items.length).toBeGreaterThan(0);
+    expect(namesake.items.every((item) => item.product.name === oldName && item.document.type === "terms")).toBe(true);
+    expect(namesake.retrieval.unmet).toEqual(["P3"]);
+    expect(() => requireProductionEvidence(namesake)).toThrow(EvidenceGradeError);
+
+    // History is never rewritten: the approving run and the acceptance keep id AND the old name.
+    const [history] = await admin<{ evaluated: unknown }[]>`
+      select r.evaluated_scope as evaluated
+      from knowledge.retrieval_configurations c join knowledge.evaluation_runs r on r.id = c.approval_run_id
+      where c.status = 'active'`;
+    expect(history!.evaluated).toEqual(scope);
+    const [acceptance] = await admin<{ scope: unknown }[]>`
+      select a.scope from knowledge.evaluation_uncertainty_acceptances a
+      join knowledge.evaluation_runs r on r.id = a.run_id
+      where r.evaluated_scope @> ${JSON.stringify([{ productId: registerProductId }])}::text::jsonb
+      order by a.accepted_at desc limit 1`;
+    expect(acceptance!.scope).toEqual(scope);
+    // Admin shows the out-of-scope product under its current name.
+    const { data: context } = await adminClient.schema("knowledge").rpc("retrieval_context");
+    expect((context as { configuration: { scopeGaps: string[] } }).configuration.scopeGaps).toContain(`${oldName} / terms`);
+    expect((context as { configuration: { scopeGaps: string[] } }).configuration.scopeGaps).not.toContain(`${newName} / terms`);
   });
 
   it("falls to development with a changed parameter (P4) and is never production as service_role (P6)", async () => {

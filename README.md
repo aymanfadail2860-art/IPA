@@ -16,7 +16,8 @@ AWS-rolle, signaturer via planlagt image, `deploy/clamav/`) og 8B-I5.6 (ClamAV 1
 engine-versioner) er gennemført, og det samme er 8B-I6 (register over retrieval-konfigurationer:
 evidens bliver kun production, når P1–P9 er opfyldt for en aktiv, godkendt konfiguration) og
 8B-I6.1 (en pilot med statistisk usikkerhed kræver menneskelig accept, og godkendelsen gælder kun de
-evaluerede produkter og dokumenttyper). 8B-I7 (evalueringsdrift, monitorering og regression) er
+evaluerede produkter og dokumenttyper) og 8B-I6.2 (produktet identificeres ved sit stabile id, ikke
+ved navnet). 8B-I7 (evalueringsdrift, monitorering og regression) er
 defineret, men ikke påbegyndt. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.

@@ -11,8 +11,9 @@ gennemført og godkendt, 8B-I2 (production embedding og reranking) er gennemfør
 8B-I4 (workerens runtime), 8B-I5 (upload-sikkerhed, karantæne og malware-scanning), 8B-I5.5
 (scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6) er gennemført og
 godkendt — I5 er fuldt lukket. 8B-I6 (register over retrieval-konfigurationer og
-ProductionEvidenceSet) er gennemført og godkendt. 8B-I6.1 (pilot-politik og pilot-scope) er
-gennemført og venter på godkendelse. 8B-I7 (Evaluation Operations, Monitoring & Regression
+ProductionEvidenceSet) er gennemført og godkendt og endeligt lukket med 8B-I6.1 (pilot-politik
+og pilot-scope) og 8B-I6.2 (stabil produktidentitet i pilot-scope), som begge er gennemført og
+godkendt. 8B-I7 (Evaluation Operations, Monitoring & Regression
 Guardrails) er defineret, men ikke påbegyndt.** Resten af 8B implementeres i deltrin, som hver
 kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
@@ -49,7 +50,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 og 8B-I6.1 gennemført, 8B-I7 defineret, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 defineret, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -450,13 +451,19 @@ godkendelse.
   - Detaljer i `docs/08b` §21.9 og B-029.
   - Pilotens `uncertain` er afgjort i B-030 (se 8B-I6.1).
   - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen hører til I7.
-- **8B-I6.1 — pilot-politik og pilot-scope: ✅ gennemført 2026-10-07, venter på godkendelse.**
+- **8B-I6.1 — pilot-politik og pilot-scope: ✅ gennemført og godkendt 2026-10-07.**
   - En pilot, der består på punktestimatet med usikre Wilson-intervaller
     (`pass_with_uncertainty`), kan kun godkendes efter en registreret menneskelig accept.
   - Tier standard er uændret. Hårde gates kan aldrig accepteres.
   - En pilot-godkendelse gælder kun de evaluerede par af produkt og dokumenttype. Det håndhæves
     pr. element i P3, så et uevalueret produkt aldrig arver den.
   - Detaljer i `docs/08b` §21.10 og B-030.
+- **8B-I6.2 — stabil produktidentitet i pilot-scope: ✅ gennemført og godkendt 2026-10-07.**
+  8B-I6 er hermed endeligt lukket.
+  - Scope binder til produktets stabile id og dokumenttypen. Navnet er et historisk
+    øjebliksbillede.
+  - Et omdøbt produkt forbliver i området. Et nyt produkt med samme navn arver intet.
+  - Detaljer i `docs/08b` §21.11 og B-031.
 - **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: defineret (B-030), ikke
   påbegyndt.** Påbegyndes kun efter eksplicit godkendelse. Indhold:
   - evalueringsmiljø og sikker publiceringstransport;
