@@ -1,5 +1,7 @@
 import "server-only";
 
+import { formatDate, formatTime } from "@/lib/format";
+import { systemStatusView, type SystemStatusView } from "@/lib/observability/system-status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import type {
@@ -474,4 +476,15 @@ export async function embeddingSettings(): Promise<EmbeddingSettings> {
     })),
     publishedChunks,
   };
+}
+
+/** Systemindstillinger → Systemstatus (docs/08b §14, 8B-I7; system.settings.manage in the database). */
+export async function systemStatus(): Promise<SystemStatusView | null> {
+  const { data, error } = await (await knowledge()).rpc("system_status");
+  if (error) return null;
+  try {
+    return systemStatusView(data, (iso) => `${formatDate(iso)} kl. ${formatTime(iso)}`);
+  } catch {
+    return null;
+  }
 }

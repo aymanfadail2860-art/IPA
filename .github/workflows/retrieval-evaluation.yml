@@ -1,0 +1,184 @@
+# Retrieval evaluation and regression (docs/08b §4.5, §10.2, §21.12; 8B-I7).
+#
+#   evaluate (environment "evaluation", the evaluation AWS account)
+#     → the evaluation project's own credentials from Secrets Manager (never production ones)
+#     → provision the evaluation corpus (idempotent) and run the real retrieval as each
+#       evaluation user against the real providers
+#     → versioned output: report, Markdown, performance measurement and a SHA-256 list,
+#       kept as an artifact
+#   publish (environment "evaluation-publication", the production AWS account)
+#     → ONLY the evaluation_publisher credential, fetched for this job through a short-lived OIDC
+#       role that can read that one secret; TLS with certificate verification
+#     → the files are checked against their SHA-256 list, recomputed, registered — and a
+#       regression run's registration suspends the configuration on a hard-gate breach
+#       (database, same transaction, no fallback) and raises the alarms.
+#
+# When: by hand (baseline or regression), weekly (regression of the configuration in service),
+# and at every change to model, reranker, chunker, retrieval algorithm or parameters.
+#
+# Inactive until the accounts exist: the jobs run only when the repository variables
+# IPA_EVAL_AWS_ACCOUNT_ID and IPA_AWS_ACCOUNT_ID are set. No credentials are stored in GitHub
+# except the optional alarm webhook (Å-5).
+
+name: Retrieval evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "baseline (a candidate configuration) or regression (the configuration in service)"
+        type: choice
+        options: [baseline, regression]
+        default: regression
+      configuration:
+        description: "Configuration under evaluation (evals/retrieval/configurations/<name>.json); empty = the one in service"
+        type: string
+        default: ""
+      publish:
+        description: "Register the run in production as evaluation_publisher"
+        type: boolean
+        default: true
+  schedule:
+    # Weekly regression (§4.5), Monday 03:41 UTC.
+    - cron: "41 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "src/lib/knowledge/retrieval-core.ts"
+      - "src/lib/knowledge/core/**"
+      - "src/lib/knowledge/providers/**"
+      - "workers/ingestion/chunker.ts"
+      - "workers/ingestion/structure.ts"
+      - "workers/ingestion/normalize.ts"
+      - "workers/ingestion/extract.ts"
+      - "evals/retrieval/configurations/**"
+      - "supabase/migrations/**"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: retrieval-evaluation
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  EVAL_SET: ${{ vars.IPA_EVAL_SET || 'terms-v1' }}
+  EVAL_GATES: ${{ vars.IPA_EVAL_GATES || 'gates-v1' }}
+  MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'regression' }}
+  CONFIGURATION: ${{ (github.event_name == 'workflow_dispatch' && inputs.configuration) || vars.IPA_EVAL_ACTIVE_CONFIGURATION }}
+
+jobs:
+  evaluate:
+    if: ${{ vars.IPA_EVAL_AWS_ACCOUNT_ID != '' && vars.IPA_AWS_ACCOUNT_ID != '' }}
+    runs-on: ubuntu-24.04
+    environment: evaluation
+    timeout-minutes: 120
+    outputs:
+      report: ${{ steps.run.outputs.report }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+
+      - run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.IPA_EVAL_AWS_ACCOUNT_ID }}:role/ipa-evaluation-runner
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: The evaluation project's credentials (evaluation account only)
+        run: |
+          SECRET=$(aws secretsmanager get-secret-value --secret-id ipa/evaluation/supabase --query SecretString --output text)
+          for key in url anon_key service_role_key; do
+            value=$(jq -r --arg k "$key" '.[$k]' <<<"$SECRET")
+            test -n "$value" && test "$value" != null || { echo "ipa/evaluation/supabase mangler $key"; exit 1; }
+            echo "::add-mask::$value"
+          done
+          {
+            echo "IPA_EVAL_SUPABASE_URL=$(jq -r .url <<<"$SECRET")"
+            echo "IPA_EVAL_SUPABASE_ANON_KEY=$(jq -r .anon_key <<<"$SECRET")"
+            echo "IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY=$(jq -r .service_role_key <<<"$SECRET")"
+          } >> "$GITHUB_ENV"
+
+      - name: Provision and evaluate (refused unless the database is an evaluation environment)
+        id: run
+        env:
+          IPA_ALERT_SINK: ${{ secrets.IPA_ALERT_WEBHOOK_URL != '' && 'webhook' || 'log' }}
+          IPA_ALERT_WEBHOOK_URL: ${{ secrets.IPA_ALERT_WEBHOOK_URL }}
+        run: |
+          test -n "$CONFIGURATION" || { echo "Ingen konfiguration angivet (vars.IPA_EVAL_ACTIVE_CONFIGURATION)"; exit 2; }
+          OUT="evals/retrieval/reports/ci-${GITHUB_RUN_ID}"
+          set +e
+          npm run eval:retrieval -- --adapter evaluation --providers bedrock --provision \
+            --set "$EVAL_SET" --gates "$EVAL_GATES" --configuration "$CONFIGURATION" --mode "$MODE" --out "$OUT"
+          CODE=$?
+          set -e
+          # 0 pass, 1 fail/uncertain: a completed run — it is published (a regression must be).
+          # 2 invalid input, 3 the run could not be carried out (alarm already sent).
+          test "$CODE" -le 1 || exit "$CODE"
+          REPORT=$(ls "$OUT"/*.json | grep -v '\.performance\.json$' | head -1)
+          echo "report=$(basename "$REPORT")" >> "$GITHUB_OUTPUT"
+          (cd "$OUT" && sha256sum -c ./*.sha256)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-evaluation-${{ github.run_id }}
+          path: evals/retrieval/reports/ci-${{ github.run_id }}/
+          retention-days: 400
+          if-no-files-found: error
+
+  publish:
+    needs: evaluate
+    if: ${{ needs.evaluate.outputs.report != '' && (github.event_name != 'workflow_dispatch' || inputs.publish) }}
+    runs-on: ubuntu-24.04
+    environment: evaluation-publication
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: retrieval-evaluation-${{ github.run_id }}
+          path: run/
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.IPA_AWS_ACCOUNT_ID }}:role/ipa-evaluation-publisher
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 900
+
+      - name: The evaluation_publisher credential (this one secret only)
+        run: |
+          SECRET=$(aws secretsmanager get-secret-value --secret-id ipa/production/evaluation-publisher/db --query SecretString --output text)
+          for key in host username password; do
+            value=$(jq -r --arg k "$key" '.[$k]' <<<"$SECRET")
+            test -n "$value" && test "$value" != null || { echo "ipa/production/evaluation-publisher/db mangler $key"; exit 1; }
+          done
+          echo "::add-mask::$(jq -r .password <<<"$SECRET")"
+          {
+            echo "IPA_PUBLISHER_DB_HOST=$(jq -r .host <<<"$SECRET")"
+            echo "IPA_PUBLISHER_DB_PORT=$(jq -r '.port // 5432' <<<"$SECRET")"
+            echo "IPA_PUBLISHER_DB_USER=$(jq -r .username <<<"$SECRET")"
+            echo "IPA_PUBLISHER_DB_PASSWORD=$(jq -r .password <<<"$SECRET")"
+            echo "IPA_PUBLISHER_DB_CA_FILE=deploy/ingestion-worker/certs/supabase-ca.crt"
+          } >> "$GITHUB_ENV"
+
+      - name: Register in production as evaluation_publisher
+        env:
+          IPA_ALERT_SINK: ${{ secrets.IPA_ALERT_WEBHOOK_URL != '' && 'webhook' || 'log' }}
+          IPA_ALERT_WEBHOOK_URL: ${{ secrets.IPA_ALERT_WEBHOOK_URL }}
+        run: npm run eval:publish -- --report "run/${{ needs.evaluate.outputs.report }}" --gates "$EVAL_GATES" --mode "$MODE"

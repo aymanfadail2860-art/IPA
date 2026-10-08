@@ -21,6 +21,13 @@ driften anvender med AWS CLI, når produktionskontoen findes. Pladsholdere står
 | `iam/task-role-policy.json` | Task-rollen: forberedt Bedrock Embed v4 via EU-inferensprofilen, intet andet |
 | `iam/ecs-tasks-trust-policy.json` | Kun ECS-tasks i kontoen kan påtage sig rollerne |
 | `certs/` | Supabases CA (offentligt certifikat), som lægges her, før imaget bygges |
+| `alarms.json` | Metric filters og alarmer (8B-I7): kritiske alarmer og advarsler fra den planlagte sundhedskontrol, og en alarm, hvis kontrollen tier stille i 15 minutter |
+
+> **Sundhedskontrol (8B-I7):** workeren læser hvert 5. minut `knowledge.worker_system_health()`
+> (kø, fejl, scanner, konfiguration, regression — kun tal og id'er) og sender alarmer gennem
+> `AlertSink` (`IPA_HEALTH_CHECK_INTERVAL_MS`, `IPA_ALERT_SINK`). Kanalen `webhook` kræver
+> `IPA_ALERT_WEBHOOK_URL` som secret, når Å-5 er afgjort; indtil da går alarmerne til loggen og
+> derfra til alarmtopic'en (`alarms.json`).
 
 ## Byg og registrér
 

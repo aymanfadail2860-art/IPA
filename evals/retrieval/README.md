@@ -7,11 +7,12 @@ Evalueringen måler **retrieval, ikke svar**. Hver kørsel tager én retrieval-k
 evalueringssæt. Alle spørgsmål køres gennem den rigtige `runRetrieval` som den angivne
 evalueringsbruger og sammenlignes med facit. Resultatet er en rapport.
 
-> **Status (8B-I1):** Motoren, formaterne og gates er implementeret. Der findes endnu ikke et
-> evalueringsmiljø, rigtige udbydere, et register over konfigurationer eller en
-> `evaluation_publisher`. En kørsel kan derfor kun foretages mod fixture-retrieval, og **en
-> rapport kan ikke godkende, registrere eller aktivere en konfiguration eller gøre evidens
-> production**.
+> **Status (8B-I7):** Motoren, formaterne og gates (I1), registret og `evaluation_publisher`
+> (I6) og evalueringsdriften (I7) er implementeret: adapteren til evalueringsmiljøet,
+> provisionering af korpus og evalueringsbrugere, performance-målinger, publicering som et
+> særskilt trin og regressionsalarmer. Selve evalueringsmiljøet (eget Supabase-projekt) og
+> pilotsættet `terms-v1` findes endnu ikke. **En rapport godkender, aktiverer eller gør aldrig
+> noget production** — det kræver registrering og en menneskelig beslutning (`docs/08b` §10).
 
 ## Struktur
 
@@ -50,7 +51,30 @@ Som standard bruger fixture-retrieval test-embedderen og rerankeren "none" fra r
 dem, medmindre `IPA_RUNTIME_ENV` udtrykkeligt er `local` eller `test`. Kørslen skriver
 `reports/<kørsels-id>.json` (maskinlæsbar) og `.md` (til mennesker).
 
-Exitkoder: 0 = bestået, 1 = ikke bestået eller usikker, 2 = ugyldigt input.
+Exitkoder: 0 = bestået, 1 = ikke bestået eller usikker, 2 = ugyldigt input, 3 = kørslen kunne ikke
+gennemføres (alarm `evaluation_failed`).
+
+### Evalueringsmiljøet (8B-I7)
+
+```bash
+# Evalueringsprojektets egne credentials — aldrig produktionens:
+export IPA_EVAL_SUPABASE_URL=... IPA_EVAL_SUPABASE_ANON_KEY=... IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY=...
+npm run eval:retrieval -- --adapter evaluation --providers bedrock --provision \
+  --set terms-v1 --configuration <navn> --mode baseline|regression
+```
+
+- Kørslen nægter at starte, medmindre databasen selv siger `evaluation`
+  (`select ops.set_environment_kind('evaluation')`, sat af ejeren ved udrulning).
+- `--provision` indlæser korpusset gennem den normale vej (karantæne, scanning, behandling,
+  gennemgang, publicering), opretter evalueringsbrugerne med præcis manifestets tildelinger og
+  ingen roller, og markerer konflikterne. Idempotent: samme korpus giver samme checksum.
+- Produkterne oprettes med manifestets stabile id'er (`products[].id`, B-031), så en registreret
+  kørsels område navngiver produktionens produkter.
+- Output: `<id>.json`, `<id>.md`, `<id>.performance.json` (p50/p95 pr. trin og ingestion mod
+  §12) og `<id>.sha256`.
+- Registrering i produktion er et særskilt trin som `evaluation_publisher`:
+  `npm run eval:publish -- --report <dir>/<id>.json --mode baseline|regression`
+  (`deploy/evaluation/README.md`).
 
 ## Regler for indholdet
 

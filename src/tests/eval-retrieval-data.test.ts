@@ -89,13 +89,31 @@ describe("the evaluation tooling stays outside the application", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the engine never issues or upgrades evidence, and never talks to a database itself", () => {
+  it("the engine never issues or upgrades evidence; only the evaluation environment module talks to a database", () => {
     expect(engine.length).toBeGreaterThan(5);
+    // 8B-I7: the evaluation environment (docs/08b §4.5) is a separate Supabase project. Exactly one
+    // module connects to it; the rest of the engine — and the publication — never does.
+    const ENVIRONMENT = "evals/engine/evaluation-environment.ts";
     for (const { file, text } of engine) {
       expect(text, file).not.toMatch(/\bissueEvidenceSet\b|\brequireProductionEvidence\b|as\s+ProductionEvidenceSet/);
-      expect(text, file).not.toMatch(/@supabase\/|createClient\(|service_role|SERVICE_ROLE/);
+      if (file !== ENVIRONMENT) expect(text, file).not.toMatch(/@supabase\/|createClient\(|service_role|SERVICE_ROLE/);
       expect(text, file).not.toMatch(/grade:\s*["']production["']/);
+      expect(text, file).not.toMatch(/postgres\b.*from ["']postgres["']|from ["']postgres["']/);
     }
+  });
+
+  it("the evaluation environment module reads only the evaluation project's own credentials and checks the database first", () => {
+    const text = engine.find(({ file }) => file === "evals/engine/evaluation-environment.ts")!.text;
+    // Never the application's variables.
+    expect(text).not.toMatch(/NEXT_PUBLIC_SUPABASE|["']SUPABASE_SERVICE_ROLE_KEY["']|process\.env/);
+    expect(text).toMatch(/IPA_EVAL_SUPABASE_URL/);
+    // Every way in asks the database what it is before anything else.
+    for (const fn of ["signInUser", "snapshot"]) {
+      const body = text.slice(text.indexOf(`async function ${fn}(`));
+      const first = body.indexOf("{") + 1;
+      expect(body.slice(first, body.indexOf("\n", body.indexOf("\n", first) + 1)).trim(), fn).toBe("await assertEvaluation();");
+    }
+    expect(text).toMatch(/if \(kind !== "evaluation"\) throw new NotAnEvaluationEnvironmentError/);
   });
 
   it("the report can never claim production eligibility", () => {

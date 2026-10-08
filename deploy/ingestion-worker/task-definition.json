@@ -98,6 +98,14 @@
           "value": "3310"
         },
         {
+          "name": "IPA_HEALTH_CHECK_INTERVAL_MS",
+          "value": "300000"
+        },
+        {
+          "name": "IPA_ALERT_SINK",
+          "value": "log"
+        },
+        {
           "name": "AWS_REGION",
           "value": "eu-central-1"
         }

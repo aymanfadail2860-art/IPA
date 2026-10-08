@@ -4,6 +4,7 @@ import type { Chunk } from "./chunker.ts";
 import { handleWorkerStorage, supabaseStorageDeps, type StorageClient } from "../../supabase/functions/worker-storage/handler.ts";
 
 import type { Clearance } from "./gate.ts";
+import type { HealthSource } from "./health-monitor.ts";
 import { ticketOriginals } from "./originals.ts";
 import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, OriginalStore, RecordedVerdict, WorkerDb } from "./pipeline.ts";
 import type { ScanContext } from "./security/scan.ts";
@@ -159,4 +160,13 @@ export function devServiceRoleWorkerDb(client: SupabaseClient, workerId: string)
 export function devServiceRoleOriginals(client: SupabaseClient, db: Pick<WorkerDb, "issueStorageTicket">): OriginalStore {
   const deps = supabaseStorageDeps(client as unknown as StorageClient, () => {});
   return ticketOriginals({ db, url: "http://worker-storage.local/", fetchImpl: async (_url, init) => handleWorkerStorage(new Request("http://worker-storage.local/", init), deps) });
+}
+
+/** The health check over the development path (local/test only). */
+export function devServiceRoleHealthSource(client: SupabaseClient): HealthSource {
+  return {
+    async systemHealth() {
+      return call<unknown>(client.schema("knowledge").rpc("worker_system_health"));
+    },
+  };
 }

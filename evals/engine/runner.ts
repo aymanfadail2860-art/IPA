@@ -212,7 +212,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
 
   const setChecksum = evalSetChecksum(set);
   const gatesChecksum = gateSetChecksum(gates);
-  const corpusBefore = retrieval.corpusChecksum();
+  const corpusBefore = await retrieval.corpusChecksum();
   validateAnchors(set, retrieval);
 
   const declaredFingerprint = configurationFingerprint(options.declared.configuration);
@@ -255,7 +255,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
   }
 
   // H7: integrity. Nothing the run depends on may change while it runs.
-  const corpusAfter = retrieval.corpusChecksum();
+  const corpusAfter = await retrieval.corpusChecksum();
   if (corpusAfter !== corpusBefore) runViolations.push({ gate: "H7", caseId: null, explanation: "Korpussets checksum ændrede sig under kørslen." });
   if (evalSetChecksum(set) !== setChecksum) runViolations.push({ gate: "H7", caseId: null, explanation: "Evalueringssættet ændrede sig under kørslen." });
   if (gateSetChecksum(gates) !== gatesChecksum) runViolations.push({ gate: "H7", caseId: null, explanation: "Gate-sættet ændrede sig under kørslen." });

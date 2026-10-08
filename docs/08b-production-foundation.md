@@ -1224,7 +1224,7 @@ implementeret.**
 | **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført og godkendt 2026-10-07 (B-029, B-030). Lukket med I6.1 og I6.2 |
 | **8B-I6.1** | Pilot-politik for statistisk usikkerhed med menneskelig accept, pilot-scope på produkt og dokumenttype (§21.10) | ✅ Gennemført og godkendt 2026-10-07 (B-030) |
 | **8B-I6.2** | Stabil produktidentitet i pilot-scope: produkt-id og dokumenttype, navnet som historisk øjebliksbillede (§21.11) | ✅ Gennemført og godkendt 2026-10-07 (B-031). 8B-I6 er hermed endeligt lukket |
-| **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails (definition i §21.10) | Defineret (B-030). Ikke påbegyndt — kræver din eksplicitte godkendelse |
+| **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails: evalueringsmiljø, provisionering, publicering som særskilt trin, regressionsaudit og -alarmer, AlertSink, sundhedskontrol, Systemstatus og performance-målinger (§21.10, §21.12) | Gennemført 2026-10-08 (B-032). Venter på din godkendelse |
 | Øvrige | Baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
@@ -2562,9 +2562,9 @@ genberegnede afgørelse og kan ikke sættes:
 
 Godkendelse sker også i I6 via databasefunktionerne.
 
-#### 8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails (definition, ikke påbegyndt)
+#### 8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails (definition)
 
-Defineret i B-030. Påbegyndes kun efter din eksplicitte godkendelse. Uden for I7: rate limiting,
+Defineret i B-030. Implementeret i §21.12 (B-032). Uden for I7: rate limiting,
 samtalelagring og retention (8C) samt enterprise-dashboards.
 
 1. **Evalueringsdrift (§20 trin 4):**
@@ -2655,3 +2655,218 @@ i I7.
 | Integration | `retrieval-configuration` (15): det evaluerede produkt omdøbes og forbliver production. Et andet produkt får det gamle navn og giver `unmet: ["P3"]`. Kørslen og accepten bevarer id og det gamle navn. Admin viser navnefællen som uden for området |
 | Mutation | 68/68 fanget: 30 i TypeScript, 36 i SQL og 2 via integration. Tjekket på produkt-id fanges, også når det erstattes af en sammenligning på navnet (T27), og det samme gælder scope-hullerne på id (S36) og dubletter på id (S37) |
 
+### 21.12 8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails
+
+**Leveret (B-032):**
+- migrationen `20261008000100_evaluation_operations.sql`;
+- evalueringsdriften i `evals/engine/`:
+  - `evaluation-environment.ts`, `provision.ts`, `database-retrieval.ts`;
+  - `performance.ts`, `regression.ts`, `operations.ts`;
+  - CLI'en `--adapter evaluation`, `--mode` og `--provision`;
+- publiceringstrinnet `workers/evaluation/` (`npm run eval:publish`);
+- alarmer og observability i `src/lib/observability/`;
+- workerens sundhedskontrol (`workers/ingestion/health-monitor.ts`);
+- afsnittet Systemstatus i Admin;
+- workflowet `.github/workflows/retrieval-evaluation.yml`;
+- `deploy/evaluation/` (runbook og IAM) og `deploy/ingestion-worker/alarms.json`.
+
+**1. Evalueringsdrift:**
+- **Evalueringsmiljøet:**
+  - Det er et eget Supabase-projekt. Databasens art ligger i `ops.environment`, kan være
+    `local`, `evaluation`, `staging` eller `production` og er `unset`, hvis den ikke er angivet.
+  - Kun ejeren sætter arten (`ops.set_environment_kind`), og ændringen auditeres.
+    `knowledge.environment_kind()` kan læses af indloggede brugere og service_role.
+  - Motoren kontrollerer arten, før noget læses eller skrives, og stopper med
+    `NotAnEvaluationEnvironmentError`, hvis den ikke er `evaluation`.
+  - Credentials kommer kun fra `IPA_EVAL_SUPABASE_URL`, `IPA_EVAL_SUPABASE_ANON_KEY` og
+    `IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY`.
+- **Provisionering** (`--provision`) er idempotent og bruger den normale vej (upload, worker,
+  review og publicering):
+  - Fixtures bliver til PDF'er. Offentlige kilder hentes og skal matche deres SHA-256.
+  - Produkterne oprettes med manifestets `products[].id`. Manifestet har fået det valgfri felt
+    `id` (B-031).
+  - Evalueringsbrugerne får ingen roller og præcis manifestets tildelinger. En tildeling, der er
+    givet ved siden af, fjernes igen.
+  - Konflikterne markeres af en evalueringsoperatør (administrator i evalueringsmiljøet).
+  - En gentaget provisionering ændrer intet, og korpussets checksum er den samme.
+  - Ingestion måles pr. version: sider og sekunder fra upload til `processed`.
+- **Retrieval:** `createDatabaseRetrieval` kører den rigtige `runRetrieval` som hver
+  evalueringsbruger med evalueringsmiljøets embedding-model og reranker:
+  - Identiteten tæller kun, når `retrieval_context.executedAs` er brugerens eget `auth.uid()`.
+    Ellers er aktøren `unverified:<id>`, og H7 fejler.
+  - Korpussets checksum læses igen ved hver integritetskontrol. En ændring under kørslen giver
+    H7.
+  - De rå rækker fra SQL-funktionerne gemmes til H2. Q7-baselinen kører uden reranker og indgår
+    ikke i tidsmålingen.
+- **Reproducerbarhed:** samme sæt (id, version og checksum), gate-sæt (version og checksum),
+  konfiguration (fingeraftryk) og korpus (checksum før og efter).
+- **Versionerede rapporter:** `writeVersionedReport` skriver rapporten (JSON), Markdown,
+  `*.performance.json` og en SHA-256-liste. CI gemmer dem som artefakt i 400 dage.
+- **Kørsler:**
+  - manuelt via `workflow_dispatch` med `baseline` eller `regression`;
+  - ugentligt mandag kl. 03:41 UTC;
+  - ved push til `main`, der ændrer retrieval-kernen, udbydere, chunker, konfigurationer eller
+    migrationer.
+
+  Workflowet er inaktivt, indtil kontiene findes (`IPA_EVAL_AWS_ACCOUNT_ID` og
+  `IPA_AWS_ACCOUNT_ID`).
+- **Exitkoder:**
+  - 0: bestået;
+  - 1: ikke bestået eller usikker;
+  - 2: ugyldigt input;
+  - 3: kørslen kunne ikke gennemføres. Det giver alarmen `evaluation_failed`.
+- **Sikker transport:** to CI-jobs med hver sit GitHub-environment, sin OIDC-rolle og sin secret.
+  - `evaluate` bruger `evaluation`, rollen `ipa-evaluation-runner` og secretten
+    `ipa/evaluation/supabase`.
+  - `publish` bruger `evaluation-publication`, rollen `ipa-evaluation-publisher` og secretten
+    `ipa/production/evaluation-publisher/db`. Hver rolle kan kun læse sin ene secret.
+  - Publiceringen (`workers/evaluation/publish.ts`) forbinder som `evaluation_publisher_login`
+    med postgres.js og TLS med certifikatverifikation mod Supabases CA.
+  - Uden for local og test nægter den at starte, hvis `SUPABASE_SERVICE_ROLE_KEY`,
+    `IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY` eller `NEXT_PUBLIC_SUPABASE_ANON_KEY` er sat.
+  - Rækkefølgen er:
+    1. filerne efterprøves mod SHA-256-listen, og målingen genberegnes;
+    2. gate-sæt og kørsel registreres;
+    3. målingen registreres;
+    4. regressionsalarmerne sendes.
+  - En afvisning fra databasen (`P0001`, `22`, `23` eller `42501`) giver alarmen
+    `publication_refused`. En forbindelsesfejl er en fejl og ikke en afvisning.
+
+**2. Regressionskontrol:**
+- En kørsel, der registreres, mens dens konfiguration er i drift (`active`), er en regression. En
+  kandidats eller en suspenderet konfigurations kørsel er det ikke. Triggeren `evaluation_runs_regression_audit` auditerer den som
+  `knowledge.evaluation_run.regression` med:
+  - evalueringssæt (id, version og checksum);
+  - gate-sæt (id, version og checksum);
+  - runtime-fingeraftryk;
+  - fejlede hårde gates og kvalitetsgates;
+  - udfald: `hard_gate_regression`, `quality_regression` eller `pass`.
+- Et hårdt gate-brud suspenderer i samme transaktion i `record_evaluation_run` (uændret, D-8).
+  Det giver alarmen `hard_gate_regression` (kritisk). Der er ingen fallback.
+- Et fejlet kvalitetsgate giver alarmen `quality_regression` (advarsel) til vurdering.
+  Konfigurationen forbliver aktiv.
+- Begge alarmer bærer evalueringssæt, gate-sæt, runtime-fingeraftryk og korpus-checksum.
+  Workerens sundhedskontrol rejser dem også fra systemstatus.
+
+**3. Observability:**
+- **Systemstatus** (`ops.system_health()`) indeholder kun tal og id'er:
+  - kø: ventende, i gang, ældste ventende og udløbne leases;
+  - fejl i døgnet efter fejlkode og de seneste dead-letter-id'er;
+  - versioner under behandling i over en time;
+  - scanner: seneste verdict, signaturernes alder ved det, `scan_failed` og fund i døgnet;
+  - den aktive eller suspenderede konfiguration med årsag;
+  - den seneste evaluering med regression, gates, sæt, gate-sæt og fingeraftryk;
+  - den seneste performance-måling med afvigelser og godkendelse.
+- Systemstatus læses af workeren (`knowledge.worker_system_health()`, en del af worker-API'et,
+  som nu har 16 funktioner) og af Admin (`knowledge.system_status()`,
+  `system.settings.manage`).
+- **Retrieval-latency pr. trin:** `runRetrieval` har en observe-hook (`RetrievalDeps.observe`),
+  der måler hele kæden, embedding af forespørgsel, databasesøgning og reranking. Hooken ændrer
+  aldrig resultatet.
+  - Appen skriver én loglinje pr. retrieval (`event: "retrieval"`): udfald, grad, uopfyldte
+    betingelser, konfigurations-id, antal og `steps_ms`. Den indeholder aldrig forespørgsel,
+    titel eller indhold.
+- **Fejl:**
+  - Udbyder-, embedding- og rerankingfejl ses som fejlede trin (`failed_steps`) og
+    `error_code` i loglinjen.
+  - Ingestion- og scannerfejl ses via dead-letter, `scan_failed` og ClamAV-alarmerne fra I5.5.
+- **Admin → Indstillinger → Systemstatus:** en kort liste med tone pr. række. Det er ikke et
+  dashboard.
+
+**4. Alarmer (D-15):**
+- `AlertSink` med kanalen `log` (standard, én JSON-linje) og `webhook` (log plus HTTPS POST, 5 s
+  timeout, kaster aldrig).
+- Kanalen vælges med `IPA_ALERT_SINK=log|webhook` og `IPA_ALERT_WEBHOOK_URL`. Den skal være HTTPS,
+  dog må HTTP bruges til localhost.
+- En ukendt kanal eller en manglende URL er en konfigurationsfejl ved opstart.
+- Kataloget har 12 koder med fast alvor og fast dansk resumé:
+  - `dead_letter`, `queue_stale`, `processing_stuck`;
+  - `scanner_failures`, `malware_found`;
+  - `configuration_suspended`, `hard_gate_regression`, `quality_regression`;
+  - `evaluation_failed`, `publication_refused`;
+  - `retrieval_unavailable`, `configuration_mismatch`.
+- Detaljer skal være endelige tal eller tokens (`[A-Za-z0-9_.:/@+,-]`, højst 200 tegn). Der er
+  højst 20. Alt andet fjernes og tælles (`details_dropped`). En sink kontrollerer alarmen igen,
+  før den sendes.
+- **Workerens kontrol** kører hvert 5. minut (`IPA_HEALTH_CHECK_INTERVAL_MS`, 0 eller mindst
+  30 s; 0 er ikke tilladt i production) og aldrig med `--once`:
+  - Den kører én kontrol ad gangen, og en fejlende kilde logges uden at stoppe workeren.
+  - En vedvarende tilstand giver én alarm pr. episode. Dead-letter giver én alarm pr. job-id.
+  - Tærsklerne er dem i §14: ældste ventende job over 30 min og behandling over en time.
+- **Appens alarmer:** `retrieval_unavailable` og `configuration_mismatch` (P4 uopfyldt, mens en
+  konfiguration er i drift). Hver kode sendes højst én gang pr. 10 minutter pr. proces. Adgangs-
+  og anmodningsfejl giver aldrig alarm.
+- **CloudWatch** (`deploy/ingestion-worker/alarms.json`):
+  - kritiske alarmer;
+  - advarsler;
+  - en tavs kontrol (ingen kontrol i 15 min).
+
+  De går til alarmtopic'en.
+- **Å-5:** modtager og tjeneste afgøres stadig ved deployment. Indtil da går alarmerne til loggen
+  og CloudWatch.
+
+**5. Performance-exit-kriterier (§12, §17 pkt. 10):**
+- Målene er versioneret som `performance-targets-v1` i både TypeScript og SQL. En drift-test
+  sammenholder dem.
+
+  | Mål | Grænse (≤) |
+  |---|---|
+  | `retrieval_total_p50` | 800 ms |
+  | `retrieval_total_p95` | 1.500 ms |
+  | `query_embedding_p95` | 300 ms |
+  | `search_p95` | 300 ms |
+  | `rerank_p95` | 500 ms |
+  | `ingestion_50_pages_seconds` | 300 s (det langsomste dokument på mindst 50 sider) |
+  | `ingestion_corpus_2000_pages_seconds` | 14.400 s (kun når korpusset har mindst 2.000 sider) |
+
+- Percentilen er nearest rank: k = ⌈p·n/100⌉. Det er den samme heltalsformel i TypeScript og
+  SQL. Kun vellykkede trin tæller, rundet til hele millisekunder.
+- Målingen (`schema 1`) indeholder de rå målinger, resultaterne, konfigurationens fingeraftryk,
+  kørslens id og en checksum.
+- `knowledge.record_performance_measurement` kan kun kaldes af `evaluation_publisher`. Den
+  afviser:
+  - forkert format eller negative tal;
+  - forkert checksum;
+  - et andet miljø end `evaluation`;
+  - ingen registreret kørsel af netop den konfiguration;
+  - en ukendt version af målene;
+  - resultater, der ikke stemmer med genberegningen.
+
+  Målingen er append-only og auditeres.
+- **Afvigelser:** et mål, der ikke er nået eller ikke er målt, er en afvigelse.
+  - Den godkendes med `knowledge.accept_performance_deviation(måling, begrundelse)`.
+    Godkendelsen kræver `system.settings.manage`, en begrundelse på mindst 20 tegn og sker kun
+    én gang.
+  - En måling uden afvigelser har intet at godkende.
+  - Godkendelsen gemmer hvem, hvornår og afvigelserne med værdier og grænser. Den er append-only.
+
+**Kørsel mod den lokale database:** hele kæden med provisionering, de rigtige SQL-funktioner, RLS
+og evalueringsbrugere. H1–H5 og H7 består. H6 fejler som forventet, fordi de lokale udbydere er
+udviklingsimplementeringer. Rigtige tal kræver evalueringsmiljøet med Bedrock.
+
+**Tests:**
+
+| Lag | Hvad |
+|---|---|
+| pgTAP | `evaluation_operations` (36): arten (kun ejeren, audit, `unset`, validering), systemstatus (afsnit, tal mod tabellerne, intet indhold, rettigheder), workerens og publisherens API, ejeren uden rollens identitet afvises, grænsen er inklusiv, "over en time". `retrieval_configuration_registry` (181): regressionsauditten (hård og kvalitet, kun konfigurationen i drift), performance-målingen (genberegning, checksum, kørsel og fingeraftryk, miljø, version, negative tal, kun publisheren, én gang, append-only, audit) og godkendelsen af afvigelser. `ingestion_worker_identity` (82): API'et har 16 funktioner |
+| Enhed | `observability-alerts` (10), `observability-health` (11), `retrieval-telemetry` (8), `evaluation-performance` (7, drift mod pgTAP), `evaluation-operations` (12, inklusive workflowets adskillelse og IAM-politikkerne), `evaluation-database-retrieval` (5) og `worker-runtime` (konfiguration af kontrol og kanal). Guardrails: egress (`?? fetch` ses nu), workerens identitet og runtime, `eval-retrieval-data` og `evaluation-publisher` (drift for de nye fixtures) |
+| Integration | `evaluation-operations` (4): en database, der ikke er evalueringsmiljø, afvises, før noget sker. Provisionering er idempotent med præcis manifestets tildelinger, også efter en tildeling ved siden af. Den rigtige retrieval køres som evalueringsbrugerne med bekræftet identitet og tidsmålte trin. Et ændret korpus giver H7. `retrieval-configuration` (15): publicering af en kvalitetsregression (alarm, ingen suspendering, audit, systemstatus), af en hård regression (suspendering, kritisk alarm) og med en manipuleret fil (afvist med alarm) |
+| Mutation | 56/56 fanget: 34 i TypeScript, 20 i SQL og 2 via integration. Syv overlevede første gennemløb: T14 (ulæselig systemstatus), T18 (adgangsfejl uden alarm), S09 og S18 (ejeren uden rollens identitet), S15 (inklusiv grænse i SQL), S19 ("over en time") og I02 (en tildeling ved siden af). Testene blev skærpet, og alle syv fanges nu |
+
+**Ikke implementeret (bevidst):**
+- rate limiting, samtalelagring og retention (8C);
+- enterprise-dashboards;
+- rate- og latency-alarmerne fra forslagskolonnen i §14, som kræver aggregering i logplatformen
+  (B-032, udledt 3);
+- en Admin-knap til at godkende afvigelser (databasefunktionen, som ved accepten i I6.1);
+- valget af alarmmodtager (Å-5).
+
+**Deploymentforudsætninger:**
+- evalueringsprojektet med arten `evaluation`;
+- evalueringsmiljøets worker og scanner;
+- de to AWS-konti med OIDC-roller og secrets;
+- GitHub-environments og -variabler;
+- Å-5.
+
+Først derefter kan baselinen med et rigtigt pilotsæt og de rigtige performance-tal frembringes
+(§17 pkt. 3, 4 og 10).

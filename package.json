@@ -16,7 +16,8 @@
     "test:db": "supabase test db",
     "test:integration": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run -c vitest.integration.config.mts",
     "worker:ingestion": "node --env-file-if-exists=.env.local workers/ingestion/main.ts",
-    "eval:retrieval": "node --import ./evals/engine/node-hooks.mjs evals/engine/cli.ts"
+    "eval:retrieval": "node --import ./evals/engine/node-hooks.mjs evals/engine/cli.ts",
+    "eval:publish": "node --import ./evals/engine/node-hooks.mjs workers/evaluation/publish.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1146.0",

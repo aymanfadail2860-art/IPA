@@ -17,8 +17,9 @@ engine-versioner) er gennemført, og det samme er 8B-I6 (register over retrieval
 evidens bliver kun production, når P1–P9 er opfyldt for en aktiv, godkendt konfiguration) og
 8B-I6.1 (en pilot med statistisk usikkerhed kræver menneskelig accept, og godkendelsen gælder kun de
 evaluerede produkter og dokumenttyper) og 8B-I6.2 (produktet identificeres ved sit stabile id, ikke
-ved navnet). 8B-I7 (evalueringsdrift, monitorering og regression) er
-defineret, men ikke påbegyndt. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+ved navnet). 8B-I7 (evalueringsdrift, monitorering og regression: evalueringsmiljø, publicering
+som særskilt CI-job, regressionsalarmer, sundhedskontrol, Systemstatus i Admin og
+performance-målinger) er gennemført og venter på godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
@@ -77,5 +78,7 @@ fremtvinge "kan ikke dokumenteres" og "utilstrækkeligt grundlag". Kør migratio
 | `npm run build` | Produktionsbuild |
 | `npm run check` | Lint, typecheck, enhedstests og build |
 | `IPA_RUNTIME_ENV=test npm run eval:retrieval` | Retrieval-evaluering mod det fiktive fixture-korpus (8B-I1, `evals/retrieval/README.md`). Med `-- --providers bedrock` evalueres Bedrock-adapterne (kræver AWS-credentials). Kan aldrig give production-grad |
+| `npm run eval:retrieval -- --adapter evaluation --provision …` | Evaluering i evalueringsmiljøet (8B-I7): provisionering og den rigtige retrieval som evalueringsbrugerne. Kræver `IPA_EVAL_*` og en database med arten `evaluation`. Køres af `.github/workflows/retrieval-evaluation.yml` |
+| `npm run eval:publish -- --report …` | Registrerer en kørsel i produktion som `evaluation_publisher` (8B-I7, `deploy/evaluation/README.md`). Kun i CI's publiceringsjob |
 
 Testbrugere og teamstruktur er beskrevet i `docs/06` §11.

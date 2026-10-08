@@ -113,6 +113,36 @@ export interface RetrievalDeps {
    * "insufficient" state can be seen. Refused unless IPA_RUNTIME_ENV is local/test.
    */
   devForceInsufficient?: boolean;
+  /**
+   * Observability (docs/08b §12, §14; 8B-I7): called with the duration of each step and whether
+   * it succeeded. Only timings and a step name — never the query or any content. It cannot
+   * influence the result: it is called after the step, and anything it throws is ignored.
+   */
+  observe?: RetrievalObserver;
+}
+
+/** The measured steps (§12): the whole chain, query embedding, the database search and reranking. */
+export type RetrievalStep = "total" | "query_embedding" | "search" | "rerank";
+export type RetrievalObserver = (step: RetrievalStep, milliseconds: number, ok: boolean) => void;
+
+const clock = (): number => globalThis.performance?.now?.() ?? Date.now();
+
+/** Runs a step and reports its duration to the observer (if any). The observer can never fail the step. */
+async function timed<T>(observe: RetrievalObserver | undefined, step: RetrievalStep, run: () => Promise<T>): Promise<T> {
+  if (!observe) return run();
+  const started = clock();
+  let ok = false;
+  try {
+    const result = await run();
+    ok = true;
+    return result;
+  } finally {
+    try {
+      observe(step, Math.max(0, clock() - started), ok);
+    } catch {
+      // Measurement never changes retrieval.
+    }
+  }
 }
 
 /** One row of knowledge.search_chunks. */
@@ -211,6 +241,11 @@ export function danishDate(now: Date): string {
 }
 
 export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDeps): Promise<EvidenceSet> {
+  if (deps.devForceInsufficient) return retrieve(request, deps);
+  return timed(deps.observe, "total", () => retrieve(request, deps));
+}
+
+async function retrieve(request: RetrievalRequest, deps: RetrievalDeps): Promise<EvidenceSet> {
   const config = deps.config ?? DEFAULT_RETRIEVAL_CONFIG;
   const now = (deps.now ?? (() => new Date()))();
   const normalized = normalizeRequest(request, config);
@@ -231,7 +266,10 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
     });
   }
 
-  const queryEmbedding = deps.embedding ? (await deps.embedding.embedder.embed([normalized.query], { inputType: "query" }))[0] : null;
+  const embedding = deps.embedding;
+  const queryEmbedding = embedding
+    ? (await timed(deps.observe, "query_embedding", () => embedding.embedder.embed([normalized.query], { inputType: "query" })))[0]
+    : null;
   if (deps.embedding && (!queryEmbedding || queryEmbedding.length !== deps.embedding.embedder.dimensions)) {
     throw new RetrievalError("unavailable", "Forespørgslen kunne ikke embeddes.");
   }
@@ -250,13 +288,13 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
       p_document_types: documentIds ? null : normalized.documentTypes,
       p_candidate_k: candidateK,
     });
-  const rows = await search(null, config.candidateK);
+  const rows = await timed(deps.observe, "search", () => search(null, config.candidateK));
 
   const fused = fuse(
     rows.map((row) => ({ ...row, chunkId: row.chunk_id, vectorRank: row.vector_rank, lexicalRank: row.lexical_rank })),
     config.rrfK,
   );
-  const reranked = await deps.reranker.rerank({
+  const reranked = await timed(deps.observe, "rerank", () => deps.reranker.rerank({
     query: normalized.query,
     topN: config.rerankN,
     candidates: fused.slice(0, config.rerankN).map((row) => ({
@@ -271,7 +309,7 @@ export async function runRetrieval(request: RetrievalRequest, deps: RetrievalDep
         fusedScore: row.fusedScore,
       },
     })),
-  });
+  }));
 
   const byId = new Map(fused.map((row) => [row.chunk_id, row]));
   const ranked: RankedChunk[] = reranked.ranked.flatMap((entry) => {

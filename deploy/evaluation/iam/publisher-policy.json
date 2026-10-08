@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EvaluationPublisherCredentialOnly",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:eu-central-1:${AWS_ACCOUNT_ID}:secret:ipa/production/evaluation-publisher/db-*"
+    }
+  ]
+}

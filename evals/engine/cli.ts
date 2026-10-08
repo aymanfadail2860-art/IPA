@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -11,9 +10,12 @@ import { COHERE_RERANK_35_ID } from "../../src/lib/knowledge/providers/bedrock/c
 import { createSdkBedrockTransport } from "../../src/lib/knowledge/providers/bedrock/sdk-transport.ts";
 import { createProductionEmbedder, createProductionReranker, embeddingModelRow } from "../../src/lib/knowledge/providers/catalog.ts";
 
+import { createAlert, createAlertSink } from "../../src/lib/observability/alerts.ts";
+
+import { connectEvaluationEnvironment, evaluationEnvironmentFromEnv, NotAnEvaluationEnvironmentError } from "./evaluation-environment.ts";
 import { createFixtureRetrieval, fixtureUuid } from "./fixture-retrieval.ts";
 import { EVALS_ROOT, loadInputs } from "./loader.ts";
-import { renderMarkdown } from "./report.ts";
+import { runEvaluationOperation, writeVersionedReport, type EvaluationMode } from "./operations.ts";
 import { runEvaluation } from "./runner.ts";
 import { EvalSetError, GateSetError } from "./schema.ts";
 
@@ -23,15 +25,23 @@ import { EvalSetError, GateSetError } from "./schema.ts";
  *   --set            evaluation set (manifests/<set>.json + cases/<set>.jsonl), default "example-v1"
  *   --gates          gate set (gates/<gates>.json), default "gates-v1"
  *   --configuration  declared configuration (configurations/<name>.json), default by --providers
- *   --adapter        retrieval under test; only "fixture" exists (the evaluation environment comes later)
+ *   --adapter        retrieval under test: "fixture" (in-memory, development only, default) or
+ *                    "evaluation" — the evaluation environment (docs/08b §4.5, 8B-I7): a separate
+ *                    Supabase project whose database says it is one. Its own credentials come
+ *                    from the environment (evaluationEnvironmentFromEnv) — never production ones.
+ *   --mode           "baseline" (default) or "regression" (the configuration in service, scheduled or by hand)
+ *   --provision      (evaluation adapter) provision the corpus, users, grants and conflicts first (idempotent)
  *   --providers      "development" (test embedder + "none", default) or "bedrock" (Cohere Embed v4 EU
  *                    1024 + Rerank 3.5 in eu-central-1, 8B-I2). "bedrock" calls AWS with the
  *                    credentials of the default provider chain and uses the candidate configuration
  *                    bedrock-embed-v4-eu-1024-rerank-3-5 unless --configuration is given.
  *   --out            output directory, default evals/retrieval/reports/
  *
- * Writes <run-id>.json and <run-id>.md. Exit code 0 for "pass", 1 for "fail" or "uncertain",
- * 2 for invalid input. It never writes to a database and never registers anything.
+ * Writes <run-id>.json, <run-id>.md, <run-id>.sha256 and — with the evaluation adapter — the
+ * performance measurement <run-id>.performance.json. Exit code 0 for "pass", 1 for "fail" or
+ * "uncertain", 2 for invalid input, 3 when the run could not be carried out (an alarm is sent:
+ * evaluation_failed). It never writes to the production database and never registers anything:
+ * registration is a separate step as evaluation_publisher (workers/evaluation/publish.ts).
  */
 
 async function main(): Promise<number> {
@@ -43,14 +53,21 @@ async function main(): Promise<number> {
       adapter: { type: "string", default: "fixture" },
       providers: { type: "string", default: "development" },
       out: { type: "string", default: path.join(EVALS_ROOT, "reports") },
+      mode: { type: "string", default: "baseline" },
+      provision: { type: "boolean", default: false },
     },
   });
+  if (values.mode !== "baseline" && values.mode !== "regression") {
+    console.error(`Ukendt mode "${values.mode}". Brug "baseline" eller "regression".`);
+    return 2;
+  }
+  const mode = values.mode as EvaluationMode;
   if (values.providers !== "development" && values.providers !== "bedrock") {
     console.error(`Ukendte providers "${values.providers}". Brug "development" eller "bedrock".`);
     return 2;
   }
-  if (values.adapter !== "fixture") {
-    console.error(`Ukendt adapter "${values.adapter}". I 8B-I1 findes kun "fixture"; evalueringsmiljøet kommer i et senere deltrin.`);
+  if (values.adapter !== "fixture" && values.adapter !== "evaluation") {
+    console.error(`Ukendt adapter "${values.adapter}". Brug "fixture" eller "evaluation".`);
     return 2;
   }
 
@@ -73,25 +90,44 @@ async function main(): Promise<number> {
     reranker = createReranker();
     baselineReranker = createReranker("none");
   }
-  const retrieval = createFixtureRetrieval({ manifest: inputs.set.manifest, fixtures: inputs.fixtures, embedder, reranker, baselineReranker, now: () => new Date() });
+  let report;
+  let performance = null;
+  if (values.adapter === "evaluation") {
+    const config = evaluationEnvironmentFromEnv(process.env);
+    if ("missing" in config) {
+      console.error(`Evalueringsmiljøet kræver ${config.missing.join(", ")}.`);
+      return 2;
+    }
+    const env = connectEvaluationEnvironment(config);
+    try {
+      ({ report, performance } = await runEvaluationOperation({
+        inputs, mode, embedder, reranker, baselineReranker, env, provision: values.provision,
+        log: (event) => console.log(JSON.stringify(event)),
+      }));
+    } catch (error) {
+      const reason = error instanceof NotAnEvaluationEnvironmentError ? "not_evaluation_environment" : error instanceof Error ? error.name : "unknown";
+      await createAlertSink(process.env, "evaluation").send(createAlert("evaluation_failed", { set: values.set, mode, reason }));
+      console.error(error instanceof Error ? error.message : error);
+      return 3;
+    }
+  } else {
+    const retrieval = createFixtureRetrieval({ manifest: inputs.set.manifest, fixtures: inputs.fixtures, embedder, reranker, baselineReranker, now: () => new Date() });
+    report = await runEvaluation({
+      set: inputs.set,
+      gates: inputs.gates,
+      declared: { label: inputs.declared.label, configuration: inputs.declared.configuration },
+      retrieval,
+      verifyInputsUnchanged: inputs.verifyUnchanged,
+    });
+  }
 
-  const report = await runEvaluation({
-    set: inputs.set,
-    gates: inputs.gates,
-    declared: { label: inputs.declared.label, configuration: inputs.declared.configuration },
-    retrieval,
-    verifyInputsUnchanged: inputs.verifyUnchanged,
-  });
-
-  fs.mkdirSync(values.out, { recursive: true });
+  const written = writeVersionedReport(values.out, report, performance);
   const base = path.join(values.out, report.runId);
-  fs.writeFileSync(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`);
-  fs.writeFileSync(`${base}.md`, renderMarkdown(report));
   console.log(`Resultat: ${report.verdict} (gyldig: ${report.valid ? "ja" : "nej"}, tier: ${report.tier})`);
   for (const gate of report.hardGates) console.log(`  ${gate.id} ${gate.status} (${gate.violations} brud)`);
   for (const gate of report.qualityGates) console.log(`  ${gate.id} ${gate.status}${gate.uncertain ? " (usikker)" : ""} — ${gate.explanation}`);
   for (const reason of report.invalidReasons) console.log(`  Ugyldig: ${reason}`);
-  console.log(`Rapport: ${base}.json og ${base}.md`);
+  console.log(`Rapport: ${base}.json og ${base}.md (${mode}; filer med SHA-256: ${written.length})`);
   return report.verdict === "pass" ? 0 : 1;
 }
 

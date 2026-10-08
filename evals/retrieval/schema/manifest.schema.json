@@ -14,7 +14,7 @@
     "products": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "object", "additionalProperties": false, "required": ["key", "name"], "properties": { "key": { "$ref": "#/$defs/key" }, "name": { "type": "string", "minLength": 1 } } }
+      "items": { "type": "object", "additionalProperties": false, "required": ["key", "name"], "properties": { "key": { "$ref": "#/$defs/key" }, "name": { "type": "string", "minLength": 1 }, "id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" } } }
     },
     "documents": {
       "type": "array",

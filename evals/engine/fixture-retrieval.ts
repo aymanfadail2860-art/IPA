@@ -88,7 +88,7 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
   const config = options.config ?? DEFAULT_RETRIEVAL_CONFIG;
 
   const binding: CorpusBinding = {
-    products: Object.fromEntries(manifest.products.map((product) => [product.key, fixtureUuid(`product:${product.key}`)])),
+    products: Object.fromEntries(manifest.products.map((product) => [product.key, product.id ?? fixtureUuid(`product:${product.key}`)])),
     documents: Object.fromEntries(
       manifest.documents.map((document) => [
         document.key,

@@ -12,9 +12,11 @@ import {
   verifyForPublication,
   type PublisherConnection,
 } from "../../evals/engine/publication.ts";
+import { buildPerformanceMeasurement } from "../../evals/engine/performance.ts";
 import { REPORT_SCHEMA_VERSION, type EvaluationReport } from "../../evals/engine/runner.ts";
 
-import { buildReport, GATES_V1, reseal, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "./fixtures/evaluation-report";
+import { FIXTURE_PERFORMANCE } from "./fixtures/evaluation-performance";
+import { buildReport, GATES_V1, qualityRegressionReport, reseal, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "./fixtures/evaluation-report";
 import { fixtureMaterial } from "./fixtures/production-config";
 
 /**
@@ -184,5 +186,7 @@ describe("the pgTAP fixture is the generated report (no drift between TypeScript
     expect(literal("gates")).toEqual(JSON.parse(JSON.stringify(GATES_V1)));
     expect(literal("uncertainpilot")).toEqual(JSON.parse(JSON.stringify(buildReport({ counts: UNCERTAIN_PILOT_COUNTS, runId: "f6000000-0000-4000-8000-0000000000ab" }))));
     expect(literal("uncertainstandard")).toEqual(JSON.parse(JSON.stringify(buildReport({ counts: UNCERTAIN_STANDARD_COUNTS, runId: "f6000000-0000-4000-8000-0000000000ac" }))));
+    expect(literal("qualityregression")).toEqual(JSON.parse(JSON.stringify(qualityRegressionReport())));
+    expect(literal("performance")).toEqual(JSON.parse(JSON.stringify(buildPerformanceMeasurement(FIXTURE_PERFORMANCE))));
   });
 });

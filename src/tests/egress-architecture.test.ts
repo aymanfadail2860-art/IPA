@@ -53,6 +53,8 @@ const NETWORK = [
   /from ["']undici["']/,
   /from ["']axios["']/,
   /\bfetch\s*\(/,
+  // 8B-I7: fetch handed on as a value (`x ?? fetch`) is a network client too.
+  /\?\?\s*fetch\b/,
   /\bnew\s+WebSocket\s*\(/,
   /\bXMLHttpRequest\b/,
   /require\(["'](@aws-sdk|openai|@anthropic-ai|https?|undici|axios)/,
@@ -68,6 +70,15 @@ const ALLOWED_TRANSPORTS = ["src/lib/knowledge/providers/bedrock/sdk-transport.t
  */
 const NON_AI_NETWORK: Record<string, RegExp> = {
   "workers/ingestion/security/scanner.ts": /^import \{ connect \} from "node:net";$/m,
+  // 8B-I4: the worker redeems one-time storage tickets at the Edge Function worker-storage (the
+  // platform's own Supabase). Listed explicitly from 8B-I7, when the guard learned to see `?? fetch`.
+  "workers/ingestion/originals.ts": /^ {2}const fetchImpl = options\.fetchImpl \?\? fetch;$/m,
+  // 8B-I7: the alarm webhook (Å-5). An alarm carries only a fixed summary, numbers and ids
+  // (createAlert/isSafeAlert) — never content, a query or personal data.
+  "src/lib/observability/alerts.ts": /^ {2}const doFetch = options\.fetch \?\? fetch;$/m,
+  // 8B-I7: the evaluation provisioning downloads a PUBLIC source named in the manifest and
+  // refuses it unless its SHA-256 matches. It sends nothing.
+  "evals/engine/provision.ts": /^ {2}const download = options\.download \?\? \(async \(url: string\) => new Uint8Array\(await \(await fetch\(url\)\)\.arrayBuffer\(\)\)\);$/m,
 };
 
 describe("external transports: only allowlisted, and only behind the egress check", () => {

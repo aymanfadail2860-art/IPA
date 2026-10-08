@@ -488,7 +488,12 @@ describe("static guardrails", () => {
   });
 
   it("knowledge.retrieval_context is read only by the retrieval layer", () => {
-    const readers = sources.filter(({ text }) => /["']retrieval_context["']/.test(text)).map(({ file }) => file);
-    expect(readers).toEqual(["src/lib/knowledge/retrieval-core.ts"]);
+    const readers = sources.filter(({ text }) => /["']retrieval_context["']/.test(text)).map(({ file }) => file).sort();
+    // 8B-I7: the evaluation adapter reads it once per evaluation user, ONLY for the identity the
+    // database reports (executedAs, H7) — never the configuration, a grade or a readiness verdict.
+    expect(readers).toEqual(["evals/engine/database-retrieval.ts", "src/lib/knowledge/retrieval-core.ts"]);
+    const evaluation = sources.find(({ file }) => file === "evals/engine/database-retrieval.ts")!.text;
+    expect(evaluation).toMatch(/\.rpc\("retrieval_context"\)/);
+    expect(evaluation).not.toMatch(/\.configuration\b|productionReady|notReady|parseRetrievalContext/);
   });
 });

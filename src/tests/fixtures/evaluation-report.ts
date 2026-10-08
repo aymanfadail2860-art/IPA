@@ -187,3 +187,17 @@ export function reseal(report: EvaluationReport): EvaluationReport {
   sealed.checksums.report = reportChecksum(sealed);
   return sealed;
 }
+
+/**
+ * A regression run that fails QUALITY gates only (8B-I7): every direct question loses its
+ * source and its passage. No hard gate fails — the configuration in service is not suspended,
+ * an alarm goes to review. Used by the unit tests and, as a literal, by pgTAP.
+ */
+export function qualityRegressionReport(options: ReportOptions = {}): EvaluationReport {
+  return buildReport({
+    runId: "f6000000-0000-4000-8000-0000000000ad",
+    counts: UNCERTAIN_PILOT_COUNTS,
+    observe: (cases) => cases.filter((c) => c.type === "direct").forEach((c) => Object.assign(c, { sourceRank: null, firstGrade3Rank: null, requiredCovered: 0 })),
+    ...options,
+  });
+}

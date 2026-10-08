@@ -4,8 +4,8 @@
   "version": 1,
   "description": "Syntetisk eksempelsæt til at afprøve evalueringsmotoren (8B-I1). Alt er fiktivt. Det er IKKE pilot-evalueringssættet, og det opfylder bevidst ikke minimum pr. type.",
   "products": [
-    { "key": "ansvar-fiktiv", "name": "Testprodukt Erhvervsansvar (fiktiv)" },
-    { "key": "bygning-fiktiv", "name": "Testprodukt Bygning (fiktiv)" }
+    { "key": "ansvar-fiktiv", "name": "Testprodukt Erhvervsansvar (fiktiv)", "id": "e7a10000-0000-4000-8000-000000000001" },
+    { "key": "bygning-fiktiv", "name": "Testprodukt Bygning (fiktiv)", "id": "e7a10000-0000-4000-8000-000000000002" }
   ],
   "documents": [
     {

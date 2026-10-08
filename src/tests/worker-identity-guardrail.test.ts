@@ -109,7 +109,13 @@ describe("worker identity guardrails (8B-I3)", () => {
     walk("src");
     walk("workers");
     expect(users.sort()).toEqual([
+      // 8B-I7: asserts that the evaluation tooling never reads the application's key (test only).
+      "src/tests/eval-retrieval-data.test.ts",
+      "src/tests/evaluation-database-retrieval.test.ts",
+      "src/tests/evaluation-operations.test.ts",
       "src/tests/integration/ai-gateway.integration.test.ts",
+      // 8B-I7: the local stack plays the evaluation environment; its key is that project's own (test only).
+      "src/tests/integration/evaluation-operations.integration.test.ts",
       "src/tests/integration/ingestion-worker-lease.integration.test.ts",
       "src/tests/integration/knowledge-helpers.ts",
       // 8B-I6: proves that service_role can neither publish, approve nor obtain production evidence (test only).
@@ -120,6 +126,8 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/worker-identity-guardrail.test.ts",
       "src/tests/worker-runtime-architecture.test.ts",
       "src/tests/worker-runtime.test.ts",
+      // 8B-I7: the publication step names the key only to refuse it (D-18).
+      "workers/evaluation/publish.ts",
       // Names the key only to refuse it outside local/test (8B-I4).
       "workers/ingestion/config.ts",
     ]);

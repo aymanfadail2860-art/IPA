@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 
 import { runtimeEnv, type RuntimeEnv } from "../../src/lib/knowledge/core/grade.ts";
+import { AlertConfigError, createAlertSink } from "../../src/lib/observability/alerts.ts";
 
 /**
  * The worker's runtime configuration (docs/08b §21.5), validated before anything connects.
@@ -78,6 +79,10 @@ export interface WorkerConfig {
   shutdownGraceMs: number;
   livenessFile: string | null;
   scanner: ScannerConfig;
+  /** The scheduled health check (docs/08b §14, 8B-I7): every 5 minutes; 0 = off (only outside production). */
+  healthCheckMs: number;
+  /** The alarm channel (D-15): "log" always, plus the webhook when configured (Å-5). */
+  alerts: { sink: "log" | "webhook" };
 }
 
 /** blue/green login role, with the Supavisor tenant suffix (<role>.<project-ref>) in production. */
@@ -181,6 +186,16 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
   }
 
   const leaseSeconds = int(env, "IPA_WORKER_LEASE_SECONDS", 300, 60, 900, problems);
+  const healthCheckMs = int(env, "IPA_HEALTH_CHECK_INTERVAL_MS", 300_000, 0, 3_600_000, problems);
+  if (healthCheckMs !== 0 && healthCheckMs < 30_000) problems.push("IPA_HEALTH_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 30000.");
+  if (production && healthCheckMs === 0) problems.push("Den planlagte sundhedskontrol kan ikke slås fra i produktion (docs/08b §14).");
+  let alertSink: "log" | "webhook" = "log";
+  try {
+    createAlertSink(env, "ingestion-worker", { write: () => {} });
+    alertSink = env.IPA_ALERT_SINK?.trim() === "webhook" ? "webhook" : "log";
+  } catch (error) {
+    problems.push(error instanceof AlertConfigError ? error.message : "Alarmkanalen kunne ikke konfigureres.");
+  }
   const config: WorkerConfig = {
     runtimeEnv: environment,
     workerLabel,
@@ -196,6 +211,8 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
     shutdownGraceMs: int(env, "IPA_WORKER_SHUTDOWN_GRACE_MS", 90_000, 0, 110_000, problems),
     livenessFile: env.IPA_WORKER_LIVENESS_FILE || null,
     scanner,
+    healthCheckMs,
+    alerts: { sink: alertSink },
   };
   if (config.idle.maxMs < config.idle.initialMs) problems.push("IPA_WORKER_POLL_MAX_MS må ikke være mindre end IPA_WORKER_POLL_MS.");
   if (problems.length > 0) throw new ConfigError(problems);
@@ -217,5 +234,14 @@ export function describeConfig(config: WorkerConfig): Record<string, unknown> {
         }
       : { kind: "service-role-dev" };
   const scanner = config.scanner.kind === "clamd" ? { kind: "clamd", host: config.scanner.host, port: config.scanner.port } : { kind: "development-fixture" };
-  return { runtime_env: config.runtimeEnv, worker: config.workerLabel, db, scanner, lease_seconds: config.leaseSeconds, heartbeat_ms: config.heartbeatMs };
+  return {
+    runtime_env: config.runtimeEnv,
+    worker: config.workerLabel,
+    db,
+    scanner,
+    lease_seconds: config.leaseSeconds,
+    heartbeat_ms: config.heartbeatMs,
+    health_check_ms: config.healthCheckMs,
+    alert_sink: config.alerts.sink,
+  };
 }

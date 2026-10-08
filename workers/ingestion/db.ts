@@ -5,6 +5,7 @@ import postgres, { type JSONValue, type Options, type PendingQuery, type Row, ty
 import type { PostgresConfig } from "./config.ts";
 import type { Chunk } from "./chunker.ts";
 import type { Clearance } from "./gate.ts";
+import type { HealthSource } from "./health-monitor.ts";
 import type { ChunkToEmbed, ClaimedJob, EmbeddingModelRow, IntegrityRow, RecordedVerdict, WorkerDb } from "./pipeline.ts";
 import type { ScanContext } from "./security/scan.ts";
 
@@ -177,6 +178,16 @@ export function postgresWorkerDb(sql: Sql, workerLabel: string, options: Postgre
     },
     forget(jobId) {
       leases.delete(jobId);
+    },
+  };
+}
+
+/** The scheduled health check's one call (knowledge.worker_system_health, 8B-I7). */
+export function postgresHealthSource(sql: Sql, queryTimeoutMs: number): HealthSource {
+  return {
+    async systemHealth() {
+      const [row] = await timed(sql<{ health: unknown }[]>`select knowledge.worker_system_health() as health`, queryTimeoutMs);
+      return row?.health ?? null;
     },
   };
 }

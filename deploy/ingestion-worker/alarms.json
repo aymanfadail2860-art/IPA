@@ -1,0 +1,69 @@
+{
+  "MetricFilters": [
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-alerts-critical",
+      "filterPattern": "{ $.event = \"alert\" && $.severity = \"critical\" }",
+      "metricTransformations": [{ "metricName": "CriticalAlerts", "metricNamespace": "IPA/Operations", "metricValue": "1", "defaultValue": 0 }]
+    },
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-alerts-warning",
+      "filterPattern": "{ $.event = \"alert\" && $.severity = \"warning\" }",
+      "metricTransformations": [{ "metricName": "WarningAlerts", "metricNamespace": "IPA/Operations", "metricValue": "1", "defaultValue": 0 }]
+    },
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-health-check-failed",
+      "filterPattern": "{ $.event = \"health_check_failed\" }",
+      "metricTransformations": [{ "metricName": "HealthCheckFailures", "metricNamespace": "IPA/Operations", "metricValue": "1", "defaultValue": 0 }]
+    },
+    {
+      "logGroupName": "/ipa/ingestion-worker",
+      "filterName": "ipa-health-check-ran",
+      "filterPattern": "{ $.event = \"health_check\" }",
+      "metricTransformations": [{ "metricName": "HealthChecks", "metricNamespace": "IPA/Operations", "metricValue": "1", "defaultValue": 0 }]
+    }
+  ],
+  "Alarms": [
+    {
+      "AlarmName": "ipa-critical-alert",
+      "AlarmDescription": "The worker's scheduled health check raised a critical alarm (docs/08b §14): a suspended retrieval configuration, a hard-gate regression. The log line names the code and the ids.",
+      "Namespace": "IPA/Operations",
+      "MetricName": "CriticalAlerts",
+      "Statistic": "Sum",
+      "Period": 300,
+      "EvaluationPeriods": 1,
+      "Threshold": 0,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "TreatMissingData": "notBreaching",
+      "AlarmActions": ["${ALARM_TOPIC_ARN}"]
+    },
+    {
+      "AlarmName": "ipa-warning-alert",
+      "AlarmDescription": "The worker's scheduled health check raised a warning (dead-letter, stale queue, stuck processing, scanner failures, a found infection, a quality regression).",
+      "Namespace": "IPA/Operations",
+      "MetricName": "WarningAlerts",
+      "Statistic": "Sum",
+      "Period": 300,
+      "EvaluationPeriods": 1,
+      "Threshold": 0,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "TreatMissingData": "notBreaching",
+      "AlarmActions": ["${ALARM_TOPIC_ARN}"]
+    },
+    {
+      "AlarmName": "ipa-health-check-silent",
+      "AlarmDescription": "No scheduled health check for 15 minutes: the worker is down or cannot read the system status. Silence is not health.",
+      "Namespace": "IPA/Operations",
+      "MetricName": "HealthChecks",
+      "Statistic": "Sum",
+      "Period": 900,
+      "EvaluationPeriods": 1,
+      "Threshold": 1,
+      "ComparisonOperator": "LessThanThreshold",
+      "TreatMissingData": "breaching",
+      "AlarmActions": ["${ALARM_TOPIC_ARN}"]
+    }
+  ]
+}

@@ -103,7 +103,8 @@ export interface Manifest {
   setId: string;
   version: number;
   description: string;
-  products: { key: string; name: string }[];
+  /** `id`: the product's stable id in the platform (knowledge.products.id, B-031). Required in the evaluation environment. */
+  products: { key: string; name: string; id?: string }[];
   documents: ManifestDocument[];
   actors: ManifestActor[];
   conflicts: { id: string; documents: [string, string]; status: "open" | "resolved" }[];
@@ -185,8 +186,8 @@ export interface RetrievalUnderTest {
   binding(): CorpusBinding;
   /** The normalized text of a document version, for anchor validation (docs/08b §5.4). */
   versionText(document: string, version: string): string | null;
-  /** Checksum of the corpus the adapter serves. Compared before and after the run (H7). */
-  corpusChecksum(): string;
+  /** Checksum of the corpus the adapter serves, read anew on every call. Compared before and after the run (H7). */
+  corpusChecksum(): string | Promise<string>;
   run(evalCase: EvalCase): Promise<RetrievalRun>;
   /** The same retrieval without reranking, for Q7. Null when it cannot be produced. */
   withoutReranker(): RetrievalUnderTest | null;

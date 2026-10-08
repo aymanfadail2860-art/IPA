@@ -50,7 +50,10 @@ describe("production worker code (8B-I4)", () => {
     expect([...graph.packages].filter((name) => !name.startsWith("node:")).sort()).toEqual(["pdfjs-dist", "postgres"]);
     expect(graph.files.has("workers/ingestion/dev-service-role.ts")).toBe(false);
     for (const file of graph.files) {
-      expect(file.startsWith("workers/ingestion/") || file.startsWith("src/lib/egress/") || file.startsWith("src/lib/knowledge/core/"), file).toBe(true);
+      expect(
+        file.startsWith("workers/ingestion/") || file.startsWith("src/lib/egress/") || file.startsWith("src/lib/knowledge/core/") || file.startsWith("src/lib/observability/"),
+        file,
+      ).toBe(true);
       // config.ts names the key only to refuse it in production (next test).
       if (file !== "workers/ingestion/config.ts") expect(read(file), file).not.toMatch(/SUPABASE_SERVICE_ROLE_KEY|service_role/);
     }
@@ -68,7 +71,7 @@ describe("production worker code (8B-I4)", () => {
   it("the database adapter calls only the locked knowledge.worker_* API — no tables, admin or ops functions", () => {
     const code = stripComments(read("workers/ingestion/db.ts"));
     const statements = [...code.matchAll(/sql(?:<[^`]*?>)?`([^`]*)`/g)].map((match) => match[1]!.replace(/\$\{[^}]*\}/g, "$").replace(/\s+/g, " ").trim());
-    expect(statements).toHaveLength(15);
+    expect(statements).toHaveLength(16);
     const api = new Set<string>();
     for (const statement of statements) {
       const match = /^select (?:(?:\*|[a-z_, ()]+) from )?knowledge\.(worker_[a-z_]+)\([^;]*\)(?: as [a-z_]+)?$/.exec(statement);
@@ -79,7 +82,7 @@ describe("production worker code (8B-I4)", () => {
     expect([...api].sort()).toEqual([
       "worker_checkpoint", "worker_chunks_to_embed", "worker_claim_job", "worker_complete_job", "worker_embedding_models", "worker_fail_job",
       "worker_heartbeat", "worker_issue_storage_ticket", "worker_record_security_verdict", "worker_security_clearance", "worker_security_scan_context",
-      "worker_store_chunks", "worker_store_embeddings", "worker_store_pages", "worker_verify_index",
+      "worker_store_chunks", "worker_store_embeddings", "worker_store_pages", "worker_system_health", "worker_verify_index",
     ]);
     // No unsafe/raw SQL and no session state.
     expect(code).not.toMatch(/\.unsafe\(|\.begin\(|\.reserve\(|\blisten\(|set_config|SET (ROLE|SESSION)/i);
@@ -176,6 +179,8 @@ describe("production image (8B-I4)", () => {
       "workers/ingestion/",
       "src/lib/egress/",
       "src/lib/knowledge/core/",
+      // 8B-I7: the alarm sink and the health evaluation (no dependencies).
+      "src/lib/observability/",
       "deploy/ingestion-worker/certs/",
     ]);
     expect(instructions).toMatch(/npm ci --omit=dev --omit=optional --ignore-scripts/);

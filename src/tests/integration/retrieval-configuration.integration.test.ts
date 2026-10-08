@@ -1,10 +1,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createEvaluationPublisher, sqlPublisherConnection } from "../../../evals/engine/publication.ts";
+import { writeVersionedReport } from "../../../evals/engine/operations.ts";
+import { buildPerformanceMeasurement, type PerformanceMeasurement } from "../../../evals/engine/performance.ts";
+import { createEvaluationPublisher, sqlPublisherConnection, type SqlClient } from "../../../evals/engine/publication.ts";
+import { publishEvaluation } from "../../../workers/evaluation/publish-run.ts";
+import type { Alert, AlertSink } from "@/lib/observability/alerts";
+import { evaluateHealth, INITIAL_HEALTH_STATE, parseSystemHealth } from "@/lib/observability/health";
 import type { EvaluationReport } from "../../../evals/engine/runner.ts";
 import { userText } from "@/lib/egress/classification";
 import { EvidenceGradeError, requireProductionEvidence } from "@/lib/knowledge/core/evidence";
@@ -386,10 +394,83 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     configurations.c = await configurationOf(reportC.configuration.declaredFingerprint);
     expect(await approve(configurations.c, await latestRun(configurations.c))).toBeNull();
     expect(await activate(adminClient, configurations.c)).toBeNull();
-    await publish(report("it-config-c", { configuration: material({ minScore: 0.25 }), violations: [{ gate: "H1", caseId: null, explanation: "Fiktivt brud i regression." }] }));
+    const alerts: Alert[] = [];
+    const sink: AlertSink = { send: async (alert) => void alerts.push(alert) };
+    const publishFiles = async (reportX: EvaluationReport, performance: PerformanceMeasurement | null, mode: "baseline" | "regression") => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ipa-eval-"));
+      const written = writeVersionedReport(dir, reportX, performance);
+      const files = Object.fromEntries(written.filter((file) => !file.endsWith(".sha256")).map((file) => [path.basename(file), fs.readFileSync(file, "utf8")]));
+      return publishEvaluation(
+        { report: reportX, gates: GATES_V1, performance, mode, files, checksums: fs.readFileSync(written.find((file) => file.endsWith(".sha256"))!, "utf8") },
+        publisherSql as unknown as SqlClient,
+        sink,
+        () => {},
+      );
+    };
+
+    // 8B-I7: a QUALITY regression is registered through the publication step: an alarm for
+    // review, the configuration stays active, and the event names set, gate set and fingerprint.
+    const quality = report("it-config-c", {
+      configuration: material({ minScore: 0.25 }),
+      observe: (cases) => cases.filter((c) => c.type === "direct").forEach((c) => Object.assign(c, { sourceRank: null, firstGrade3Rank: null, requiredCovered: 0 })),
+    });
+    const performance = buildPerformanceMeasurement({
+      runId: quality.runId, configurationFingerprint: quality.configuration.runtimeFingerprint, environment: "evaluation",
+      retrieval: { total: [700, 750, 1700], queryEmbedding: [120, 140, 400], search: [80, 90, 100], rerank: [200, 210, 220] },
+      ingestion: { documents: [{ pages: 52, seconds: 200 }], corpusPages: 52, corpusSeconds: 200 },
+    });
+    expect(await publishFiles(quality, performance, "regression")).toMatchObject({ status: "published" });
+    expect(alerts.map((alert) => alert.code)).toEqual(["quality_regression"]);
+    expect(alerts[0]!.details).toMatchObject({ eval_set_checksum: quality.evalSet.checksum, gate_set_checksum: quality.gateSet.checksum, runtime_fingerprint: quality.configuration.runtimeFingerprint });
+    expect((await admin<{ status: string }[]>`select status from knowledge.retrieval_configurations where id = ${configurations.c}`)[0]!.status).toBe("active");
+    const [qualityEvent] = await admin<{ details: Record<string, unknown> }[]>`
+      select a.details from audit.audit_log a join knowledge.evaluation_runs r on r.id::text = a.entity_id
+      where a.action = 'knowledge.evaluation_run.regression' and r.run_id = ${quality.runId}`;
+    expect(qualityEvent!.details).toMatchObject({
+      result: "quality_regression",
+      eval_set: { id: quality.evalSet.setId, version: quality.evalSet.version, checksum: quality.evalSet.checksum },
+      gate_set: { checksum: quality.gateSet.checksum },
+      runtime_fingerprint: quality.configuration.runtimeFingerprint,
+    });
+    // The performance measurement is registered with the run and the fingerprint; the deviations
+    // (p95 total, query embedding; corpus not measured) need a documented approval.
+    const [measurement] = await admin<{ id: string; deviations: string[]; configuration_fingerprint: string }[]>`
+      select id, deviations, configuration_fingerprint from knowledge.performance_measurements where measurement_id = ${performance.measurementId}`;
+    expect(measurement!.configuration_fingerprint).toBe(quality.configuration.runtimeFingerprint);
+    expect(measurement!.deviations).toEqual(["retrieval_total_p95", "query_embedding_p95", "ingestion_corpus_2000_pages_seconds"]);
+    expect(await rpc(adminClient, "accept_performance_deviation", { p_measurement_id: measurement!.id, p_justification: "Fiktiv godkendelse: målt i evalueringsmiljøet, gentages i drift." })).toBeNull();
+    // The scheduled health check sees the same: a quality regression of the active configuration.
+    const health = parseSystemHealth((await admin<{ h: unknown }[]>`select ops.system_health() as h`)[0]!.h);
+    expect(evaluateHealth(health, INITIAL_HEALTH_STATE).alerts.map((alert) => alert.code)).toContain("quality_regression");
+    expect((await admin<{ p: { accepted: boolean } }[]>`select ops.system_health() -> 'performance' as p`)[0]!.p.accepted).toBe(true);
+
+    // A hard-gate regression: suspended in the same transaction (D-8), no fallback; critical alarm.
+    alerts.length = 0;
+    const hard = report("it-config-c", { configuration: material({ minScore: 0.25 }), violations: [{ gate: "H1", caseId: null, explanation: "Fiktivt brud i regression." }] });
+    expect(await publishFiles(hard, null, "regression")).toMatchObject({ status: "published" });
+    expect(alerts.map((alert) => alert.code)).toEqual(["hard_gate_regression"]);
+    expect(alerts[0]!.details).toMatchObject({ failed_hard_gates: "H1", runtime_fingerprint: hard.configuration.runtimeFingerprint });
     // A run-level H1 breach is registered as a regression run and suspends.
     const [row] = await admin<{ status: string; suspension_reason: string }[]>`select status, suspension_reason from knowledge.retrieval_configurations where id = ${configurations.c}`;
     expect(row).toEqual({ status: "suspended", suspension_reason: "hard_gate_failed" });
+    const suspendedHealth = parseSystemHealth((await admin<{ h: unknown }[]>`select ops.system_health() as h`)[0]!.h);
+    const suspendedAlerts = evaluateHealth(suspendedHealth, INITIAL_HEALTH_STATE).alerts;
+    expect(suspendedAlerts.find((alert) => alert.code === "configuration_suspended")?.details).toMatchObject({ reason: "hard_gate_failed", runtime_fingerprint: hard.configuration.runtimeFingerprint });
+
+    // A tampered file is refused before anything is sent — and raises the alarm.
+    alerts.length = 0;
+    const tampered = report("it-config-c", { configuration: material({ minScore: 0.25 }) });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ipa-eval-"));
+    const written = writeVersionedReport(dir, tampered, null);
+    const outcome = await publishEvaluation(
+      { report: tampered, gates: GATES_V1, performance: null, mode: "baseline", files: { [`${tampered.runId}.json`]: `${fs.readFileSync(written[0]!, "utf8")} ` }, checksums: fs.readFileSync(written.at(-1)!, "utf8") },
+      publisherSql as unknown as SqlClient,
+      sink,
+      () => {},
+    );
+    expect(outcome.status).toBe("refused");
+    expect(alerts.map((alert) => alert.code)).toEqual(["publication_refused"]);
+    expect((await admin<{ n: number }[]>`select count(*)::int as n from knowledge.evaluation_runs where run_id = ${tampered.runId}`)[0]!.n).toBe(0);
   });
 
   it("history explains every decision with ids, checksums and fingerprints — never document text", async () => {

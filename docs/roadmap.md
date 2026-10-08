@@ -14,7 +14,8 @@ godkendt — I5 er fuldt lukket. 8B-I6 (register over retrieval-konfigurationer 
 ProductionEvidenceSet) er gennemført og godkendt og endeligt lukket med 8B-I6.1 (pilot-politik
 og pilot-scope) og 8B-I6.2 (stabil produktidentitet i pilot-scope), som begge er gennemført og
 godkendt. 8B-I7 (Evaluation Operations, Monitoring & Regression
-Guardrails) er defineret, men ikke påbegyndt.** Resten af 8B implementeres i deltrin, som hver
+Guardrails) er gennemført og venter på godkendelse.** 8B er ikke fuldt implementeret: baselinen med
+et rigtigt pilotsæt og aktiveringen i et miljø med de rigtige udbydere udestår. Hvert deltrin
 kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
@@ -50,7 +51,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 defineret, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 gennemført og venter på godkendelse, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -450,7 +451,7 @@ godkendelse.
   - P1–P9 afleder graden ved hvert retrieval. EvidenceSet schemaVersion 2.
   - Detaljer i `docs/08b` §21.9 og B-029.
   - Pilotens `uncertain` er afgjort i B-030 (se 8B-I6.1).
-  - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen hører til I7.
+  - Ingen rigtig konfiguration er aktiveret. CI-transporten til publiceringen er leveret i I7.
 - **8B-I6.1 — pilot-politik og pilot-scope: ✅ gennemført og godkendt 2026-10-07.**
   - En pilot, der består på punktestimatet med usikre Wilson-intervaller
     (`pass_with_uncertainty`), kan kun godkendes efter en registreret menneskelig accept.
@@ -464,16 +465,22 @@ godkendelse.
     øjebliksbillede.
   - Et omdøbt produkt forbliver i området. Et nyt produkt med samme navn arver intet.
   - Detaljer i `docs/08b` §21.11 og B-031.
-- **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: defineret (B-030), ikke
-  påbegyndt.** Påbegyndes kun efter eksplicit godkendelse. Indhold:
-  - evalueringsmiljø og sikker publiceringstransport;
-  - reproducerbar baseline og regression;
-  - automatisk suspendering ved hårde gate-brud;
-  - observability og `AlertSink` med en første kanal;
-  - målbare performance-exit-kriterier.
-
-  Definitionen står i `docs/08b` §21.10. Rate limiting, samtalelagring og retention hører til
-  8C.
+- **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: gennemført 2026-10-08,
+  venter på godkendelse (B-032).**
+  - Evalueringsmiljøet er et eget projekt, som databasen selv erklærer (`evaluation`).
+    Provisioneringen er idempotent, og den rigtige retrieval køres som evalueringsbrugerne med
+    bekræftet identitet.
+  - Publicering er et særskilt CI-job med kun `evaluation_publisher`. Det bruger kortlivet OIDC,
+    TLS og SHA-256-kontrol af filerne.
+  - Regression ugentligt, ved ændringer og manuelt. Et hårdt brud suspenderer uden fallback, og en
+    kvalitetsregression giver alarm og vurdering. Begge auditeres med sæt, gate-sæt og
+    fingeraftryk.
+  - `AlertSink` med `log` og `webhook`. Workeren kører en sundhedskontrol hvert 5. minut, appen
+    har retrieval-telemetri, og Admin har et afsnit med Systemstatus.
+  - Performance-målene i §12 er versioneret og genberegnes i databasen. Afvigelser kræver
+    dokumenteret godkendelse.
+  - Udledte punkter til bekræftelse står i B-032. Detaljer i `docs/08b` §21.12.
+  - Rate limiting, samtalelagring og retention hører fortsat til 8C.
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af
 fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B (B-019). Beslutningerne D-1–D-20 står
 i specifikationens §19, og implementeringsrækkefølgen i §20.
@@ -484,7 +491,7 @@ i specifikationens §19, og implementeringsrækkefølgen i §20.
   (exit-kriterium 11).
 - Å-3: hvem der vedligeholder evalueringssættet — før baseline.
 - Å-4: retningslinjer for fiktive dokumenter — i `evals/retrieval/README.md` før baseline.
-- Å-5: første alarmkanal og modtager — ved implementeringen af alarmer.
+- Å-5: første alarmkanal og modtager. Kanalen er implementeret som en generisk webhook (B-032); modtager og tjeneste vælges ved deployment.
 - Å-6: licens for offentlige betingelser — pr. dokument ved indlæsning.
 
 Afsnittene nedenfor er det oprindelige forslag og udbydergrundlaget. Den låste specifikation er

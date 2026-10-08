@@ -31,6 +31,7 @@ COPY deploy/ingestion-worker/package.json ./package.json
 COPY workers/ingestion/ ./workers/ingestion/
 COPY src/lib/egress/ ./src/lib/egress/
 COPY src/lib/knowledge/core/ ./src/lib/knowledge/core/
+COPY src/lib/observability/ ./src/lib/observability/
 COPY deploy/ingestion-worker/certs/ ./certs/
 RUN rm -f workers/ingestion/dev-service-role.ts
 USER node

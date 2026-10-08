@@ -1,8 +1,10 @@
 import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
+import { createAlertSink } from "../../src/lib/observability/alerts.ts";
 
 import { ConfigError, describeConfig, loadConfig, type WorkerConfig } from "./config.ts";
-import { connectWorkerDatabase, postgresWorkerDb } from "./db.ts";
+import { connectWorkerDatabase, postgresHealthSource, postgresWorkerDb } from "./db.ts";
 import { databaseSecurityGate } from "./gate.ts";
+import { createHealthMonitor, type HealthSource } from "./health-monitor.ts";
 import { createLiveness } from "./liveness.ts";
 import { createLogger, errorClass } from "./log.ts";
 import { ticketOriginals } from "./originals.ts";
@@ -48,11 +50,13 @@ const scanner: MalwareScanner =
 const inspector = childProcessInspector();
 
 let db: WorkerDb;
+let health: HealthSource;
 let originals: OriginalStore;
 let close: () => Promise<void>;
 if (config.db.kind === "postgres") {
   const sql = connectWorkerDatabase(config.db);
   db = postgresWorkerDb(sql, config.workerLabel, { leaseSeconds: config.leaseSeconds, queryTimeoutMs: config.db.queryTimeoutMs });
+  health = postgresHealthSource(sql, config.db.queryTimeoutMs);
   originals = ticketOriginals({ db, url: config.storageUrl! });
   close = () => sql.end({ timeout: 5 });
 } else {
@@ -61,6 +65,7 @@ if (config.db.kind === "postgres") {
   const dev = await import("./dev-service-role.ts");
   const client = dev.createDevServiceRoleClient(config.db.url, config.db.key);
   db = dev.devServiceRoleWorkerDb(client, config.workerLabel);
+  health = dev.devServiceRoleHealthSource(client);
   originals = dev.devServiceRoleOriginals(client, db);
   close = async () => {};
 }
@@ -115,9 +120,16 @@ log(
       },
 );
 
+// The scheduled health check (docs/08b §14, 8B-I7) beside the job loop; not in --once runs.
+const monitor = config.once || config.healthCheckMs === 0
+  ? null
+  : createHealthMonitor({ source: health, sink: createAlertSink(process.env, "ingestion-worker"), log, intervalMs: config.healthCheckMs });
+void monitor?.tick();
+
 const runtime = createWorkerRuntime(config, { db, originals, gate, scan: { scanner, inspector }, log, liveness });
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => runtime.stop(signal));
 const result = await runtime.run();
+monitor?.stop();
 
 await close().catch(() => {});
 log({ event: "worker_stop", reason: result.reason, jobs: result.jobs });

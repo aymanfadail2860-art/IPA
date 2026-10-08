@@ -112,6 +112,30 @@ describe("runtime configuration", () => {
   });
 });
 
+describe("the scheduled health check and the alarm channel (8B-I7)", () => {
+  it("checks every 5 minutes and alarms to the log by default", () => {
+    const config = loadConfig(production(), [], exists);
+    expect(config.healthCheckMs).toBe(300_000);
+    expect(config.alerts).toEqual({ sink: "log" });
+    expect(describeConfig(config)).toMatchObject({ health_check_ms: 300_000, alert_sink: "log" });
+  });
+
+  it("cannot be switched off in production, and never runs more often than every 30 seconds", () => {
+    expect(problems(production({ IPA_HEALTH_CHECK_INTERVAL_MS: "0" }))).toContain("Den planlagte sundhedskontrol kan ikke slås fra i produktion (docs/08b §14).");
+    expect(problems(production({ IPA_HEALTH_CHECK_INTERVAL_MS: "1000" }))).toContain("IPA_HEALTH_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 30000.");
+    expect(loadConfig({ IPA_RUNTIME_ENV: "local", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "k", IPA_HEALTH_CHECK_INTERVAL_MS: "0" }, [], exists).healthCheckMs).toBe(0);
+  });
+
+  it("a webhook channel needs an HTTPS URL; an unknown channel is a configuration error at start", () => {
+    expect(loadConfig(production({ IPA_ALERT_SINK: "webhook", IPA_ALERT_WEBHOOK_URL: "https://alerts.example.invalid/x" }), [], exists).alerts).toEqual({ sink: "webhook" });
+    expect(problems(production({ IPA_ALERT_SINK: "webhook" }))).toContain("IPA_ALERT_SINK=webhook kræver IPA_ALERT_WEBHOOK_URL.");
+    expect(problems(production({ IPA_ALERT_SINK: "webhook", IPA_ALERT_WEBHOOK_URL: "http://alerts.example.invalid/x" }))).toContain("IPA_ALERT_WEBHOOK_URL skal bruge HTTPS.");
+    expect(problems(production({ IPA_ALERT_SINK: "pager" })).join(" ")).toMatch(/IPA_ALERT_SINK="pager" er ukendt/);
+    // The URL is never logged.
+    expect(JSON.stringify(describeConfig(loadConfig(production({ IPA_ALERT_SINK: "webhook", IPA_ALERT_WEBHOOK_URL: "https://alerts.example.invalid/secret-path" }), [], exists)))).not.toContain("secret-path");
+  });
+});
+
 describe("postgres.js configuration", () => {
   const db: PostgresConfig = {
     kind: "postgres", host: "pooler.example", port: 6543, database: "postgres", username: `ingestion_worker_login_blue.${REF}`, password: PASSWORD,

@@ -127,6 +127,9 @@ class Checker {
 // Manifest
 // ---------------------------------------------------------------------------------------------
 
+/** A product id: a lowercase UUID, as knowledge.products.id. */
+const PRODUCT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export const MANIFEST_FIELDS = {
   required: ["schema", "setId", "version", "description", "products", "documents", "actors", "conflicts"],
   optional: [],
@@ -143,12 +146,14 @@ function checkManifest(value: unknown, c: Checker): value is Manifest {
   if (c.array(value.products, "manifest.products", { min: 1 })) {
     value.products.forEach((product, i) => {
       const path = `manifest.products[${i}]`;
-      if (!c.object(product, path, ["key", "name"], [])) return;
+      if (!c.object(product, path, ["key", "name"], ["id"])) return;
       if (c.string(product.key, `${path}.key`, { pattern: KEY })) {
         if (products.has(product.key)) c.error(`${path}.key`, "er brugt før");
         products.add(product.key);
       }
       c.string(product.name, `${path}.name`);
+      // The product's stable id in the platform (B-031): required in the evaluation environment.
+      if (product.id !== undefined) c.string(product.id, `${path}.id`, { pattern: PRODUCT_ID });
     });
   }
 

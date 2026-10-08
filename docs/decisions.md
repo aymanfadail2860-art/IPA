@@ -10,6 +10,121 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-032 — Evaluation Operations, Monitoring & Regression Guardrails (8B-I7)
+
+**Dato:** 8. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.12,
+`supabase/migrations/20261008000100_evaluation_operations.sql`, `evals/engine/`,
+`workers/evaluation/`, `src/lib/observability/`, `workers/ingestion/health-monitor.ts`,
+`.github/workflows/retrieval-evaluation.yml`, `deploy/evaluation/`
+
+**Beslutning:**
+- **8B-I6.2 er godkendt, og 8B-I7 er påbegyndt** efter din eksplicitte godkendelse. Indholdet
+  følger definitionen i §21.10.
+- **Evalueringsmiljøet** er et eget Supabase-projekt med samme migrationer. Databasen siger selv,
+  hvad den er (`ops.environment`). Kun databasens ejer sætter arten (`ops.set_environment_kind`),
+  og ændringen auditeres. Uden en angivet art er miljøet `unset`. Motoren nægter at provisionere
+  eller køre, før der læses eller skrives noget, medmindre databasen siger `evaluation`.
+  Credentials kommer kun fra `IPA_EVAL_*` og aldrig fra applikationens variabler.
+- **Retrieval i evalueringen** er den rigtige `runRetrieval`, kørt som hver evalueringsbruger
+  gennem RLS. Identiteten tæller kun, når databasen selv bekræfter den (H7). Korpussets checksum
+  læses igen ved integritetskontrollen, så en ændring under kørslen fanges (H7).
+- **Korpusset** provisioneres idempotent fra manifestet:
+  - produkterne oprettes med manifestets produkt-id'er (B-031);
+  - evalueringsbrugerne får ingen roller og præcis manifestets tildelinger;
+  - offentlige kilder skal matche deres SHA-256.
+- **Publicering er et særskilt trin og et særskilt CI-job.**
+  - Evalueringsjobbet har ingen production-credential.
+  - Publiceringsjobbet har kun `evaluation_publisher_login`, hentet gennem en kortlivet
+    OIDC-rolle, der kun kan læse den ene secret. Det bruger TLS med certifikatverifikation og
+    nægter at starte, hvis en applikationsnøgle er sat.
+  - Filerne efterprøves mod deres SHA-256-liste, før noget registreres.
+- **Regression** er en registreret kørsel af konfigurationen i drift. Hændelsen auditeres
+  (`knowledge.evaluation_run.regression`) med evalueringssæt, gate-sæt, runtime-fingeraftryk,
+  fejlede gates og udfald:
+  - Et hårdt gate-brud suspenderer i samme transaktion (D-8, uændret) og giver den kritiske
+    alarm `hard_gate_regression`. Der er ingen fallback.
+  - Et fejlet kvalitetsgate giver alarmen `quality_regression` til faglig og teknisk vurdering.
+    Konfigurationen forbliver aktiv.
+  - En ugyldig kørsel (H6 uden for drift, H7) afvises ved registreringen og giver alarmen
+    `publication_refused`.
+- **Kørsler:** manuelt (baseline eller regression), ugentligt og ved hver ændring af model,
+  reranker, chunker, algoritme, parametre eller migrationer. Rapporterne er versionerede og
+  gemmes i 400 dage som artefakt:
+  - rapport;
+  - Markdown;
+  - performance-måling;
+  - SHA-256-liste.
+- **Performance (§12, §17 pkt. 10):**
+  - Målene i §12 er versioneret som `performance-targets-v1`. De ændres kun med en ny version og
+    en beslutning her.
+  - Målingen indeholder de rå målinger. Databasen genberegner percentilerne (nearest rank, samme
+    formel som motoren) og resultaterne og afviser en måling, der ikke stemmer.
+  - Målingen registreres af `evaluation_publisher` med konfigurationens fingeraftryk og den
+    kørsel, den stammer fra.
+  - Et mål, der ikke er nået eller ikke er målt, er en afvigelse.
+  - En afvigelse kræver en dokumenteret godkendelse
+    (`knowledge.accept_performance_deviation`, `system.settings.manage`, begrundelse på mindst
+    20 tegn, én gang). Godkendelsen er append-only.
+- **Alarmer (D-15):** `AlertSink` med `log`, som altid kører, og `webhook` (JSON over HTTPS) som
+  første kanal.
+  - Kataloget har 12 faste koder med faste danske resuméer.
+  - Detaljer er kun tal og korte tokens: id'er, checksums og koder. Alt andet fjernes og tælles.
+  - Modtager og tjeneste afgøres stadig ved deployment (Å-5). URL'en ligger i
+    secret-håndteringen.
+- **Sundhedskontrol (§14):**
+  - Workeren læser hvert 5. minut `knowledge.worker_system_health()`. Det er en del af
+    worker-API'et.
+  - En vedvarende tilstand giver én alarm, når den opstår, ikke én pr. kontrol. Dead-letter
+    giver én alarm pr. job.
+  - En CloudWatch-alarm melder, hvis kontrollen er tavs i 15 minutter.
+- **Retrieval-telemetri i appen:** én loglinje pr. retrieval med udfald, grad, uopfyldte
+  betingelser og varighed pr. trin, aldrig forespørgsel eller indhold. Alarmerne er retrieval
+  utilgængelig og runtime-fingeraftryk ≠ aktiv konfiguration. Hver alarmkode sendes højst én gang
+  pr. 10 minutter pr. proces.
+- **Admin:** afsnittet "Systemstatus" under Indstillinger viser kø, fejl, scanner, aktiv
+  konfiguration og suspendering, seneste evaluering og regression samt performance. Det kræver
+  `system.settings.manage`.
+- **Ikke i I7:** rate limiting, samtalelagring og retention (8C) samt enterprise-dashboards.
+
+**Overvejede alternativer:**
+- *Evaluere mod produktionsdatabasen med en særlig rolle.* Fravalgt: evalueringsdokumenter må
+  aldrig blandes med produktionsviden (§4.5), og evalueringsjobbet ville få en
+  production-credential.
+- *Lade motoren publicere i samme job.* Fravalgt: ét job ville holde både evalueringsprojektets
+  service-role og produktionens publisher-credential. Desuden er en direkte databaseforbindelse
+  kun tilladt i `workers/` (D-19).
+- *Percentiler kun i motoren.* Fravalgt: databasen skal kunne efterprøve målingen på samme måde,
+  som den genberegner gates.
+- *En bestemt alarmtjeneste (SNS, Slack, PagerDuty) nu.* Fravalgt: Å-5 er åben. En webhook passer
+  til e-mail-relæer, chatværktøjer og incident-værktøjer.
+- *Alarm ved hver kontrol, så længe tilstanden varer.* Fravalgt: støj gør, at alarmer ignoreres.
+- *En ny observability-leverandør.* Fravalgt: §14 siger logs hos hostingudbyderen og ingen ny
+  leverandør.
+
+**Begrundelse:** I6 gjorde det muligt at registrere en kørsel. I7 gør det muligt at frembringe
+den sikkert, gentage den og opdage, når noget går tilbage. Det sker uden, at en evaluering kan
+røre produktionsdata, og uden, at en alarm kan bære indhold ud af systemet.
+
+**Udledt (til bekræftelse):**
+1. *Ikke målt tæller som en afvigelse* (fail-closed). Et pilotkorpus under 2.000 sider kan
+   derfor ikke måle korpusmålet, og målet skal godkendes som afvigelse.
+2. *Performance måles i evalueringsmiljøet.* Netværksvejen dér kan afvige fra produktionens. I
+   drift ses tallene i retrieval-loglinjen.
+3. *Rate- og latency-alarmerne fra forslagskolonnen i §14 er ikke implementeret som alarmer.* Det
+   gælder fejlrate over 5 % over 15 minutter, reranking p95 over 1 s og retrieval p95 over
+   1,5 s. Grundlaget logges pr. kald, men tærsklerne kræver aggregering i logplatformen. Det er en
+   deploymentbeslutning sammen med Å-5.
+4. *Alarmens art følger kørslens erklærede tilstand* (`--mode`). Databasen afgør selv, om
+   kørslen er en regression af konfigurationen i drift, og suspenderer og auditerer derefter.
+5. *Evalueringsmiljøets korpus bruger manifestets produkt-id'er*, som B-031 forudsatte. Pilotens
+   manifest skal derfor bære produktionens id'er.
+6. *Et blindt punkt i egress-arkitekturtesten er lukket.* Mønstret `options.fetch ?? fetch`
+   blev ikke set som et netværkskald. Det gjaldt også den eksisterende
+   `workers/ingestion/originals.ts`, som nu er eksplicit tilladt med begrundelse.
+
+---
+
 ## B-031 — Stabil produktidentitet i pilot-scope (8B-I6.2); 8B-I6 lukket
 
 **Dato:** 7. oktober 2026

@@ -2,13 +2,23 @@ import "server-only";
 
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { getServerSession } from "@/lib/auth/server-session";
+import { AlertConfigError, createAlertSink, logAlertSink, type AlertSink } from "@/lib/observability/alerts";
+import { createRetrievalTelemetry } from "@/lib/observability/retrieval-telemetry";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import type { EvidenceSet } from "./core/evidence";
 import { applicationProviderRuntime, providersForContext } from "./providers/configured";
 import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
-import { DEFAULT_RETRIEVAL_CONFIG, readRetrievalContext, RetrievalError, runRetrieval, type ClassifiedRetrievalRequest, type RetrievalRequest } from "./retrieval-core";
+import {
+  DEFAULT_RETRIEVAL_CONFIG,
+  readRetrievalContext,
+  RetrievalError,
+  runRetrieval,
+  type ClassifiedRetrievalRequest,
+  type RetrievalObserver,
+  type RetrievalRequest,
+} from "./retrieval-core";
 import type { RetrievalOutcome } from "./result-presentation";
 
 /**
@@ -24,7 +34,9 @@ import type { RetrievalOutcome } from "./result-presentation";
  *     service (knowledge.retrieval_context(), 8B-I6) — or, without one, from the fail-closed
  *     registry (docs/07 §9.1). They are never parameters, so a caller cannot choose a provider
  *     or set the evidence grade. The grade is derived from P1–P9 for every set (docs/08b §9).
- *   * The query is not stored or logged.
+ *   * The query is not stored or logged. Telemetry (8B-I7) logs only the outcome, the grade and
+ *     the duration of each step, and raises the alarms for unavailable retrieval and a
+ *     configuration mismatch (src/lib/observability/retrieval-telemetry.ts).
  */
 
 export { RetrievalError, type ClassifiedRetrievalRequest, type RetrievalAvailability, type RetrievalRequest };
@@ -41,12 +53,41 @@ export async function getRetrievalAvailability(): Promise<RetrievalAvailability>
   return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: context?.activeModel ?? undefined, context, runtime: applicationProviderRuntime });
 }
 
+let applicationSink: AlertSink | null = null;
+
+/** The application's alarm channel (D-15). A misconfigured channel falls back to the log — never silence. */
+function alertSink(): AlertSink {
+  if (!applicationSink) {
+    try {
+      applicationSink = createAlertSink(process.env, "app");
+    } catch (error) {
+      process.stdout.write(`${JSON.stringify({ event: "alert_config_invalid", reason: error instanceof AlertConfigError ? error.message : "unknown" })}\n`);
+      applicationSink = logAlertSink("app");
+    }
+  }
+  return applicationSink;
+}
+
 /** Development tools for one call — refused outside IPA_RUNTIME_ENV=local/test (B-009). */
 export interface RetrievalDevOptions {
   devForceInsufficient?: boolean;
 }
 
 export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
+  if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
+  const telemetry = createRetrievalTelemetry({ sink: alertSink() });
+  try {
+    const set = await retrieveObserved(request, dev, telemetry.observe);
+    await telemetry.succeeded(set);
+    return set;
+  } catch (error) {
+    // Access and invalid requests are not system failures; everything else is.
+    await telemetry.failed(error instanceof RetrievalError ? error.code : "error");
+    throw error;
+  }
+}
+
+async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions, observe: RetrievalObserver): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   // An active platform user is required. WHICH documents the user may read is decided by the
   // database (docs/07 §4.1): administrators through the role, advisors and leaders through
@@ -68,6 +109,7 @@ export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev:
     reranker: providers.reranker,
     config,
     devForceInsufficient: dev.devForceInsufficient === true,
+    observe,
   });
 }
 
