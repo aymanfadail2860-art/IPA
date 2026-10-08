@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { regressionAlerts, type EvaluationMode } from "../../evals/engine/regression.ts";
+import { classificationAlerts, invalidRunAlert, requestedModeMatches, type EvaluationMode, type RunClassification } from "../../evals/engine/regression.ts";
 import { verifyPerformanceMeasurement, type PerformanceMeasurement } from "../../evals/engine/performance.ts";
 import { createEvaluationPublisher, PublicationRefusedError, sqlPublisherConnection, type SqlClient } from "../../evals/engine/publication.ts";
 import type { EvaluationReport } from "../../evals/engine/runner.ts";
@@ -15,28 +15,34 @@ import { createAlert, type AlertSink } from "../../src/lib/observability/alerts.
  *   * The files are checked against their SHA-256 list from the evaluation run before anything
  *     is sent; the report and the measurement are recomputed here (verifyForPublication,
  *     verifyPerformanceMeasurement) and again in the database.
- *   * A regression run's registration is what suspends the configuration on a hard-gate breach
- *     (in the database, same transaction, no fallback). The alarms follow: hard-gate regression
+ *   * The DATABASE classifies the registered run (8B-I7.1): a run of the configuration in service
+ *     is a regression, anything else a baseline — whatever the CI job asked for. A hard-gate
+ *     regression's registration is what suspends the configuration (same transaction, no
+ *     fallback). The alarms follow the database's classification: hard-gate regression
  *     (critical) or quality regression (warning), with evaluation set, gate set and fingerprint.
- *   * A refused publication raises an alarm too — never silence.
+ *     The requested mode is logged and shown beside it; it decides nothing.
+ *   * A run the database refuses as invalid (H7, or H6 outside service) raises
+ *     "evaluation_invalid"; any other refusal "publication_refused" — never silence, and never a
+ *     baseline or a pass.
  */
 
 export interface PublishInput {
   report: EvaluationReport;
   gates: GateSet;
   performance: PerformanceMeasurement | null;
-  mode: EvaluationMode;
+  /** What the CI job intended (`--mode`). Diagnostic only: stored and logged, decides nothing. */
+  requestedMode: EvaluationMode | null;
   /** The files as read (name → content) and the sha256sum list of the run, if present. */
   files: Record<string, string>;
   checksums: string | null;
 }
 
-export interface PublishOutcome {
-  status: "published" | "refused";
-  runId?: string;
-  performanceId?: string | null;
-  problems?: string[];
-}
+export type PublishOutcome =
+  | { status: "published"; runId: string; classification: RunClassification; performanceId: string | null }
+  | { status: "refused"; invalidRun: boolean; problems: string[] };
+
+/** A registry refusal carries its code in the message: "Afvist (<code>): …". */
+const isInvalidRunRefusal = (error: unknown) => error instanceof Error && error.message.includes("Afvist (invalid_run)");
 
 /** sha256sum lines ("<hex>  <name>") against the given files. Missing or wrong → problems. */
 export function checkFileSums(files: Record<string, string>, checksums: string | null): string[] {
@@ -57,10 +63,15 @@ export function checkFileSums(files: Record<string, string>, checksums: string |
 }
 
 export async function publishEvaluation(input: PublishInput, sql: SqlClient, sink: AlertSink, log: (event: Record<string, unknown>) => void): Promise<PublishOutcome> {
-  const refuse = async (problems: string[]): Promise<PublishOutcome> => {
-    log({ event: "eval_publication_refused", run_id: input.report.runId, problems: problems.length });
-    await sink.send(createAlert("publication_refused", { run_id: input.report.runId, mode: input.mode, problems: problems.length }));
-    return { status: "refused", problems };
+  const requestedMode = input.requestedMode;
+  const refuse = async (problems: string[], invalidRun = false): Promise<PublishOutcome> => {
+    log({ event: "eval_publication_refused", run_id: input.report.runId, requested_mode: requestedMode, invalid_run: invalidRun, problems: problems.length });
+    await sink.send(
+      invalidRun
+        ? invalidRunAlert(input.report.runId, requestedMode)
+        : createAlert("publication_refused", { run_id: input.report.runId, requested_mode: requestedMode ?? "none", problems: problems.length }),
+    );
+    return { status: "refused", invalidRun, problems };
   };
 
   const problems = checkFileSums(input.files, input.checksums);
@@ -70,17 +81,22 @@ export async function publishEvaluation(input: PublishInput, sql: SqlClient, sin
   }
   if (problems.length > 0) return refuse(problems);
 
-  let runId: string;
+  let published: Awaited<ReturnType<ReturnType<typeof createEvaluationPublisher>["publish"]>>;
   try {
-    runId = (await createEvaluationPublisher(sqlPublisherConnection(sql)).publish(input.report, input.gates)).runId;
+    published = await createEvaluationPublisher(sqlPublisherConnection(sql)).publish(input.report, input.gates, requestedMode);
   } catch (error) {
     if (error instanceof PublicationRefusedError) return refuse(error.problems);
     // The database refused it (it recomputes everything) — also a refusal, with its reason class.
     const code = (error as { code?: unknown })?.code;
-    if (typeof code === "string" && /^(P0001|23|22|42501)/.test(code)) return refuse([`Databasen afviste rapporten (${code}).`]);
+    if (typeof code === "string" && /^(P0001|23|22|42501)/.test(code)) return refuse([`Databasen afviste rapporten (${code}).`], isInvalidRunRefusal(error));
     throw error;
   }
-  log({ event: "eval_published", run_id: input.report.runId, registered_id: runId, mode: input.mode, verdict: input.report.verdict });
+  const { event } = published;
+  log({
+    event: "eval_published", run_id: input.report.runId, registered_id: published.runId, verdict: input.report.verdict,
+    classification: event.classification, requested_mode: requestedMode, requested_mode_matches: requestedModeMatches(event),
+    configuration_status: event.configurationStatus, suspended: event.suspended,
+  });
 
   let performanceId: string | null = null;
   if (input.performance) {
@@ -89,6 +105,6 @@ export async function publishEvaluation(input: PublishInput, sql: SqlClient, sin
     log({ event: "eval_performance_recorded", run_id: input.report.runId, measurement_id: performanceId });
   }
 
-  for (const alert of regressionAlerts(input.report, input.mode)) await sink.send(alert);
-  return { status: "published", runId, performanceId };
+  for (const alert of classificationAlerts(event)) await sink.send(alert);
+  return { status: "published", runId: published.runId, classification: event.classification, performanceId };
 }

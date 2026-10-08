@@ -396,20 +396,37 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(await activate(adminClient, configurations.c)).toBeNull();
     const alerts: Alert[] = [];
     const sink: AlertSink = { send: async (alert) => void alerts.push(alert) };
-    const publishFiles = async (reportX: EvaluationReport, performance: PerformanceMeasurement | null, mode: "baseline" | "regression") => {
+    const publishFiles = async (reportX: EvaluationReport, performance: PerformanceMeasurement | null, requestedMode: "baseline" | "regression") => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ipa-eval-"));
       const written = writeVersionedReport(dir, reportX, performance);
       const files = Object.fromEntries(written.filter((file) => !file.endsWith(".sha256")).map((file) => [path.basename(file), fs.readFileSync(file, "utf8")]));
       return publishEvaluation(
-        { report: reportX, gates: GATES_V1, performance, mode, files, checksums: fs.readFileSync(written.find((file) => file.endsWith(".sha256"))!, "utf8") },
+        { report: reportX, gates: GATES_V1, performance, requestedMode, files, checksums: fs.readFileSync(written.find((file) => file.endsWith(".sha256"))!, "utf8") },
         publisherSql as unknown as SqlClient,
         sink,
         () => {},
       );
     };
 
+    // 8B-I7.1: CI says "regression" about a NEW candidate — the database finds a baseline: no
+    // regression alarm, no audit as regression, nothing suspended.
+    const candidate = report("it-config-c2", { configuration: material({ minScore: 0.27 }) });
+    expect(await publishFiles(candidate, null, "regression")).toMatchObject({ status: "published", classification: "baseline" });
+    expect(alerts).toEqual([]);
+    expect((await admin<{ requested_mode: string; registered_while: string }[]>`
+      select requested_mode, registered_while from knowledge.evaluation_runs where run_id = ${candidate.runId}`)[0]).toEqual({ requested_mode: "regression", registered_while: "candidate" });
+
+    // 8B-I7.1: an INVALID run (H7) is refused by the database whatever was requested — neither a
+    // baseline nor a pass; its own alarm; nothing registered.
+    const invalid = report("it-config-c", { configuration: material({ minScore: 0.25 }), violations: [{ gate: "H7", caseId: null, explanation: "Fiktivt: korpusset ændrede sig." }] });
+    expect(await publishFiles(invalid, null, "baseline")).toMatchObject({ status: "refused", invalidRun: true });
+    expect(alerts.map((alert) => alert.code)).toEqual(["evaluation_invalid"]);
+    expect((await admin<{ n: number }[]>`select count(*)::int as n from knowledge.evaluation_runs where run_id = ${invalid.runId}`)[0]!.n).toBe(0);
+    alerts.length = 0;
+
     // 8B-I7: a QUALITY regression is registered through the publication step: an alarm for
     // review, the configuration stays active, and the event names set, gate set and fingerprint.
+    // 8B-I7.1: the CI job says "baseline" — the database's classification decides.
     const quality = report("it-config-c", {
       configuration: material({ minScore: 0.25 }),
       observe: (cases) => cases.filter((c) => c.type === "direct").forEach((c) => Object.assign(c, { sourceRank: null, firstGrade3Rank: null, requiredCovered: 0 })),
@@ -419,15 +436,20 @@ describe.skipIf(!configured)("retrieval configuration register against the local
       retrieval: { total: [700, 750, 1700], queryEmbedding: [120, 140, 400], search: [80, 90, 100], rerank: [200, 210, 220] },
       ingestion: { documents: [{ pages: 52, seconds: 200 }], corpusPages: 52, corpusSeconds: 200 },
     });
-    expect(await publishFiles(quality, performance, "regression")).toMatchObject({ status: "published" });
+    expect(await publishFiles(quality, performance, "baseline")).toMatchObject({ status: "published", classification: "quality_regression" });
     expect(alerts.map((alert) => alert.code)).toEqual(["quality_regression"]);
-    expect(alerts[0]!.details).toMatchObject({ eval_set_checksum: quality.evalSet.checksum, gate_set_checksum: quality.gateSet.checksum, runtime_fingerprint: quality.configuration.runtimeFingerprint });
+    expect(alerts[0]!.details).toMatchObject({
+      eval_set_checksum: quality.evalSet.checksum, gate_set_checksum: quality.gateSet.checksum, runtime_fingerprint: quality.configuration.runtimeFingerprint,
+      classification: "quality_regression", requested_mode: "baseline", requested_mode_matches: "false",
+    });
     expect((await admin<{ status: string }[]>`select status from knowledge.retrieval_configurations where id = ${configurations.c}`)[0]!.status).toBe("active");
     const [qualityEvent] = await admin<{ details: Record<string, unknown> }[]>`
       select a.details from audit.audit_log a join knowledge.evaluation_runs r on r.id::text = a.entity_id
       where a.action = 'knowledge.evaluation_run.regression' and r.run_id = ${quality.runId}`;
     expect(qualityEvent!.details).toMatchObject({
       result: "quality_regression",
+      classification: "quality_regression",
+      requested_mode: "baseline",
       eval_set: { id: quality.evalSet.setId, version: quality.evalSet.version, checksum: quality.evalSet.checksum },
       gate_set: { checksum: quality.gateSet.checksum },
       runtime_fingerprint: quality.configuration.runtimeFingerprint,
@@ -444,12 +466,13 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(evaluateHealth(health, INITIAL_HEALTH_STATE).alerts.map((alert) => alert.code)).toContain("quality_regression");
     expect((await admin<{ p: { accepted: boolean } }[]>`select ops.system_health() -> 'performance' as p`)[0]!.p.accepted).toBe(true);
 
-    // A hard-gate regression: suspended in the same transaction (D-8), no fallback; critical alarm.
+    // A hard-gate regression: suspended in the same transaction (D-8), no fallback; critical alarm —
+    // also when the CI job says "baseline" (8B-I7.1).
     alerts.length = 0;
     const hard = report("it-config-c", { configuration: material({ minScore: 0.25 }), violations: [{ gate: "H1", caseId: null, explanation: "Fiktivt brud i regression." }] });
-    expect(await publishFiles(hard, null, "regression")).toMatchObject({ status: "published" });
-    expect(alerts.map((alert) => alert.code)).toEqual(["hard_gate_regression"]);
-    expect(alerts[0]!.details).toMatchObject({ failed_hard_gates: "H1", runtime_fingerprint: hard.configuration.runtimeFingerprint });
+    expect(await publishFiles(hard, null, "baseline")).toMatchObject({ status: "published", classification: "hard_gate_regression" });
+    expect(alerts.map((alert) => [alert.code, alert.severity])).toEqual([["hard_gate_regression", "critical"]]);
+    expect(alerts[0]!.details).toMatchObject({ failed_hard_gates: "H1", runtime_fingerprint: hard.configuration.runtimeFingerprint, suspended: "true", requested_mode: "baseline" });
     // A run-level H1 breach is registered as a regression run and suspends.
     const [row] = await admin<{ status: string; suspension_reason: string }[]>`select status, suspension_reason from knowledge.retrieval_configurations where id = ${configurations.c}`;
     expect(row).toEqual({ status: "suspended", suspension_reason: "hard_gate_failed" });
@@ -463,7 +486,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ipa-eval-"));
     const written = writeVersionedReport(dir, tampered, null);
     const outcome = await publishEvaluation(
-      { report: tampered, gates: GATES_V1, performance: null, mode: "baseline", files: { [`${tampered.runId}.json`]: `${fs.readFileSync(written[0]!, "utf8")} ` }, checksums: fs.readFileSync(written.at(-1)!, "utf8") },
+      { report: tampered, gates: GATES_V1, performance: null, requestedMode: "baseline", files: { [`${tampered.runId}.json`]: `${fs.readFileSync(written[0]!, "utf8")} ` }, checksums: fs.readFileSync(written.at(-1)!, "utf8") },
       publisherSql as unknown as SqlClient,
       sink,
       () => {},

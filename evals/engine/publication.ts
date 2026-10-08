@@ -1,6 +1,7 @@
 import { checksumOf, configurationFingerprint, gateSetChecksum } from "./checksum.ts";
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "./gates.ts";
 import { computeMetrics } from "./metrics.ts";
+import { parseRunEvent, type EvaluationMode, type RegisteredRunEvent } from "./regression.ts";
 import { REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport } from "./runner.ts";
 import { HARD_GATE_IDS, type GateSet, type HardGateId, type Violation } from "./types.ts";
 
@@ -22,12 +23,22 @@ import { HARD_GATE_IDS, type GateSet, type HardGateId, type Violation } from "./
  * Publishing never approves or activates a configuration — that takes a human with
  * system.settings.manage (§10.2). The connection runs as evaluation_publisher_login and is
  * injected (D-19: the postgres driver lives only in workers/; CI passes its own client).
+ *
+ * From 8B-I7.1 the run is registered through knowledge.publish_evaluation_run, which returns the
+ * DATABASE's classification of it (baseline, regression, hard or quality regression). The mode
+ * the caller asks for is stored as diagnostics only and decides nothing.
  */
 
 declare const published: unique symbol;
 
 /** A run registered by evaluation_publisher. Obtainable ONLY from an EvaluationPublisher. */
-export type PublishedEvaluationRun = { readonly runId: string; readonly reportChecksum: string; readonly registeredAt: string } & {
+export type PublishedEvaluationRun = {
+  readonly runId: string;
+  readonly reportChecksum: string;
+  readonly registeredAt: string;
+  /** The database's classification and the run's identity (8B-I7.1) — never the caller's mode. */
+  readonly event: RegisteredRunEvent;
+} & {
   readonly [published]: true;
 };
 
@@ -36,8 +47,9 @@ export interface EvaluationPublisher {
    * Registers a report as a published run. An implementation MUST run as the
    * evaluation_publisher identity, re-verify the report with verifyForPublication and refuse it
    * on any problem. It never approves or activates a configuration — that takes a human (§10.2).
+   * `requestedMode` is what the caller intends; it is stored as diagnostics and decides nothing.
    */
-  publish(report: EvaluationReport, gates: GateSet): Promise<PublishedEvaluationRun>;
+  publish(report: EvaluationReport, gates: GateSet, requestedMode?: EvaluationMode | null): Promise<PublishedEvaluationRun>;
 }
 
 export class PublisherUnavailableError extends Error {
@@ -63,12 +75,15 @@ export const unavailablePublisher: EvaluationPublisher = Object.freeze({
   },
 });
 
-/** The two database functions evaluation_publisher may call — nothing else. */
+/** The database functions evaluation_publisher calls here — nothing else. */
 export interface PublisherConnection {
   /** knowledge.register_evaluation_gate_set (idempotent). Returns the gate set's id. */
   registerGateSet(gates: GateSet): Promise<string>;
-  /** knowledge.record_evaluation_run. Returns the registered run's id and time. */
-  recordRun(report: EvaluationReport): Promise<{ id: string; registeredAt: string }>;
+  /**
+   * knowledge.publish_evaluation_run (record_evaluation_run plus the database's classification).
+   * Returns the registered run's id, time and the database's event.
+   */
+  recordRun(report: EvaluationReport, requestedMode: EvaluationMode | null): Promise<{ id: string; registeredAt: string; event: RegisteredRunEvent }>;
 }
 
 /** The minimal SQL client the connection needs (e.g. postgres.js `sql.unsafe`). */
@@ -82,10 +97,10 @@ export function sqlPublisherConnection(sql: SqlClient): PublisherConnection {
       const rows = await sql.unsafe("select knowledge.register_evaluation_gate_set($1::text::jsonb) as id", [JSON.stringify(gates)]);
       return String(rows[0]?.id);
     },
-    async recordRun(report: EvaluationReport) {
-      const rows = await sql.unsafe("select knowledge.record_evaluation_run($1::text::jsonb) as id, now() as registered_at", [JSON.stringify(report)]);
-      const registeredAt = rows[0]?.registered_at;
-      return { id: String(rows[0]?.id), registeredAt: registeredAt instanceof Date ? registeredAt.toISOString() : String(registeredAt) };
+    async recordRun(report: EvaluationReport, requestedMode: EvaluationMode | null) {
+      const rows = await sql.unsafe("select knowledge.publish_evaluation_run($1::text::jsonb, $2::text) as event", [JSON.stringify(report), requestedMode]);
+      const event = parseRunEvent(rows[0]?.event);
+      return { id: event.id, registeredAt: event.registeredAt, event };
     },
   });
 }
@@ -93,12 +108,12 @@ export function sqlPublisherConnection(sql: SqlClient): PublisherConnection {
 /** The publisher (8B-I6): verify here, then register as evaluation_publisher, where it is verified again. */
 export function createEvaluationPublisher(connection: PublisherConnection): EvaluationPublisher {
   return Object.freeze({
-    async publish(report: EvaluationReport, gates: GateSet): Promise<PublishedEvaluationRun> {
+    async publish(report: EvaluationReport, gates: GateSet, requestedMode: EvaluationMode | null = null): Promise<PublishedEvaluationRun> {
       const verification = verifyForPublication(report, gates);
       if (!verification.ok) throw new PublicationRefusedError(verification.problems);
       await connection.registerGateSet(gates);
-      const row = await connection.recordRun(report);
-      return Object.freeze({ runId: row.id, reportChecksum: report.checksums.report, registeredAt: row.registeredAt }) as PublishedEvaluationRun;
+      const row = await connection.recordRun(report, requestedMode);
+      return Object.freeze({ runId: row.id, reportChecksum: report.checksums.report, registeredAt: row.registeredAt, event: Object.freeze(row.event) }) as PublishedEvaluationRun;
     },
   });
 }

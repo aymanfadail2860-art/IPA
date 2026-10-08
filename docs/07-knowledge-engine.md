@@ -947,6 +947,11 @@ fil → checksum → godkender) ligger i selve datamodellen, ikke i audit.
 
 **Dette er ikke den endelige produktionsbeslutning** (§17, B-16).
 
+*Status: produktionsadgangen er fastlagt i 8B (D-10, K-5) og implementeret i 8B-I3/I4. Det er en
+dedikeret LOGIN-rolle uden service-rolle og uden tabelrettigheder, der kun kan kalde
+`knowledge.worker_*` (`docs/08b` §6.1.1, §21.4–21.5). Den er ikke udrullet endnu. Fase 7 er ikke
+genåbnet, og afsnittet nedenfor beskriver fortsat den lokale udviklingsworker.*
+
 - Den lokale/dev-worker må i fase 7 bruge Supabase service-role-nøglen. Nøglen ligger kun i
   workerens runtime-miljø (`workers/ingestion/`).
 - Brugen følger least privilege inden for workerens runtime: workeren kalder kun et snævert sæt
@@ -1320,7 +1325,11 @@ brugerfladen for tilstanden kan ses og bygges. Værktøjet:
 ### 20.6 Ikke afgjort (videreført til 8B — Produktionsgrundlag)
 
 - Virusscanning af uploads (B-26) — ✅ afgjort i 8B-I5/I5.5 (`docs/08b` §21.6–21.7).
-- Workerens adgang er development-only (§14.1, B-16).
-- Embedding- og reranking-udbyder er ikke valgt (§17.4).
-- Validering af retrieval-tallene med et evalueringssæt (§20.4, B-008).
+- Workerens adgang er development-only (§14.1, B-16). — ✅ afgjort i 8B (D-10) og implementeret
+  i 8B-I3/I4 (`docs/08b` §21.4–21.5). Ikke udrullet.
+- Embedding- og reranking-udbyder er ikke valgt (§17.4). — ✅ afgjort i 8B (D-1–D-3, B-020) og
+  implementeret i 8B-I2 (`docs/08b` §21.2). Ikke valideret mod den rigtige Bedrock.
+- Validering af retrieval-tallene med et evalueringssæt (§20.4, B-008). — Rammen er
+  implementeret i 8B-I1/I6/I7 (`docs/08b` §21.1, §21.9, §21.12). Selve valideringen kræver et
+  rigtigt pilotsæt og evalueringsmiljøet og udestår.
 

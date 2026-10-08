@@ -22,7 +22,12 @@ export interface SystemHealth {
   evaluation: {
     runId: string;
     outcome: string;
+    /** The database's classification (8B-I7.1): baseline, regression, hard_gate_regression or quality_regression. */
+    classification: string;
+    /** True for every classification but baseline. Derived from the database's classification only. */
     regression: boolean;
+    /** What the CI job asked for — diagnostic only. */
+    requestedMode: string | null;
     hardGatesPassed: boolean;
     qualityGatesPassed: boolean;
     evalSet: { id: string; version: number; checksum: string };
@@ -77,7 +82,9 @@ export function parseSystemHealth(data: unknown): SystemHealth {
       ? {
           runId: str(evaluation.runId),
           outcome: str(evaluation.outcome),
-          regression: evaluation.regression === true,
+          classification: str(evaluation.classification),
+          regression: ["regression", "hard_gate_regression", "quality_regression"].includes(str(evaluation.classification)),
+          requestedMode: typeof evaluation.requestedMode === "string" ? evaluation.requestedMode : null,
           hardGatesPassed: evaluation.hardGatesPassed === true,
           qualityGatesPassed: evaluation.qualityGatesPassed === true,
           evalSet: { id: str(evalSet.id), version: num(evalSet.version), checksum: str(evalSet.checksum) },
@@ -104,6 +111,8 @@ function regressionDetails(health: SystemHealth): Record<string, unknown> {
     ? {
         run_id: run.runId,
         outcome: run.outcome,
+        classification: run.classification,
+        requested_mode: run.requestedMode ?? "none",
         eval_set: `${run.evalSet.id}@${run.evalSet.version}`,
         eval_set_checksum: run.evalSet.checksum,
         gate_set_checksum: run.gateSetChecksum,
@@ -132,7 +141,8 @@ export function evaluateHealth(health: SystemHealth, state: HealthState, now: ()
       ...regressionDetails(health),
     });
   }
-  if (cfg && cfg.status === "active" && run && run.regression && run.hardGatesPassed && !run.qualityGatesPassed) {
+  // The database's classification decides — never the mode the CI job asked for (8B-I7.1).
+  if (cfg && cfg.status === "active" && run && run.classification === "quality_regression") {
     conditions.set("quality_regression", { configuration_id: cfg.id, ...regressionDetails(health) });
   }
 

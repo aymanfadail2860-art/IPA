@@ -1209,12 +1209,12 @@ produktionsbrug:**
 
 Specifikationen ovenfor er låst (B-020). Afsnittet her registrerer, hvad der er implementeret.
 8B implementeres i deltrin, og hvert deltrin kræver din godkendelse. **8B er ikke fuldt
-implementeret.**
+implementeret, og fasen er ikke afsluttet.** Status efter afslutningsauditten står i §21.14.
 
 | Deltrin | Indhold | Status |
 |---------|---------|--------|
 | **8B-I1** | Evalueringsframework og gates (§4, §5; dele af §20 trin 4) | ✅ Gennemført og godkendt 2026-10-03 (rettet i 8B-I2: påkrævede passager som sæt, B-021) |
-| **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Ikke koblet på applikationen |
+| **8B-I2** | Production embedding og reranking: provider-kontrakt og Bedrock-adaptere (§2, §3; dele af §20 trin 1–2) | ✅ Gennemført og godkendt 2026-10-03. Koblet på applikationen i 8B-I6 (`providers/configured.ts`, §21.9) |
 | **8B-I2.5** | Ekstern AI-datagrænse: central egress-policy for alle eksterne AI-kald (§8; dele af §20 trin 7) | ✅ Gennemført og godkendt 2026-10-03 (B-022). Admin-værktøjets forespørgsel er afgjort (B-023) |
 | **8B-I3** | Workerens databaseidentitet og databasefunktioner: roller, worker-API med lease-token, billetkontrakt, rotation og nødspærring på databasesiden (§6.1.1 D-10/D-20; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-024) |
 | **8B-I4** | Workerens runtime: postgres.js via Supavisor, job-løkke, heartbeat, nedlukning, Secrets Manager-grænse, IAM, Fargate-specifikation, Edge Function `worker-storage` og I5-gaten (§6.1, §6.1.1; dele af §20 trin 6) | ✅ Gennemført og godkendt 2026-10-05 (B-025). Gaten blev erstattet af I5's release-gate |
@@ -1224,8 +1224,9 @@ implementeret.**
 | **8B-I6** | Register over retrieval-konfigurationer, `evaluation_publisher`, ProductionEvidenceSet (P1–P9), schemaVersion 2 (§9–§11, §20 trin 3) | ✅ Gennemført og godkendt 2026-10-07 (B-029, B-030). Lukket med I6.1 og I6.2 |
 | **8B-I6.1** | Pilot-politik for statistisk usikkerhed med menneskelig accept, pilot-scope på produkt og dokumenttype (§21.10) | ✅ Gennemført og godkendt 2026-10-07 (B-030) |
 | **8B-I6.2** | Stabil produktidentitet i pilot-scope: produkt-id og dokumenttype, navnet som historisk øjebliksbillede (§21.11) | ✅ Gennemført og godkendt 2026-10-07 (B-031). 8B-I6 er hermed endeligt lukket |
-| **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails: evalueringsmiljø, provisionering, publicering som særskilt trin, regressionsaudit og -alarmer, AlertSink, sundhedskontrol, Systemstatus og performance-målinger (§21.10, §21.12) | Gennemført 2026-10-08 (B-032). Venter på din godkendelse |
-| Øvrige | Baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere | Ikke påbegyndt |
+| **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails: evalueringsmiljø, provisionering, publicering som særskilt trin, regressionsaudit og -alarmer, AlertSink, sundhedskontrol, Systemstatus og performance-målinger (§21.10, §21.12) | ✅ Gennemført og godkendt 2026-10-09 (B-032, B-033). Lukket med I7.1 |
+| **8B-I7.1** | Kanonisk klassifikation: databasen klassificerer en registreret kørsel; CI-jobbets mode er kun diagnostik (§21.13) | ✅ Gennemført 2026-10-09 (B-033) |
+| Øvrige | Kodehullerne C1–C6, baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere (§21.14) | Ikke påbegyndt |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -2461,7 +2462,7 @@ En test, der kræver et andet eller manglende miljø, sætter det selv (`fixture
 - 8C og en rigtig Copilot-model.
 - Lagring af EvidenceSet pr. svar.
 
-Publiceringens CI-transport er heller ikke koblet på. Kontrakten og `sqlPublisherConnection`
+Publiceringens CI-transport er heller ikke koblet på (*leveret i 8B-I7, §21.12*). Kontrakten og `sqlPublisherConnection`
 findes, men `postgres` må kun bruges i `workers/` (D-19), og evalueringsmiljøet er §20 trin 4.
 
 **Ingen rigtig konfiguration er aktiveret:** ingen AWS, ingen Bedrock og ingen
@@ -2779,7 +2780,8 @@ i I7.
 - Kanalen vælges med `IPA_ALERT_SINK=log|webhook` og `IPA_ALERT_WEBHOOK_URL`. Den skal være HTTPS,
   dog må HTTP bruges til localhost.
 - En ukendt kanal eller en manglende URL er en konfigurationsfejl ved opstart.
-- Kataloget har 12 koder med fast alvor og fast dansk resumé:
+- Kataloget har 12 koder med fast alvor og fast dansk resumé (13 fra 8B-I7.1, med
+  `evaluation_invalid`, §21.13):
   - `dead_letter`, `queue_stale`, `processing_stuck`;
   - `scanner_failures`, `malware_found`;
   - `configuration_suspended`, `hard_gate_regression`, `quality_regression`;
@@ -2870,3 +2872,101 @@ udviklingsimplementeringer. Rigtige tal kræver evalueringsmiljøet med Bedrock.
 
 Først derefter kan baselinen med et rigtigt pilotsæt og de rigtige performance-tal frembringes
 (§17 pkt. 3, 4 og 10).
+
+### 21.13 8B-I7.1 — Kanonisk klassifikation af evalueringskørsler
+
+**Leveret (B-033):**
+- migrationen `20261009000100_canonical_run_classification.sql`;
+- `evals/engine/regression.ts`, der afleder alarmerne af databasens hændelse;
+- `knowledge.publish_evaluation_run` i publiceringen;
+- alarmkoden `evaluation_invalid`;
+- systemstatus og sundhedskontrol på klassifikationen.
+
+**Model:**
+- `evaluation_runs.registered_while` er konfigurationens status i databasen, da kørslen blev
+  registreret. Den sættes af en trigger. Kalderen kan ikke sætte den, og migrationen kræver en tom
+  tabel (der findes ingen kørsler uden for lokale tests).
+- `knowledge.evaluation_run_classification(run)` klassificerer kørslen:
+
+  | Klassifikation | Hvornår | Følge |
+  |---|---|---|
+  | `baseline` | Konfigurationen var ikke i drift (kandidat, godkendt, suspenderet eller udfaset) | Ingen regressionsalarm, ingen regressionsaudit |
+  | `hard_gate_regression` | I drift, et hårdt gate er brudt | Suspenderet i samme transaktion (D-8, uændret), kritisk alarm |
+  | `quality_regression` | I drift, ingen hårde brud, men udfaldet er ikke bestået | Advarsel til faglig og teknisk vurdering; konfigurationen forbliver aktiv |
+  | `regression` | I drift og bestået (`pass` eller `pass_with_uncertainty`) | Ingen alarm |
+
+- En ugyldig kørsel (H7, eller H6 for en konfiguration uden for drift) afvises fortsat med
+  `invalid_run` og registreres aldrig. Publiceringen giver alarmen `evaluation_invalid`.
+- `requested_mode` (`baseline`, `regression` eller tom) er CI-jobbets ønske. Det er kun
+  diagnostik:
+  - Det gemmes på kørslen, i regressionsauditten og i publiceringens loglinje, og alarmen viser
+    `requested_mode_matches`.
+  - Det afgør hverken klassifikation, alvor, suspendering, alarmkode eller production-tilstand.
+  - En værdi, som kalderen selv sætter i sessionen, gemmes ikke, medmindre den er en kendt
+    tilstand, og den påvirker aldrig klassifikationen.
+- `knowledge.publish_evaluation_run(rapport, ønsket tilstand)` kan kun kaldes af
+  `evaluation_publisher`, og identiteten kontrolleres først. Funktionen kalder den uændrede
+  `record_evaluation_run` og returnerer databasens hændelse:
+  - klassifikation og ønsket tilstand;
+  - konfigurationens status før og nu;
+  - om netop denne kørsel suspenderede;
+  - sæt, gate-sæt, fingeraftryk og korpus;
+  - fejlede gates.
+
+  Publisherens API har fire funktioner.
+- Systemstatus viser klassifikationen. Sundhedskontrollen rejser `quality_regression` kun ud fra
+  den, og Admin farver rækken efter den.
+
+**Tests:**
+
+| Lag | Hvad |
+|---|---|
+| pgTAP | `retrieval_configuration_registry` (202). CI siger baseline, og databasen konstaterer en kvalitetsregression. CI siger regression, og databasen konstaterer en baseline (ny kandidat), uden regressionsaudit. En bestået kørsel i drift er en regression, også når CI siger baseline. Hård regression suspenderer og er kritisk uanset ønsket tilstand, uden fallback. Kvalitetsregression suspenderer ikke. Ugyldige kørsler (H7, og H6 uden for drift) afvises uanset ønsket tilstand og efterlader intet. En ukendt ønsket tilstand afvises. Kun publisheren kan publicere, og identiteten kontrolleres først. En værdi sat af kalderen i sessionen afgør intet. Kun den kørsel, der suspenderede, står som årsag. Systemstatus viser klassifikationen |
+| Enhed | `evaluation-operations` (de fem scenarier og publiceringen med databasens hændelse), `evaluation-publisher` (transporten sender den ønskede tilstand og læser hændelsen; en ukendt klassifikation er en fejl), `observability-health` (alarmen og Admin-rækken følger klassifikationen) |
+| Integration | `retrieval-configuration` (15) mod den lokale database. CI siger regression om en ny kandidat, og databasen svarer baseline uden alarm. En H7-kørsel afvises med `evaluation_invalid`, og intet registreres. CI siger baseline om en kvalitetsregression, som giver advarsel og audit med ønsket tilstand. CI siger baseline om en hård regression, som giver suspendering og kritisk alarm |
+| Mutation | 21/21 fanget: 9 i TypeScript og 12 i SQL. I7's øvrige mutationer er kørt igen mod den nye kode: 50/50 (31 i TypeScript, 17 i SQL, 2 via integration). Seks er erstattet af I7.1 (T10, T26, T27 og S01–S03) |
+
+**8B-I7 er hermed implementeret og godkendt (B-033).**
+
+### 21.14 Status efter afslutningsauditten (2026-10-09)
+
+**Status: implementeringen er ikke fuldt gennemført, og fasen er ikke afsluttet.** Det skyldes et
+lille antal afgrænsede kodehuller (C1–C6) og forudsætninger, der kræver deployment, validering,
+compliance og indhold. Ingen af hullerne svækker en sikkerhedsgrænse i den nuværende kode.
+Exit-kriterierne i §17 er ikke opfyldt. Auditten tilføjede ingen funktionalitet.
+
+**Kode, der mangler (C):**
+
+| # | Hvad | Krav | Blokerer |
+|---|---|---|---|
+| C1 | Appens Bedrock-credentials på Vercel. `applicationProviderRuntime` bruger SDK'ens standardkæde, som ikke ser Vercels OIDC-token. Der er ingen injiceret Vercel-OIDC-provider (bekræftes ved første deployment) | D-11, K-8 | Exit 4 i et Vercel-hostet miljø |
+| C2 | Menneskelig betjeningsvej. Godkendelse af gate-sæt, accept af usikkerhed, godkendelse og aktivering af konfiguration, aktivering af embedding-model og accept af performance-afvigelser findes kun som databasefunktioner, der skal kaldes som indlogget administrator. Der er ingen Admin-handling, intet script og ingen runbook | §10.2, §10.3, §20 trin 9 | Exit 3, 4 og 10 i praksis |
+| C3 | Udbyderens fejltype (`throttled`, `unavailable`, `timeout`) logges hverken i appen eller i workeren. 429-raten kan derfor ikke ses, og alarm A6 kan ikke bygges | §14, B-033 | Exit 9 og forudsætningen før Copilot-piloten |
+| C4 | H6 i en regression, hvor runtime ikke er den erklærede konfiguration: publiceringens lokale verifikation afviser rapporten, før databasen kan suspendere. §4.4 siger "suspenderes automatisk". Production beskyttes fortsat af P4. Kræver din beslutning | §4.4 (H6), D-8 | Ingen exit direkte; en afvigelse fra specifikationen |
+| C5 | Ingen CI-workflow kører lint, typecheck, test, build og valideringen af evalueringssættet ved ændringer | D-16 ("med CI-kontrol"), §17 pkt. 1 | Exit 1 bevises kun lokalt |
+| C6 | Kontrolsættet af embedding-vektorer ved workerens start og dagligt, mod at udbyderen skifter modellen bag samme id | §2.5, §15 | Ingen exit direkte; et udestående trusselsmodtiltag |
+
+**Forudsætninger uden for repoet:**
+- *Deployment:* AWS-konti (produktion og evaluering) med:
+  - Bedrock-adgang og kvoter (Å-1);
+  - OIDC (GitHub og Vercel);
+  - ECR, VPC, NAT og EIP;
+  - Secrets Manager;
+  - CloudWatch og alarmtopic.
+
+  Desuden et Supabase-projekt til evaluering og et hostet pilot- eller produktionsprojekt
+  (miljøart sat, CA-certifikat, login-roller) samt udrulning af ClamAV 1.4.6 (kandidatkørsel),
+  worker og `worker-storage`.
+- *Validering:*
+  - kontrakttest mod Bedrock;
+  - baseline med rigtige udbydere;
+  - performance-målinger;
+  - de alarmer, exit 9 nævner, afprøvet i miljøet;
+  - et udstedt ProductionEvidenceSet.
+- *Compliance:* databehandleraftaler (Å-2, exit 11) og licens for offentlige betingelser (Å-6).
+- *Indhold:*
+  - pilotsættet `terms-v1` (30–50 spørgsmål, alle typer);
+  - manifest med produktionens produkt-id'er;
+  - vedligeholder (Å-3);
+  - retningslinjer for fiktive dokumenter og kalibreringsprocedure (Å-4).
+- *Afgørelse:* modtager og tjeneste for alarmer (Å-5).

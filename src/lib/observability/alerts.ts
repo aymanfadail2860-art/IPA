@@ -31,6 +31,7 @@ export const ALERT_CATALOGUE = {
   hard_gate_regression: { severity: "critical", summary: "En regressionskørsel har brudt et hårdt gate. Konfigurationen suspenderes automatisk (ingen fallback)." },
   quality_regression: { severity: "warning", summary: "En regressionskørsel har fejlet et kvalitetsgate. Det kræver faglig og teknisk vurdering." },
   evaluation_failed: { severity: "warning", summary: "En planlagt eller manuel evalueringskørsel kunne ikke gennemføres." },
+  evaluation_invalid: { severity: "warning", summary: "En evalueringskørsel er ugyldig (H6 eller H7) og er ikke registreret. Den tæller hverken som baseline eller regression; konfigurationen er uændret." },
   publication_refused: { severity: "warning", summary: "En evalueringsrapport blev afvist ved publiceringen." },
   retrieval_unavailable: { severity: "critical", summary: "Retrieval er utilgængelig (systemfejl, ikke et tomt resultat)." },
   configuration_mismatch: { severity: "critical", summary: "Runtime-fingeraftrykket svarer ikke til den aktive konfiguration. Evidensen er development." },

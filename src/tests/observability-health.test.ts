@@ -11,7 +11,7 @@ import { systemStatusView } from "@/lib/observability/system-status";
  */
 
 const now = () => new Date("2026-10-08T08:00:00.000Z");
-const RUN = { runId: "run-7", outcome: "fail", regression: true, hardGatesPassed: true, qualityGatesPassed: false, evalSet: { id: "pilot-v1", version: 1, checksum: "a".repeat(64) }, gateSetChecksum: "b".repeat(64), runtimeFingerprint: "c".repeat(64), registeredAt: "2026-10-08T07:00:00Z" };
+const RUN = { runId: "run-7", outcome: "fail", classification: "quality_regression", requestedMode: "baseline", regression: true, hardGatesPassed: true, qualityGatesPassed: false, evalSet: { id: "pilot-v1", version: 1, checksum: "a".repeat(64) }, gateSetChecksum: "b".repeat(64), runtimeFingerprint: "c".repeat(64), registeredAt: "2026-10-08T07:00:00Z" };
 const CONFIG = { id: "c0ffee00-0000-4000-8000-000000000001", label: "pilot", version: 3, status: "active", fingerprint: "c".repeat(64), suspensionReason: null };
 
 function raw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -22,7 +22,7 @@ function raw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     processing: { stuckOverOneHour: 0 },
     scanner: { scanFailedLast24h: 0, infectedLast24h: 0 },
     configuration: CONFIG,
-    evaluation: { ...RUN, regression: false, outcome: "pass", qualityGatesPassed: true },
+    evaluation: { ...RUN, classification: "baseline", regression: false, outcome: "pass", qualityGatesPassed: true },
     performance: null,
     ...overrides,
   };
@@ -52,10 +52,19 @@ describe("the alarms of §14", () => {
     expect(alert.details).toMatchObject({ reason: "hard_gate_failed", run_id: "run-7", eval_set: "pilot-v1@1", eval_set_checksum: "a".repeat(64), gate_set_checksum: "b".repeat(64), runtime_fingerprint: "c".repeat(64) });
   });
 
-  it("a quality regression of the active configuration — not the approving run, not a hard-gate breach", () => {
-    expect(codes(evaluateHealth(health({ evaluation: RUN }), INITIAL_HEALTH_STATE, now).alerts)).toEqual(["quality_regression"]);
-    expect(evaluateHealth(health({ evaluation: { ...RUN, regression: false } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
-    expect(evaluateHealth(health({ evaluation: { ...RUN, hardGatesPassed: false } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
+  it("a quality regression of the active configuration — by the database's classification only (8B-I7.1)", () => {
+    const quality = evaluateHealth(health({ evaluation: RUN }), INITIAL_HEALTH_STATE, now).alerts;
+    expect(codes(quality)).toEqual(["quality_regression"]);
+    expect(quality[0]!.details).toMatchObject({ classification: "quality_regression", requested_mode: "baseline" });
+    // The approving run (a baseline) and a hard-gate regression (its alarm is the suspension) are not.
+    expect(evaluateHealth(health({ evaluation: { ...RUN, classification: "baseline" } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
+    expect(evaluateHealth(health({ evaluation: { ...RUN, classification: "hard_gate_regression", hardGatesPassed: false } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
+    // The gate flags or a stale "regression" flag do not decide; the classification does.
+    expect(evaluateHealth(health({ evaluation: { ...RUN, classification: "regression" } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
+    expect(codes(evaluateHealth(health({ evaluation: { ...RUN, regression: false } }), INITIAL_HEALTH_STATE, now).alerts)).toEqual(["quality_regression"]);
+    // Nor does a missing or unknown classification raise one.
+    expect(evaluateHealth(health({ evaluation: { ...RUN, classification: "something-else" } }), INITIAL_HEALTH_STATE, now).alerts).toEqual([]);
+    expect(health({ evaluation: { ...RUN, classification: "something-else" } }).evaluation!.regression).toBe(false);
   });
 });
 
@@ -142,7 +151,7 @@ describe("Admin → Systemstatus", () => {
     expect(view.environment).toBe("Produktion");
     expect(view.rows.find((row) => row.label === "Kø")).toMatchObject({ tone: "warning", value: "3 venter, 1 i gang · ældste 40 min." });
     expect(view.rows.find((row) => row.label === "Behandlingsfejl (24 t)")?.value).toBe("2: no_text (2)");
-    expect(view.rows.find((row) => row.label === "Seneste regressionskørsel")).toMatchObject({ tone: "warning", value: "ikke bestået · pilot-v1 v1 · 2026-10-08" });
+    expect(view.rows.find((row) => row.label === "Seneste regressionskørsel")).toMatchObject({ tone: "warning", value: "ikke bestået (kvalitetsregression) · pilot-v1 v1 · 2026-10-08" });
     expect(view.rows.find((row) => row.label === "Performance (§12)")).toMatchObject({ tone: "warning", value: "Afvigelser: retrieval_total_p95 · ikke godkendt" });
   });
 });

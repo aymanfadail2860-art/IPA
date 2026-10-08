@@ -14,9 +14,10 @@ godkendt — I5 er fuldt lukket. 8B-I6 (register over retrieval-konfigurationer 
 ProductionEvidenceSet) er gennemført og godkendt og endeligt lukket med 8B-I6.1 (pilot-politik
 og pilot-scope) og 8B-I6.2 (stabil produktidentitet i pilot-scope), som begge er gennemført og
 godkendt. 8B-I7 (Evaluation Operations, Monitoring & Regression
-Guardrails) er gennemført og venter på godkendelse.** 8B er ikke fuldt implementeret: baselinen med
-et rigtigt pilotsæt og aktiveringen i et miljø med de rigtige udbydere udestår. Hvert deltrin
-kræver godkendelse. 8C — Copilot
+Guardrails) er gennemført og godkendt og lukket med 8B-I7.1 (kanonisk klassifikation).**
+Afslutningsauditten (2026-10-09, `docs/08b` §21.14) viser, at 8B **ikke** er fuldt implementeret
+og **ikke** afsluttet. Der er seks små kodehuller (C1–C6), og deployment, validering, compliance
+og indhold udestår. Hvert nyt deltrin kræver godkendelse. 8C — Copilot
 klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
@@ -51,7 +52,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 gennemført og venter på godkendelse, resten ikke påbegyndt | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført og godkendt. Ikke afsluttet: kodehuller C1–C6 og eksterne forudsætninger (§21.14) | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -392,7 +393,7 @@ godkendelse.
   `docs/08b` §21.1. Passage Recall blev rettet i I2 (B-021).
 - **8B-I2 — production embedding og reranking: ✅ gennemført og godkendt 2026-10-03.**
   Provider-kontrakten og Bedrock-adapterne (Cohere Embed v4 EU, 1024 dimensioner, og Rerank 3.5 i
-  eu-central-1) står i `docs/08b` §21.2. De er ikke koblet ind i applikationens register.
+  eu-central-1) står i `docs/08b` §21.2. De blev koblet på applikationen i 8B-I6 via den aktive konfiguration (`docs/08b` §21.9).
 - **8B-I2.5 — ekstern AI-datagrænse: ✅ gennemført og godkendt 2026-10-03.**
   - Kundedataspærren gælder nu alle eksterne AI-kald gennem en central egress-policy:
     generering, forespørgsels- og dokument-embedding og reranking.
@@ -465,8 +466,8 @@ godkendelse.
     øjebliksbillede.
   - Et omdøbt produkt forbliver i området. Et nyt produkt med samme navn arver intet.
   - Detaljer i `docs/08b` §21.11 og B-031.
-- **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: gennemført 2026-10-08,
-  venter på godkendelse (B-032).**
+- **8B-I7 — Evaluation Operations, Monitoring & Regression Guardrails: ✅ gennemført og godkendt
+  2026-10-09 (B-032, B-033). Lukket med 8B-I7.1.**
   - Evalueringsmiljøet er et eget projekt, som databasen selv erklærer (`evaluation`).
     Provisioneringen er idempotent, og den rigtige retrieval køres som evalueringsbrugerne med
     bekræftet identitet.
@@ -479,8 +480,29 @@ godkendelse.
     har retrieval-telemetri, og Admin har et afsnit med Systemstatus.
   - Performance-målene i §12 er versioneret og genberegnes i databasen. Afvigelser kræver
     dokumenteret godkendelse.
-  - Udledte punkter til bekræftelse står i B-032. Detaljer i `docs/08b` §21.12.
+  - Udledte punkter er afgjort i B-033. Detaljer i `docs/08b` §21.12.
   - Rate limiting, samtalelagring og retention hører fortsat til 8C.
+- **8B-I7.1 — kanonisk klassifikation: ✅ gennemført 2026-10-09 (B-033).** Databasen
+  klassificerer en registreret kørsel (baseline, regression, hård regression, kvalitetsregression),
+  og alarmen følger klassifikationen. CI-jobbets mode er kun diagnostik. Detaljer i `docs/08b`
+  §21.13.
+- **Udestående før 8B kan afsluttes (afslutningsauditten 2026-10-09, `docs/08b` §21.14):**
+  - Kode:
+    - C1: appens Vercel-OIDC-credentials til Bedrock;
+    - C2: en menneskelig betjeningsvej til godkendelserne;
+    - C3: udbyderens fejltype i loglinjerne (429-rate);
+    - C4: H6 i regression ved runtime-afvigelse, som kræver din beslutning;
+    - C5: CI for lint, typecheck, test, build og evalueringssættet;
+    - C6: kontrolsættet af embedding-vektorer.
+  - Deployment: AWS-konti og -ressourcer, Supabase-projekter til evaluering og pilot/produktion,
+    ClamAV 1.4.6, worker og `worker-storage`.
+  - Validering: kontrakttest mod Bedrock, baseline, performance-målinger, alarmer og et udstedt
+    ProductionEvidenceSet.
+  - Compliance: Å-2 (databehandleraftaler) og Å-6 (licens).
+  - Indhold: pilotsættet `terms-v1`, Å-3 og Å-4.
+  - Afgørelse: Å-5 (modtager af alarmer).
+  - De aggregerede rate- og latency-alarmer (`deploy/monitoring/aggregate-alarms.md`) er en
+    forudsætning før den kontrollerede Copilot-pilot (B-033).
 - Øvrige deltrin er ikke påbegyndt. Indholdet blev foreslået ved afslutningen af
 fase 7, hed derefter "fase 9" (B-011) og er nu underfase 8B (B-019). Beslutningerne D-1–D-20 står
 i specifikationens §19, og implementeringsrækkefølgen i §20.

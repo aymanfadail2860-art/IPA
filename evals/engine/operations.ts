@@ -14,16 +14,18 @@ import type { EvaluationMode } from "./regression.ts";
 import { renderMarkdown } from "./report.ts";
 import { runEvaluation, type EvaluationReport } from "./runner.ts";
 
-export { regressionAlerts, type EvaluationMode } from "./regression.ts";
+export { classificationAlerts, type EvaluationMode } from "./regression.ts";
 
 /**
  * Evaluation operations (docs/08b §4.5, §10.2; 8B-I7): one evaluation run in the evaluation
  * environment, reproducibly, with versioned output.
  *
- *   * mode "baseline": a configuration is evaluated for registration and approval.
- *   * mode "regression": the configuration in service is evaluated again (scheduled weekly and
- *     at every change, or by hand). Its registration in production is what suspends it on a
- *     hard-gate breach (record_evaluation_run, D-8) and raises the alarms.
+ *   * mode "baseline": the intention to evaluate a configuration for registration and approval.
+ *   * mode "regression": the intention to evaluate the configuration in service again (scheduled
+ *     weekly and at every change, or by hand).
+ *   The mode is diagnostic only (8B-I7.1): the database classifies the registered run from the
+ *   configuration's status, suspends on a hard-gate breach of the configuration in service
+ *   (record_evaluation_run, D-8), and the alarms follow its classification.
  *
  * Reproducible: the run states the evaluation set (id, version, checksum), the gate set
  * (version, checksum), the configuration (fingerprint) and the corpus (checksum before and

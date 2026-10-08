@@ -8,7 +8,7 @@ Workflow: `.github/workflows/retrieval-evaluation.yml`.
 | Del | Miljø | Identitet | Credential |
 |---|---|---|---|
 | Provisionering og evalueringskørsel (`npm run eval:retrieval -- --adapter evaluation`) | Evalueringsmiljøet: eget Supabase-projekt, egen worker og scanner, rigtige udbydere | Evalueringsoperatør og evalueringsbrugere (oprettes af kørslen) | Evalueringsprojektets URL, anon- og service-role-nøgle i `ipa/evaluation/supabase` (evalueringskontoen) |
-| Publicering (`npm run eval:publish`) | Produktionsdatabasen | `evaluation_publisher_login` (kun tre funktioner) | `ipa/production/evaluation-publisher/db` (produktionskontoen) |
+| Publicering (`npm run eval:publish`) | Produktionsdatabasen | `evaluation_publisher_login` (kun fire funktioner, fra 8B-I7.1) | `ipa/production/evaluation-publisher/db` (produktionskontoen) |
 | Sundhedskontrol hvert 5. minut | Produktionens worker | `ingestion_worker_login_*` (`knowledge.worker_system_health`) | Workerens eksisterende |
 
 Ingen af de to CI-jobs ser den andens credential. Publiceringsjobbet afviser at starte, hvis en
@@ -54,6 +54,11 @@ applikationsnøgle er sat (`workers/evaluation/publish.ts`).
    konfigurationen i drift). Valgfrit: secretten `IPA_ALERT_WEBHOOK_URL` (Å-5).
 
 ## Kørsler
+
+`mode` er CI-jobbets ønske og kun diagnostik (8B-I7.1, B-033). Databasen klassificerer den
+registrerede kørsel ud fra konfigurationens status ved registreringen. Alarmerne følger
+databasens klassifikation, ikke `mode`. En ugyldig kørsel (H7, eller H6 uden for drift) afvises
+og giver alarmen `evaluation_invalid`.
 
 - **Baseline** (manuel, `mode: baseline`): en kandidatkonfiguration evalueres og registreres som
   kandidat. Godkendelse og aktivering sker derefter af et menneske i produktion.

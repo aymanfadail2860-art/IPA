@@ -19,7 +19,8 @@ import { publishEvaluation } from "./publish-run.ts";
  *
  *   --report       <dir>/<run-id>.json (the .md, .performance.json and .sha256 beside it are used)
  *   --gates        gate set name (evals/retrieval/gates/<name>.json), default "gates-v1"
- *   --mode         "baseline" or "regression"
+ *   --mode         "baseline" or "regression": what the job intends. Diagnostic only (8B-I7.1) —
+ *                  the database classifies the run and the alarms follow its classification.
  *
  * The connection (secure transport, I7): TLS with certificate verification against the Supabase
  * CA, as evaluation_publisher_login and nothing else. The credential is injected for this one job
@@ -88,7 +89,7 @@ try {
       report: JSON.parse(reportText) as EvaluationReport,
       gates,
       performance: performanceText ? (JSON.parse(performanceText) as PerformanceMeasurement) : null,
-      mode: values.mode as EvaluationMode,
+      requestedMode: values.mode as EvaluationMode,
       files,
       checksums: read(`${base}.sha256`),
     },

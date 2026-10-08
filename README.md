@@ -6,8 +6,8 @@ AI-baseret platform til erhvervsforsikringsrådgivere. Projektets styrende instr
 **Status:** Fase 1–7 og underfase 8A — AI Gateway er gennemført og låst
 (`docs/08-ai-gateway.md`). Masterfase 8 — AI Copilot fortsætter med 8B. Specifikationen er godkendt og
 låst (`docs/08b-production-foundation.md`). Deltrin 8B-I1 (evalueringsframework og gates) er
-gennemført, og det samme er 8B-I2 (production embedding og reranking på AWS Bedrock, ikke koblet
-ind i appen) og 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
+gennemført, og det samme er 8B-I2 (production embedding og reranking på AWS Bedrock, koblet på
+appen i 8B-I6) og 8B-I2.5 (ekstern AI-datagrænse: kundedata forlader aldrig platformen til en ekstern
 AI-udbyder) og 8B-I3 (workerens databaseidentitet: blue/green-roller, worker-API med lease-token og
 billetkontrakt) og 8B-I4 (workerens runtime til AWS ECS Fargate, `deploy/ingestion-worker/`).
 8B-I5 (upload-sikkerhed: karantæne, filvalidering, aktivt indhold og ClamAV; et dokument behandles
@@ -19,7 +19,9 @@ evidens bliver kun production, når P1–P9 er opfyldt for en aktiv, godkendt ko
 evaluerede produkter og dokumenttyper) og 8B-I6.2 (produktet identificeres ved sit stabile id, ikke
 ved navnet). 8B-I7 (evalueringsdrift, monitorering og regression: evalueringsmiljø, publicering
 som særskilt CI-job, regressionsalarmer, sundhedskontrol, Systemstatus i Admin og
-performance-målinger) er gennemført og venter på godkendelse. 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+performance-målinger) er gennemført og godkendt og lukket med 8B-I7.1 (databasen klassificerer
+evalueringskørslen). 8B er ikke afsluttet: små kodehuller og deployment, validering, compliance og
+indhold udestår (`docs/08b` §21.14). 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

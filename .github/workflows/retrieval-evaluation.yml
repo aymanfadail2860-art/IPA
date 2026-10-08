@@ -11,7 +11,8 @@
 #       role that can read that one secret; TLS with certificate verification
 #     → the files are checked against their SHA-256 list, recomputed, registered — and a
 #       regression run's registration suspends the configuration on a hard-gate breach
-#       (database, same transaction, no fallback) and raises the alarms.
+#       (database, same transaction, no fallback) and raises the alarms. The DATABASE classifies
+#       the run (8B-I7.1); MODE is the job's intention, stored as diagnostics only.
 #
 # When: by hand (baseline or regression), weekly (regression of the configuration in service),
 # and at every change to model, reranker, chunker, retrieval algorithm or parameters.
@@ -26,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "baseline (a candidate configuration) or regression (the configuration in service)"
+        description: "Intention: baseline (a candidate) or regression (the configuration in service). Diagnostic only; the database classifies the run"
         type: choice
         options: [baseline, regression]
         default: regression

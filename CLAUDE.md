@@ -13,15 +13,17 @@ en prompt eller et andet dokument modsiger den, gælder denne fil, indtil den bl
 8C — Copilot klar til brug (B-019). Specifikationen for 8B er godkendt og låst 2026-10-03
 (`docs/08b-production-foundation.md`, B-020). 8B implementeres i deltrin, som hver kræver
 eksplicit godkendelse. Deltrin 8B-I1 (evalueringsframework og gates), 8B-I2 (production
-embedding og reranking, ikke koblet på appen), 8B-I2.5 (ekstern AI-datagrænse), 8B-I3
+embedding og reranking, koblet på appen i 8B-I6), 8B-I2.5 (ekstern AI-datagrænse), 8B-I3
 (workerens databaseidentitet og databasefunktioner), 8B-I4 (workerens runtime) og 8B-I5
 (upload-sikkerhed, karantæne og malware-scanning) er gennemført og godkendt og fuldt lukket med
 8B-I5.5 (scanner-isolation og signaturforsyning) og 8B-I5.6 (ClamAV-patchversion 1.4.6). 8B-I6
 (register over retrieval-konfigurationer og ProductionEvidenceSet) er gennemført, godkendt og
 endeligt lukket med 8B-I6.1 (pilot-politik for statistisk usikkerhed og pilot-scope, B-030) og
 8B-I6.2 (stabil produktidentitet i pilot-scope, B-031). 8B-I7 (Evaluation Operations, Monitoring &
-Regression Guardrails, B-032) er gennemført og venter på godkendelse. Resten af 8B er ikke
-påbegyndt, og 8B er ikke fuldt implementeret. 8C er ikke påbegyndt.
+Regression Guardrails, B-032) er gennemført og godkendt og lukket med 8B-I7.1 (kanonisk
+klassifikation, B-033). Afslutningsauditten (2026-10-09, `docs/08b` §21.14) viser, at 8B ikke er
+fuldt implementeret (kodehuller C1–C6) og ikke afsluttet (deployment, validering, compliance og
+indhold udestår). 8C er ikke påbegyndt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -96,7 +98,7 @@ fase, der ophæver dem, er nået.
 | 7 | Knowledge Engine | **Gennemført og låst** |
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
-| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6 og 8B-I6 (inkl. I6.1 og I6.2) gennemført, 8B-I7 gennemført og venter på godkendelse, resten ikke påbegyndt |
+| 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført; ikke afsluttet (C1–C6 og eksterne forudsætninger, §21.14) |
 | 8C | Copilot klar til brug | Ikke påbegyndt |
 | 9 | Learn | Ikke påbegyndt |
 | 10 | Practice | Ikke påbegyndt |

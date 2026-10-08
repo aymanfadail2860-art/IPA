@@ -10,6 +10,80 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-033 — Kanonisk klassifikation af evalueringskørsler (8B-I7.1); B-032 afgjort; 8B-I7 lukket
+
+**Dato:** 9. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.13–§21.14,
+`supabase/migrations/20261009000100_canonical_run_classification.sql`, `evals/engine/regression.ts`,
+`evals/engine/publication.ts`, `workers/evaluation/publish-run.ts`, `src/lib/observability/`,
+`deploy/monitoring/aggregate-alarms.md`
+
+**Beslutning:**
+- **8B-I7 er godkendt** i grundarkitektur og implementering. Det gælder evalueringsdrift,
+  regressionskontrol, observability, `AlertSink`, performance-måling og arkitekturen for
+  evalueringsmiljøet (B-032). B-032's udledte punkter 1, 2, 3, 5 og 6 er godkendt. Punkt 4 er
+  præciseret nedenfor og implementeret som 8B-I7.1.
+- **Kanonisk klassifikation (8B-I7.1):**
+  - Databasen er source of truth for, hvad en registreret kørsel er:
+    - `baseline`;
+    - `regression` (bestået);
+    - `hard_gate_regression`;
+    - `quality_regression`.
+  - Klassifikationen afledes af konfigurationens status i databasen i det øjeblik, kørslen
+    registreres (`registered_while`), og af kørslens gates og udfald. Kalderen kan ikke sætte
+    den. Én regel bruges af audit, systemstatus og publicering:
+    `knowledge.evaluation_run_classification`.
+  - En ugyldig kørsel (H7, eller H6 uden for drift) registreres aldrig. Den afvises med
+    `invalid_run` og giver alarmen `evaluation_invalid`. Den kan hverken blive en baseline eller
+    en bestået kørsel.
+  - CI-jobbets mode gemmes kun som diagnostik (`requested_mode`). Den vises ved siden af
+    klassifikationen sammen med en markering af, om de to stemmer overens, og afgør hverken
+    alvor, suspendering, klassifikation, alarmkode eller production-tilstand.
+  - Publiceringen sker med `knowledge.publish_evaluation_run(rapport, ønsket tilstand)`, som
+    returnerer databasens hændelse. Publisherens API har dermed fire funktioner.
+  - **8B-I7 er implementeret og godkendt** og lukket med I7.1.
+- **Performance uden måling:**
+  - Et performance-kriterium, der ikke er målt, er `not demonstrated` og dermed en afvigelse. Det
+    behandles aldrig som bestået.
+  - I et afgrænset pilotmiljø kan en administrator udtrykkeligt acceptere afvigelsen med en
+    skriftlig begrundelse (`knowledge.accept_performance_deviation`). Målet i §12 ændres ikke.
+- **Performance-miljø:** det reproducerbare performance-bevis laves i evalueringsmiljøet.
+  Production- og pilot-runtime skal stadig sende de nødvendige strukturerede latency- og
+  fejlmålinger.
+- **Rate- og latency-alarmer:**
+  - Aggregerede alarmer som fejlrate og p95-latency bygges i den valgte deployment- og
+    logplatform, ikke i et eget metrics-system i applikationen.
+  - De er en forudsætning **før** den kontrollerede Copilot-pilot.
+  - `deploy/monitoring/aggregate-alarms.md` beskriver for hver alarm metric-navn, dimensioner,
+    tærskel, vindue og alvor.
+  - Tærsklerne er dem i §14. Vinduet er 15 minutter, og alle alarmerne er `warning`.
+  - Hvem der modtager alarmerne, og via hvilken tjeneste (Å-5), er fortsat åbent.
+- **Stabile produkt-id'er:** pilot- og evalueringsmanifester bruger de stabile produkt-id'er fra
+  den autoritative produktmodel. Produktnavne er kun øjebliksbilleder til visning og audit
+  (B-031).
+
+**Overvejede alternativer:**
+- *Lade CI-jobbets mode afgøre alarmen (I7).* Fravalgt: et label, som kalderen styrer, kan ikke
+  bestemme alvor eller suspendering. Databasen kender konfigurationens status, og det gør
+  kalderen ikke.
+- *Gemme klassifikationen som et frit felt, kalderen sætter.* Fravalgt af samme grund. Den
+  ønskede tilstand gemmes, men kun som diagnostik.
+- *Udlede klassifikationen af konfigurationens nuværende status.* Fravalgt: efter en hård
+  regression er konfigurationen suspenderet, så den nuværende status ville klassificere
+  kørslen forkert. Det er statussen ved registreringen, der tæller.
+- *Et metrics-system i appen til rate-alarmerne.* Fravalgt: aggregering hører til
+  deployment-platformen, §14 udelukker en ny observability-leverandør, og loglinjerne indeholder
+  allerede grundlaget.
+
+**Begrundelse:** en alarm, der kan styres af den, der starter kørslen, er ikke en sikkerhedsgrænse.
+Når klassifikationen ligger i databasen, følger alvor, suspendering og alarm den samme regel som
+selve registreringen. Uoverensstemmelser forbliver synlige.
+
+**Udledt (til bekræftelse):** en aggregeret alarm vurderes kun, når vinduet indeholder mindst
+20 forsøg. Ved pilotens trafik ville én fejl ellers give 100 % (`deploy/monitoring/aggregate-alarms.md`).
+
+---
+
 ## B-032 — Evaluation Operations, Monitoring & Regression Guardrails (8B-I7)
 
 **Dato:** 8. oktober 2026
@@ -117,6 +191,8 @@ røre produktionsdata, og uden, at en alarm kan bære indhold ud af systemet.
    deploymentbeslutning sammen med Å-5.
 4. *Alarmens art følger kørslens erklærede tilstand* (`--mode`). Databasen afgør selv, om
    kørslen er en regression af konfigurationen i drift, og suspenderer og auditerer derefter.
+   *Ændret i B-033 (8B-I7.1): alarmen følger databasens klassifikation. CI-jobbets mode er kun
+   diagnostik.*
 5. *Evalueringsmiljøets korpus bruger manifestets produkt-id'er*, som B-031 forudsatte. Pilotens
    manifest skal derfor bære produktionens id'er.
 6. *Et blindt punkt i egress-arkitekturtesten er lukket.* Mønstret `options.fetch ?? fetch`

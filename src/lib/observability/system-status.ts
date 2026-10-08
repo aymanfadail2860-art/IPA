@@ -30,6 +30,11 @@ const OUTCOME: Record<string, string> = {
   fail: "ikke bestået",
 };
 
+const CLASSIFICATION: Record<string, string> = {
+  hard_gate_regression: "hård regression",
+  quality_regression: "kvalitetsregression",
+};
+
 const minutes = (seconds: number) => `${Math.round(seconds / 60)} min.`;
 
 export function systemStatusView(data: unknown, formatDate: (iso: string) => string): SystemStatusView {
@@ -74,8 +79,9 @@ export function systemStatusView(data: unknown, formatDate: (iso: string) => str
     const registered = typeof evaluation?.registeredAt === "string" ? formatDate(evaluation.registeredAt) : "";
     rows.push({
       label: run.regression ? "Seneste regressionskørsel" : "Godkendende evalueringskørsel",
-      value: `${OUTCOME[run.outcome] ?? run.outcome} · ${run.evalSet.id} v${run.evalSet.version}${registered ? ` · ${registered}` : ""}`,
-      tone: !run.hardGatesPassed ? "danger" : !run.qualityGatesPassed ? "warning" : "success",
+      value: `${OUTCOME[run.outcome] ?? run.outcome}${CLASSIFICATION[run.classification] ? ` (${CLASSIFICATION[run.classification]})` : ""} · ${run.evalSet.id} v${run.evalSet.version}${registered ? ` · ${registered}` : ""}`,
+      // The database's classification (8B-I7.1).
+      tone: run.classification === "hard_gate_regression" ? "danger" : run.classification === "quality_regression" ? "warning" : "success",
     });
   } else {
     rows.push({ label: "Evaluering og regression", value: "Ingen registreret kørsel for konfigurationen i drift", tone: "neutral" });

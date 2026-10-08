@@ -13,6 +13,7 @@ import {
   type PublisherConnection,
 } from "../../evals/engine/publication.ts";
 import { buildPerformanceMeasurement } from "../../evals/engine/performance.ts";
+import { parseRunEvent } from "../../evals/engine/regression.ts";
 import { REPORT_SCHEMA_VERSION, type EvaluationReport } from "../../evals/engine/runner.ts";
 
 import { FIXTURE_PERFORMANCE } from "./fixtures/evaluation-performance";
@@ -33,9 +34,13 @@ function recordingConnection() {
       calls.push("registerGateSet");
       return "gate";
     },
-    async recordRun() {
-      calls.push("recordRun");
-      return { id: "f6000000-0000-4000-8000-0000000000b1", registeredAt: "2026-10-05T09:00:00.000Z" };
+    async recordRun(_report, requestedMode) {
+      calls.push(`recordRun:${requestedMode ?? "none"}`);
+      return {
+        id: "f6000000-0000-4000-8000-0000000000b1",
+        registeredAt: "2026-10-05T09:00:00.000Z",
+        event: parseRunEvent({ id: "f6000000-0000-4000-8000-0000000000b1", classification: "baseline", requestedMode }),
+      };
     },
   };
   return { connection, calls };
@@ -63,8 +68,10 @@ describe("a passing report for a production-grade configuration", () => {
   it("is published through exactly the two publisher functions and yields a PublishedEvaluationRun", async () => {
     const { connection, calls } = recordingConnection();
     const published = await createEvaluationPublisher(connection).publish(buildReport(), GATES_V1);
-    expect(calls).toEqual(["registerGateSet", "recordRun"]);
+    expect(calls).toEqual(["registerGateSet", "recordRun:none"]);
     expect(published.reportChecksum).toBe(buildReport().checksums.report);
+    // The classification is the database's (8B-I7.1).
+    expect(published.event.classification).toBe("baseline");
     expect(Object.isFrozen(published)).toBe(true);
   });
 
@@ -158,22 +165,30 @@ describe("uncertain is not pass, and small sets are uncertain", () => {
 });
 
 describe("the SQL transport", () => {
-  it("calls only knowledge.register_evaluation_gate_set and knowledge.record_evaluation_run, with JSON parameters", async () => {
+  it("calls only knowledge.register_evaluation_gate_set and knowledge.publish_evaluation_run, with JSON parameters", async () => {
     const queries: { query: string; parameters: unknown[] }[] = [];
+    const event = { id: "x", runId: "r", registeredAt: "2026-10-05T09:00:00.000+00:00", classification: "quality_regression", requestedMode: "baseline" };
     const connection = sqlPublisherConnection({
       unsafe(query, parameters = []) {
         queries.push({ query, parameters });
-        return Promise.resolve([{ id: "x", registered_at: new Date("2026-10-05T09:00:00Z") }]);
+        return Promise.resolve(query.includes("gate_set") ? [{ id: "g" }] : [{ event }]);
       },
     });
     await connection.registerGateSet(GATES_V1);
-    const row = await connection.recordRun(buildReport());
+    const row = await connection.recordRun(buildReport(), "baseline");
     expect(queries.map((entry) => entry.query)).toEqual([
       "select knowledge.register_evaluation_gate_set($1::text::jsonb) as id",
-      "select knowledge.record_evaluation_run($1::text::jsonb) as id, now() as registered_at",
+      "select knowledge.publish_evaluation_run($1::text::jsonb, $2::text) as event",
     ]);
     expect(JSON.parse(queries[1]!.parameters[0] as string)).toEqual(buildReport());
-    expect(row).toEqual({ id: "x", registeredAt: "2026-10-05T09:00:00.000Z" });
+    expect(queries[1]!.parameters[1]).toBe("baseline");
+    // The database's answer is the classification — here a regression, although "baseline" was asked for.
+    expect(row).toMatchObject({ id: "x", registeredAt: event.registeredAt, event: { classification: "quality_regression", requestedMode: "baseline" } });
+  });
+
+  it("an answer without a known classification is an error, not a baseline", async () => {
+    const connection = sqlPublisherConnection({ unsafe: () => Promise.resolve([{ event: { id: "x", classification: "pass" } }]) });
+    await expect(connection.recordRun(buildReport(), "regression")).rejects.toThrow();
   });
 });
 

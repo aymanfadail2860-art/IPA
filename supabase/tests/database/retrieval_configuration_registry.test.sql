@@ -11,7 +11,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(181);
+select plan(202);
 
 -- ----------------------------------------------------------------------------
 -- Hjælpere (kun i testens transaktion)
@@ -207,8 +207,9 @@ select is(
   (select array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_'
      and has_schema_privilege('evaluation_publisher', n.oid, 'USAGE') and has_function_privilege('evaluation_publisher', p.oid, 'EXECUTE')),
-  array['knowledge.record_evaluation_run(jsonb)', 'knowledge.record_performance_measurement(jsonb)', 'knowledge.register_evaluation_gate_set(jsonb)'],
-  'publisheren kan kun køre sine publiceringsfunktioner (kørsler, gate-sæt og fra I7 performance-målinger)');
+  array['knowledge.publish_evaluation_run(jsonb,text)', 'knowledge.record_evaluation_run(jsonb)', 'knowledge.record_performance_measurement(jsonb)',
+        'knowledge.register_evaluation_gate_set(jsonb)'],
+  'publisheren kan kun køre sine publiceringsfunktioner (kørsler, gate-sæt, fra I7 performance-målinger og fra I7.1 publicering med klassifikation)');
 select is(
   (select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
    where n.nspname = 'knowledge' and c.relkind in ('r', 'v', 'm', 'p')
@@ -808,6 +809,104 @@ set local role authenticated;
 select throws_like($$ select knowledge.accept_performance_deviation((select id from pgtap_pm_ok), 'pgTAP: forsøg uden afvigelse her') $$,
   '%Afvist (no_deviation)%', 'en måling, der når alle mål, har intet at godkende');
 reset role;
+
+-- ----------------------------------------------------------------------------
+-- 12. 8B-I7.1: databasen klassificerer kørslen; CI-jobbets ønskede tilstand er kun diagnostik
+-- ----------------------------------------------------------------------------
+
+create function pg_temp.publish_as(r jsonb, p_mode text) returns jsonb language plpgsql as $f$
+declare v jsonb;
+begin
+  set local role evaluation_publisher_login;
+  v := knowledge.publish_evaluation_run(r, p_mode);
+  reset role;
+  return v;
+end $f$;
+-- Kalderen kan selv sætte den GUC, publiceringsfunktionen bruger. Det må intet afgøre.
+create function pg_temp.publish_with_guc(r jsonb, p_guc text) returns uuid language plpgsql as $f$
+declare v uuid;
+begin
+  set local role evaluation_publisher_login;
+  perform set_config('knowledge.requested_mode', p_guc, true);
+  v := knowledge.record_evaluation_run(r);
+  perform set_config('knowledge.requested_mode', '', true);
+  reset role;
+  return v;
+end $f$;
+create temp table pgtap_events (name text primary key, e jsonb);
+grant select on pgtap_events to public;
+
+select is((select knowledge.evaluation_run_classification(r) from knowledge.evaluation_runs r where r.run_id = 'run-q1'), 'quality_regression',
+  'kvalitetsregressionen fra afsnit 11 klassificeres af databasen, også uden en ønsket tilstand');
+select is((select array_agg(knowledge.evaluation_run_classification(r) order by p.name) from pgtap_runs p join knowledge.evaluation_runs r on r.id = p.id
+           where p.name in ('a1', 'b2')), array['baseline', 'hard_gate_regression'],
+  'kandidatens kørsel er en baseline; den hårde regression fra afsnit 8 er en hård regression');
+
+-- CI siger baseline — databasen konstaterer en kvalitetsregression af konfigurationen i drift.
+insert into pgtap_events select 'q2', pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_quality_regression(), 0.33, 'run-q2'), 'baseline');
+select ok((select e @> '{"classification": "quality_regression", "requestedMode": "baseline", "registeredWhile": "active", "configurationStatus": "active", "suspended": false}'::jsonb
+                  and e -> 'failedQualityGates' = '["Q1", "Q2", "Q3"]'::jsonb and e -> 'failedHardGates' = '[]'::jsonb
+           from pgtap_events where name = 'q2'),
+  'CI siger baseline, databasen konstaterer en kvalitetsregression: klassifikationen er databasens');
+select ok((select details ->> 'classification' = 'quality_regression' and details ->> 'requested_mode' = 'baseline' from audit.audit_log
+           where action = 'knowledge.evaluation_run.regression' and entity_id = (select e ->> 'id' from pgtap_events where name = 'q2')),
+  'regressionen auditeres med den ønskede tilstand ved siden af, så uoverensstemmelsen kan ses');
+select is((select status from knowledge.retrieval_configurations where id = pg_temp.cfg('pgtap-bedrock', 4)), 'active',
+  'en kvalitetsregression suspenderer ikke, uanset den ønskede tilstand');
+insert into pgtap_events select 'q3', pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_quality_regression(), 0.33, 'run-q3'), 'regression');
+select ok((select e @> '{"classification": "quality_regression", "requestedMode": "regression", "suspended": false}'::jsonb from pgtap_events where name = 'q3'),
+  'samme kvalitetsregression, når CI siger regression');
+
+-- En bestået kørsel af konfigurationen i drift er en (bestået) regression, ikke en baseline.
+insert into pgtap_events select 'p1', pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_uncertain_pilot(), 0.33, 'run-p1'), 'baseline');
+select ok((select e @> '{"classification": "regression", "requestedMode": "baseline", "outcome": "pass_with_uncertainty", "configurationStatus": "active"}'::jsonb
+           from pgtap_events where name = 'p1'),
+  'en bestået kørsel af konfigurationen i drift er en regression, også når CI siger baseline');
+
+-- CI siger regression — databasen konstaterer en baseline (en ny kandidat).
+insert into pgtap_events select 'c1', pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_report(), 0.44, 'run-k1'), 'regression');
+select ok((select e @> '{"classification": "baseline", "requestedMode": "regression", "registeredWhile": "candidate", "configurationStatus": "candidate", "suspended": false}'::jsonb
+           from pgtap_events where name = 'c1'),
+  'CI siger regression, databasen konstaterer en baseline: ingen falsk regression');
+select is((select count(*)::int from audit.audit_log where action = 'knowledge.evaluation_run.regression'
+           and entity_id = (select e ->> 'id' from pgtap_events where name = 'c1')), 0, 'og der auditeres ingen regression');
+
+-- En ugyldig kørsel registreres aldrig — den kan hverken blive baseline eller bestået.
+select throws_like($$ select pg_temp.publish_as(pg_temp.reseal(jsonb_set(pg_temp.adapt(pg_temp.ts_report(), 0.55, 'run-i1'), '{configuration,environment}', '"fixture"')), 'baseline') $$,
+  '%Afvist (invalid_run)%', 'en ugyldig kørsel (H7) afvises, også når CI siger baseline');
+select throws_like($$ select pg_temp.publish_as(pg_temp.with_h6_breach(pg_temp.adapt(pg_temp.ts_report(), 0.55, 'run-i2')), 'regression') $$,
+  '%Afvist (invalid_run)%H6%', 'H6 for en konfiguration uden for drift afvises, også når CI siger regression');
+select is((select count(*)::int from knowledge.evaluation_runs where run_id in ('run-i1', 'run-i2')), 0,
+  'en ugyldig kørsel efterlader intet, der kan ligne en baseline eller en bestået kørsel');
+
+-- Den ønskede tilstand valideres, og kun publisheren kan publicere.
+select throws_like($$ select pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_report(), 0.44, 'run-m1'), 'production') $$,
+  '%Afvist (requested_mode)%', 'en ukendt ønsket tilstand afvises');
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select throws_ok($$ select knowledge.publish_evaluation_run('{}'::jsonb, 'baseline') $$, '42501', null, 'en administrator kan ikke publicere');
+reset role;
+select throws_ok($$ select knowledge.publish_evaluation_run('{}'::jsonb, 'baseline') $$, '42501', null, 'heller ikke ejeren uden publisherens identitet');
+select throws_ok($$ select knowledge.publish_evaluation_run('{}'::jsonb, 'production') $$, '42501', null,
+  'publisherens identitet kontrolleres, før noget andet læses');
+
+insert into pgtap_runs select 'g1', pg_temp.publish_with_guc(pg_temp.adapt(pg_temp.ts_report(), 0.66, 'run-g1'), 'hard_gate_regression');
+select ok((select r.requested_mode is null and r.registered_while = 'candidate' and knowledge.evaluation_run_classification(r) = 'baseline'
+           from knowledge.evaluation_runs r where r.id = (select id from pgtap_runs where name = 'g1')),
+  'en værdi sat af kalderen er hverken en ønsket tilstand eller en klassifikation');
+
+-- CI siger baseline — databasen konstaterer en hård regression: suspendering og kritisk klasse.
+insert into pgtap_events select 'h1', pg_temp.publish_as(pg_temp.with_h1_breach(pg_temp.adapt(pg_temp.ts_report(), 0.33, 'run-h1x'), 'run-h1'), 'baseline');
+select ok((select e @> '{"classification": "hard_gate_regression", "requestedMode": "baseline", "registeredWhile": "active", "configurationStatus": "suspended", "suspended": true}'::jsonb
+                  and e -> 'failedHardGates' = '["H1"]'::jsonb
+           from pgtap_events where name = 'h1'),
+  'en hård regression suspenderer og klassificeres som hård, også når CI siger baseline');
+select is((select count(*)::int from knowledge.retrieval_configurations where status = 'active'), 0, 'ingen fallback efter suspenderingen');
+select ok(knowledge.evaluation_run_event((select (e ->> 'id')::uuid from pgtap_events where name = 'q2')) @> '{"configurationStatus": "suspended", "suspended": false}'::jsonb,
+  'kun den kørsel, der suspenderede, står som årsag — ikke en tidligere kørsel af samme konfiguration');
+select ok((ops.system_health() -> 'evaluation') @> '{"classification": "hard_gate_regression", "regression": true, "requestedMode": "baseline"}'::jsonb
+          and ops.system_health() #>> '{configuration,status}' = 'suspended',
+  'systemstatus viser databasens klassifikation og den suspenderede konfiguration');
 
 select * from finish();
 rollback;

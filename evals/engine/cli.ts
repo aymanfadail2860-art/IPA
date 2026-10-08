@@ -29,7 +29,8 @@ import { EvalSetError, GateSetError } from "./schema.ts";
  *                    "evaluation" — the evaluation environment (docs/08b §4.5, 8B-I7): a separate
  *                    Supabase project whose database says it is one. Its own credentials come
  *                    from the environment (evaluationEnvironmentFromEnv) — never production ones.
- *   --mode           "baseline" (default) or "regression" (the configuration in service, scheduled or by hand)
+ *   --mode           "baseline" (default) or "regression": what the run intends. Diagnostic only —
+ *                    the database classifies the registered run (8B-I7.1)
  *   --provision      (evaluation adapter) provision the corpus, users, grants and conflicts first (idempotent)
  *   --providers      "development" (test embedder + "none", default) or "bedrock" (Cohere Embed v4 EU
  *                    1024 + Rerank 3.5 in eu-central-1, 8B-I2). "bedrock" calls AWS with the
