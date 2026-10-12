@@ -17,6 +17,12 @@ describe.skipIf(!integrationConfigured)("RLS and scopes against a real Supabase"
     }
   });
 
+  it("has no self-registration: an anonymous sign-up is refused (docs/06 §2)", async () => {
+    const { data, error } = await anonClient().auth.signUp({ email: `selvregistrering-${Date.now()}@example.invalid`, password: "Ikke-tilladt-1234" });
+    expect(error).not.toBeNull();
+    expect(data.user).toBeNull();
+  });
+
   async function visibleUsers(key: SeedUserKey) {
     const client = await signedInClient(key);
     const { data, error } = await client.schema("identity").from("users").select("id");

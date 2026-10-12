@@ -206,11 +206,11 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
   });
 
   it("is refused with credentials the database does not accept — the runtime treats it as fatal", async () => {
-    // The local stack trusts loopback connections, so a wrong password cannot fail here; a role
-    // that cannot log in gives the same authentication failure (28000). In production Supavisor
-    // checks the password (SCRAM) and answers 28P01, which the runtime treats the same way.
+    // A stack that trusts loopback connections cannot fail a wrong password; a role that cannot log
+    // in gives the authentication failure 28000. A stack that checks the password (SCRAM — the
+    // Supabase CLI in CI, Supavisor in production) answers 28P01. The runtime treats both the same.
     const db = postgresWorkerDb(connect("blue", "wrong-password-0000", undefined, "ingestion_worker_login_none"), "bad", { leaseSeconds: 60, queryTimeoutMs: 10_000 });
-    await expect(db.claim()).rejects.toMatchObject({ code: "28000" });
+    await expect(db.claim()).rejects.toMatchObject({ code: expect.stringMatching(/^28(000|P01)$/) });
     const result = await createWorkerRuntime(
       { once: false, leaseSeconds: 60, heartbeatMs: 12_000, stallMs: 600_000, idle: { initialMs: 10, maxMs: 10 }, errorBackoff: { initialMs: 10, maxMs: 10 }, shutdownGraceMs: 0 },
       { db, originals: ticketOriginals({ db, url: storageUrl }), gate: databaseSecurityGate(db), scan: scanTools(), log: () => {}, sleep: async () => {} },
@@ -463,7 +463,8 @@ describe.skipIf(!configured)("worker runtime against the local database (8B-I4)"
     });
     expect(result.code).toBe(2);
     expect(result.stdout).toContain("\"event\":\"worker_startup_failed\"");
-    expect(result.stdout).toContain("\"code\":\"28000\"");
+    // Refused at authentication: 28000 (role cannot log in) or 28P01 (password checked first).
+    expect(result.stdout).toMatch(/"code":"28(000|P01)"/);
     expect(result.stdout).not.toContain(passwords.blue);
     expect(result.stdout).not.toContain("job_claimed");
   }, 90_000);

@@ -3369,6 +3369,14 @@ Supabase genererer i jobbet.
   - at hverken sæt, fixtures eller kontrolsæt indeholder kundedata.
 - **Branch protection** er en ekstern forudsætning, der sættes i GitHub [AFKLARES ved
   opsætningen]. `main` skal kræve de to checks ovenfor. Workflowet kan ikke håndhæve det selv.
+- **Første kørsel på GitHub** fandt to forskelle mellem CI og den lokale testrig. Begge er rettet:
+  - `supabase/config.toml` havde slået e-mail-udbyderen helt fra (`[auth.email] enable_signup`),
+    så ingen konto kunne logge ind med den lokale Supabase CLI. Udbyderen er nu slået til.
+    Selvregistrering forbliver umulig med `[auth] enable_signup = false` (docs/06), og en ny
+    integrationstest bekræfter, at en anonym tilmelding afvises.
+  - Postgres i CLI'en tjekker adgangskoden (SCRAM) og afviser et ugyldigt worker-login med
+    `28P01`, hvor den lokale rig svarer `28000`. Testene accepterer nu begge koder; runtimen
+    behandler dem ens.
 - **Tests (C5):** `ci-workflow` (5) kontrollerer:
   - udløsere;
   - trin og rækkefølge i begge jobs;
@@ -3386,7 +3394,7 @@ Supabase genererer i jobbet.
 | Lint og typecheck (app og workers) | Bestået |
 | Enhedstests og guardrails | 893 bestået (4 sprunget over: kræver eksterne værktøjer) |
 | pgTAP | 870 i 15 filer, heraf `retrieval_configuration_registry` 220 |
-| Integration | 155 i 15 filer, inklusive appens ruter i test- og production-runtime og EICAR mod lokal ClamAV |
+| Integration | 156 i 15 filer, inklusive appens ruter i test- og production-runtime og EICAR mod lokal ClamAV |
 | Build | Bestået. Klientbundtet indeholder ingen credential- eller Bedrock-kode |
 
 **Mutationer:** I8 har 47 mutationer, som dækker C1–C7: 38 i TypeScript, 8 i SQL og 1 i

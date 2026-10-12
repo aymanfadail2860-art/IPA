@@ -219,8 +219,10 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Allow/disallow new user signups via email to your project.
-enable_signup = false
+# The email provider itself (in the CLI this setting switches it on or off): administrator-created
+# accounts sign in with email and password. Self-registration stays impossible because
+# [auth] enable_signup = false (docs/06 §2; tested in rls.integration.test.ts).
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
