@@ -10,6 +10,143 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-035 — Fast beta uden AWS med fire kernemoduler
+
+**Dato:** 12. oktober 2026
+**Område:** `docs/beta.md` (betaens scope, arkitektur og leverancer), `CLAUDE.md` §1–§4,
+`docs/roadmap.md`, `docs/07-knowledge-engine.md` (publicering og retrieval),
+`docs/08b-production-foundation.md` (§21.16)
+
+**Beslutning:**
+- **Ny udviklingsstrategi.** Målet er en professionel, fungerende beta med fire obligatoriske
+  moduler: Copilot, Learn, Practice og Assessment. Alle fire bygger på den samme autoritative,
+  versionsstyrede forsikringsviden. Prioriteten er hurtig levering, lav kompleksitet, høj
+  forsikringsfaglig kvalitet og sikkerhed. Der gås ikke på kompromis med:
+  - kundedatabeskyttelse;
+  - adgangskontrol;
+  - dokumentversioner;
+  - kildekorrekthed;
+  - prøvesikkerhed.
+- **Advise udskydes.** Kundepolice-analyse, sammenligning af kundens dækning, AI på identificerbare
+  sagsdata og sagsbaseret AI-dialog er uden for betaen. Koden bevares. Modulet skjules i betaens
+  brugerflade, og spærren mod kundesagsdata bevares.
+- **K1 — embedding-fri retrieval-konfiguration.** Godkendt. Betaen får en retrieval-konfiguration
+  uden embedding-model og reranker, som kan blive beta-godkendt efter reel evaluering.
+  - Ingen generel fjernelse af sikkerhedsgates.
+  - Ingen automatisk production-evidens.
+  - Ingen adgang til ikke-godkendte dokumenter.
+  - RLS og dokumentrettigheder tilsidesættes aldrig.
+  - P1/P2 og H6 tilpasses kun eksplicit for den nye retrieval-type. P3–P9 og de øvrige relevante
+    hårde gates gælder uændret.
+  - Evalueringen verificerer den faktiske metode og det autoriserede produktscope.
+  - Versionsstyring, konfliktmarkering, historiske betingelser og kildeproveniens bevares.
+- **Copilot-retrieval: strategi B, "produktdokumenter i fuld længde"** (`product_documents`).
+  Sammenligningen med produktfiltreret leksikalsk retrieval står i `docs/beta.md` §4. Brugeren
+  vælger produkt. Databasen udvælger de adgangsgodkendte, publicerede og gyldige dokumentversioner
+  for produktet inden for profilens dokumenttyper, og modellen modtager dem i fuld længde. Et
+  grundlag over budgettet (`maxChars`, del af fingeraftrykket) afvises og afkortes aldrig.
+- **K2 — publicering uden embeddings.** Godkendt, når den godkendte beta-retrievaltype ikke kræver
+  dem. Dokumenter skal fortsat igennem:
+  - kontrolleret import;
+  - karantæne;
+  - PDF-validering;
+  - malwarekontrol og godkendt scan-verdict;
+  - tekstudtræk og versionsregistrering;
+  - faglig menneskelig godkendelse;
+  - rettighedstildeling.
+
+  Ingen automatisk publicering.
+- **K3 — AWS fjernes fra betaen.** Den aktive beta må ikke afhænge af:
+  - Bedrock og Cohere;
+  - Fargate/ECS og ECR;
+  - NAT/VPC;
+  - AWS IAM/OIDC;
+  - Secrets Manager;
+  - CloudWatch.
+
+  AWS-kode og dependencies fjernes, når den nye vej er bygget og testet (L2). Historiske
+  migrations og Git-historik bevares. Ingen destruktive databaseændringer.
+- **K4 — faserækkefølge.** Godkendt som eksplicit undtagelse til den hidtidige
+  implementeringsrækkefølge. Betaen må implementere de nødvendige dele af 8C, 9, 10 og 12 tidligere
+  end den oprindelige masterrækkefølge. Master-roadmap 1–21 ændres ikke. CLAUDE.md §2 ændres kun i
+  det omfang, der dokumenterer undtagelsen.
+- **K5 — demo og beta adskilt.** Den offentlige demo må ikke forveksles med betaen og bevares om
+  nødvendigt kun som beskyttet development/preview uden rigtige kundedata. Betaen:
+  - kræver login;
+  - bruger Supabase;
+  - viser ikke mock-data som virkelige resultater;
+  - tillader kun inviterede, autoriserede brugere.
+- **K6 — permissions.** Separate, mindst mulige permissions:
+  - `learning.content.manage`;
+  - `practice.scenarios.manage`;
+  - `assessment.content.manage`;
+  - `assessment.content.approve`.
+
+  Eksisterende permissions genbruges til brugeradgang og Knowledge Engine-administration. Ret til
+  at redigere læringsmateriale giver aldrig ret til at godkende prøvespørgsmål. Roller, scope, RLS
+  og audit står i `docs/beta.md` §8. Permissions implementeres i den leverance, der først bruger dem.
+- **K7 — Claude API direkte.** Godkendt som teknisk beta-retning. Det er **ikke** en påstand om
+  behandling udelukkende i EU.
+  - Før rigtige fortrolige dokumenter eller personoplysninger sendes til modellen, skal DPA,
+    dokumentlicenser, behandlingsgrundlag, sikkerhed og datatransfers være vurderet og godkendt.
+  - Udvikling bruger syntetiske eller særskilt godkendte testdata.
+  - Den private Claude Code-konto må aldrig blive platformens produktionskonto.
+- **Dokumentimport:** kontrolleret administratorimport som engangskørsel i Docker på en betroet
+  maskine. Den genbruger den eksisterende worker og ClamAV-kæde. Dokumenter uploades ikke til
+  GitHub Actions som standard.
+- **E2E-svarevaluering** (exit-krav for den første begrænsede beta):
+  - mindst 40 repræsentative spørgsmål;
+  - mindst 95 % fuldt korrekte;
+  - 0 kritiske fejl om dækning, undtagelser, gyldighed eller dokumentrettigheder;
+  - ingen opdigtede kilder;
+  - alle væsentlige konklusioner dokumenteret;
+  - tydelig afvisning ved utilstrækkeligt grundlag.
+
+  Kategorierne står i `docs/beta.md` §5.2. Evalueringen erstatter ikke automatisk retrieval-gates
+  Q1–Q7. Usikkerheden ved et lille sæt rapporteres og accepteres eksplicit.
+- **Databeskyttelse for fritekst:** proveniens og egress-autorisation pr. profil og handling, aldrig
+  en generel tilladelse til at sende brugertekst til Anthropic. Ukendt eller kundebundet indhold
+  fejler lukket. Der er ingen administratoroverstyring (`docs/beta.md` §7).
+- **Supabase:** det eksisterende projekt "IPA" (EU) er udpeget som beta-staging og må kun inspiceres
+  read-only. Migrations, tabeller, Auth/RLS, uploads og betalbare ressourcer kræver særskilt
+  godkendelse. En separat production-database oprettes senere.
+- **Git og rollback:**
+  - arbejdet sker på `beta/fast-beta-without-aws` og ændrer `main` via pull requests med grøn CI;
+  - rollback-punktet er `5461546` (`docs/beta.md` §10);
+  - ingen force-push og ingen sletning af historik.
+- **Udførelse:** L0–L9 i `docs/beta.md` §9. Hver leverance godkendes særskilt.
+
+**Overvejede alternativer:**
+- *Strategi A, produktfiltreret leksikalsk retrieval.* Fravalgt som production-metode. Uden
+  embeddings og reranker findes undtagelser og fravær af dækning ikke pålideligt, og exit-kravet om 0
+  kritiske fejl kan ikke forventes nået.
+- *En kombination af A og B i runtime.* Fravalgt: den giver ikke en klar fordel, der opvejer den
+  ekstra kompleksitet. Et for stort grundlag afgrænses af brugeren til de relevante dokumenter.
+- *Behandling af dokumenter på GitHub-hostede runners.* Fravalgt som standard: forsikringsdokumenter
+  må ikke nødvendigvis behandles der.
+- *Bevare AWS-stakken i betaen.* Fravalgt: den kræver deployment og drift, som betaen ikke har
+  brug for. Den mulige EU-regionsvej, Bedrock gav, opgives bevidst. Det skal oplyses sandfærdigt.
+
+**Begrundelse:** den hurtigste vej til fire fungerende moduler er den eksisterende platform med
+Supabase, Vercel og Claude API. Den genbruger Knowledge Engine, AI Gateway, egress-grænsen,
+upload-sikkerheden og registret over konfigurationer uden AWS. De låste sikkerhedsgrænser bevares.
+Kun de valg, der binder løsningen til embeddings og AWS, tilpasses eksplicit.
+
+**Fund under L0, til afgørelse:** kvalitetsgates Q1–Q7 passer ikke til en ikke-rangerende metode
+(`docs/beta.md` §5.1). Q1–Q7 er ikke ændret. Indtil et gate-sæt for `product_documents` er besluttet,
+kan betaens konfiguration ikke godkendes (fail-closed).
+
+**Udledt (til bekræftelse):**
+1. Publicering kræver embeddings, når en aktiv embedding-model findes, og konfigurationen i drift
+   ikke er embedding-fri. Uden aktiv embedding-model kan ingen søgning bruge vektorer, så kravet
+   bortfalder. Ellers kunne betaens dokumenter ikke publiceres og evalueres, før en konfiguration
+   var godkendt. En hybrid konfiguration kan kun aktiveres, når dens model dækker alle chunks.
+2. Administratorrollen får de fire nye permissions som standard. Firøjneprincippet i databasen
+   adskiller redigering og godkendelse af prøvespørgsmål.
+3. At tage en prøve kræver en aktiv bruger og en tildelt prøve, ikke en ny permission.
+
+---
+
 ## B-034 — 8B-I8: Final Implementation Closure (C1–C7)
 
 **Dato:** 12. oktober 2026

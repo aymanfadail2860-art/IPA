@@ -21,6 +21,12 @@ COMPLETE — PHASE NOT YET COMPLETE** (`docs/08b` §21.15). I8 afventer din godk
 **ikke** afsluttet: deployment, validering med de rigtige udbydere, compliance og indhold udestår.
 8C — Copilot klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
+**Fast beta uden AWS (B-035, 2026-10-12):** en professionel beta med Copilot, Learn, Practice og
+Assessment på Vercel, Supabase og Claude API. Advise er udskudt. Som eksplicit undtagelse må
+betaen bygge de nødvendige dele af 8C, 9, 10 og 12 før den oprindelige rækkefølge. Masterfaserne
+nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9) står i
+`docs/beta.md`; åbne punkter for betaen står i `docs/beta.md` §11.
+
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
 > Supabase (EU), og demo-tilstanden skal fjernes. Fremgangsmåden står i `docs/decisions.md`
@@ -54,11 +60,11 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
 | 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført og godkendt. 8B-I8 har lukket kodehullerne C1–C7 (implementation complete, afventer godkendelse). Ikke afsluttet: eksterne forudsætninger (§21.15) | `docs/08b-production-foundation.md` |
-| 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
-| 9 | Learn | ⬜ Ikke påbegyndt | — |
-| 10 | Practice | ⬜ Ikke påbegyndt | — |
-| 11 | Advise | ⬜ Ikke påbegyndt | — |
-| 12 | Assessment | ⬜ Ikke påbegyndt | — |
+| 8C | Copilot klar til brug | ⬜ Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) | `docs/beta.md` |
+| 9 | Learn | ⬜ Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) | `docs/beta.md` |
+| 10 | Practice | ⬜ Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) | `docs/beta.md` |
+| 11 | Advise | ⬜ Ikke påbegyndt — udskudt i betaen (B-035) | — |
+| 12 | Assessment | ⬜ Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) | `docs/beta.md` |
 | 13 | Personlig AI og læringsprofil (Personal AI / Learning Profile) | ⬜ Ikke påbegyndt | — |
 | 14 | Admin | ⬜ Ikke påbegyndt | — |
 | 15 | Analytics | ⬜ Ikke påbegyndt | — |
@@ -679,6 +685,11 @@ Den forudsætter det hostede pilotmiljø (se fase 21).
 **Andre kandidater (udledt, til afklaring, når 8C specificeres):** citations-tabellen og om
 administratorers læsning af metadata og videnshuller skal slås til (B-014, `docs/08` Q-10).
 
+**Beta (B-035):** betaen bygger de nødvendige dele af 8C før tid: en rigtig Claude-model bag
+gatewayen (L4), Copilot med produktvalg og dokumenterede kilder (L5) samt forbrugsgrænser.
+Retrieval-metoden er "produktdokumenter i fuld længde" (`docs/beta.md` §4). Den kontrollerede
+Copilot-pilot i B-030 erstattes for betaen af betaens egne exit-krav (`docs/beta.md` §5.2).
+
 ---
 
 ## Fase 9 — Learn
@@ -687,6 +698,8 @@ administratorers læsning af metadata og videnshuller skal slås til (B-014, `do
 
 **Fundament fra tidligere faser:** sider med mock-data (fase 5). En Learn-profil i AI Gateway
 uden brugerflade (8A).
+
+**Beta (B-035):** de nødvendige dele bygges i betaen (L6, `docs/beta.md`).
 
 ---
 
@@ -698,6 +711,8 @@ uden brugerflade (8A).
 og den minimale tabel `practice.roleplay_sessions` til gating (8A, B-013). Fasen udvider
 tabellen og bygger den ikke om.
 
+**Beta (B-035):** de nødvendige dele bygges i betaen (L7, `docs/beta.md`).
+
 ---
 
 ## Fase 11 — Advise
@@ -708,6 +723,9 @@ tabellen og bygger den ikke om.
 deltagere (fase 6) og en Advise-profil i AI Gateway (8A). **Kundedata må ikke tillades til en
 model, før forudsætningen i 8B er opfyldt.**
 
+**Beta (B-035):** udskudt. Koden bevares, modulet skjules i betaen, og spærren mod kundesagsdata
+bevares.
+
 ---
 
 ## Fase 12 — Assessment
@@ -717,6 +735,8 @@ model, før forudsætningen i 8B er opfyldt.**
 **Fundament fra tidligere faser:** sider med mock-data (fase 5). Den minimale tabel
 `assessment.assessment_attempts` og server-side gating af AI under en aktiv prøve (8A, B-013,
 B-015). Fasen udvider tabellen og bygger den ikke om.
+
+**Beta (B-035):** de nødvendige dele bygges i betaen (L8, `docs/beta.md`).
 
 ---
 
