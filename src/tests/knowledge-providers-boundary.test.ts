@@ -131,11 +131,23 @@ describe("credentials, secrets and the browser bundle", () => {
   });
 
   it("only the SDK transport imports the AWS SDK, and no client component reaches the providers", () => {
-    const sdkImporters = providerFiles.filter((file) => /from ["']@aws-sdk\//.test(fs.readFileSync(file, "utf8"))).map((file) => path.basename(file));
-    expect(sdkImporters).toEqual(["sdk-transport.ts"]);
+    const sdkImporters = providerFiles.filter((file) => /from ["']@aws-sdk\//.test(fs.readFileSync(file, "utf8"))).map((file) => path.basename(file)).sort();
+    // 8B-I8: plus the evaluation job's credential source (temporary CI credentials, no transport).
+    expect(sdkImporters).toEqual(["credentials-environment.ts", "sdk-transport.ts"]);
     for (const file of providerFiles) expect(fs.readFileSync(file, "utf8"), file).not.toMatch(/^["']use client["']/m);
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8"));
-    expect(Object.keys(pkg.dependencies).filter((name: string) => name.startsWith("@aws-sdk/"))).toEqual(["@aws-sdk/client-bedrock-runtime"]);
+    expect(Object.keys(pkg.dependencies).filter((name: string) => name.startsWith("@aws-sdk/"))).toEqual(["@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-env"]);
+    // 8B-I8: each credential source is imported only by the one runtime it belongs to.
+    const importersOf = (source: string) =>
+      [...fs.readdirSync(path.join(REPO, "src"), { recursive: true }).map((file) => path.join("src", String(file))),
+        ...fs.readdirSync(path.join(REPO, "workers"), { recursive: true }).map((file) => path.join("workers", String(file))),
+        ...fs.readdirSync(path.join(REPO, "evals"), { recursive: true }).map((file) => path.join("evals", String(file)))]
+        .filter((file) => /\.(ts|tsx)$/.test(file) && !file.startsWith(path.join("src", "tests")))
+        .filter((file) => new RegExp(`from ["'][^"']*/${source}(\\.ts)?["']`).test(fs.readFileSync(path.join(REPO, file), "utf8")))
+        .map((file) => file.split(path.sep).join("/"));
+    expect(importersOf("credentials-vercel")).toEqual(["src/lib/knowledge/providers/configured.ts"]);
+    expect(importersOf("credentials-container")).toEqual(["workers/ingestion/providers.ts"]);
+    expect(importersOf("credentials-environment")).toEqual(["evals/engine/cli.ts"]);
   });
 });
 
@@ -239,6 +251,23 @@ describe("evaluation integration (8B-I1 recognizes 8B-I2's configuration)", () =
     });
     expect(declared.configuration).toEqual(material);
     expect(configurationFingerprint(declared.configuration)).toBe(retrievalFingerprint(material));
+  });
+
+  it("the evaluation environment's candidate configuration is the same material over the real worker's chunker (8B-I8 C7)", async () => {
+    const { CHUNKER_VERSION } = await import("../../workers/ingestion/chunker.ts");
+    const declared = validateDeclaredConfiguration(
+      JSON.parse(fs.readFileSync(path.join(REPO, "evals/retrieval/configurations/bedrock-embed-v4-eu-1024-rerank-3-5-structure-1.json"), "utf8")),
+    );
+    const material = retrievalFingerprintMaterial({
+      embedding: EMBED_V4_EU_1024_DESCRIPTOR,
+      reranker: RERANK_35_DESCRIPTOR,
+      algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
+      params: { ...DEFAULT_RETRIEVAL_CONFIG },
+      chunkerVersions: [CHUNKER_VERSION],
+    });
+    expect(declared.configuration).toEqual(material);
+    // The CLI picks it for the evaluation adapter with the Bedrock providers.
+    expect(fs.readFileSync(path.join(REPO, "evals/engine/cli.ts"), "utf8")).toMatch(/values\.adapter === "evaluation" \? "bedrock-embed-v4-eu-1024-rerank-3-5-structure-1"/);
   });
 
   it("the runner evaluates the Bedrock adapters (fake transport): production implementations, but the report is never production-eligible", async () => {

@@ -39,6 +39,10 @@ on:
         description: "Register the run in production as evaluation_publisher"
         type: boolean
         default: true
+      capture_control_reference:
+        description: "Also capture a DRAFT embedding control reference (8B-I8 C6). Approval and calibration are a person's decision"
+        type: boolean
+        default: false
   schedule:
     # Weekly regression (§4.5), Monday 03:41 UTC.
     - cron: "41 3 * * 1"
@@ -107,6 +111,18 @@ jobs:
             echo "IPA_EVAL_SUPABASE_ANON_KEY=$(jq -r .anon_key <<<"$SECRET")"
             echo "IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY=$(jq -r .service_role_key <<<"$SECRET")"
           } >> "$GITHUB_ENV"
+
+      - name: Capture a DRAFT embedding control reference (never approved here)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.capture_control_reference }}
+        run: npm run eval:retrieval -- --providers bedrock --capture-control-reference "evals/retrieval/control-drafts/ci-${GITHUB_RUN_ID}/control-reference-draft.json"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.capture_control_reference }}
+        with:
+          name: control-reference-draft-${{ github.run_id }}
+          path: evals/retrieval/control-drafts/ci-${{ github.run_id }}/
+          retention-days: 400
+          if-no-files-found: error
 
       - name: Provision and evaluate (refused unless the database is an evaluation environment)
         id: run

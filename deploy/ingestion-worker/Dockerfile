@@ -7,8 +7,10 @@
 # * No build arguments and no secrets. The database credential is injected by ECS at runtime
 #   from AWS Secrets Manager; nothing secret is baked into a layer.
 # * Only the worker's runtime dependencies (deploy/ingestion-worker/package.json: postgres,
-#   pdfjs-dist) — no Next.js, no @supabase/supabase-js, no dev dependencies.
-# * The development-only service-role adapter is not in the image (.dockerignore + rm below).
+#   pdfjs-dist, the Bedrock runtime client and the ECS container credential provider, 8B-I8
+#   C7) — no Next.js, no @supabase/supabase-js, no Vercel code, no dev dependencies.
+# * The development-only adapters (service role, fake Bedrock) are not in the image
+#   (.dockerignore + rm below), and neither are the other runtimes' credential sources.
 # * Runs as the unprivileged "node" user (uid 1000) on a read-only root filesystem; /tmp is a
 #   task volume (task definition).
 # * Base image from Amazon ECR Public (no Docker Hub rate limits). Pin the digest when the image
@@ -31,9 +33,12 @@ COPY deploy/ingestion-worker/package.json ./package.json
 COPY workers/ingestion/ ./workers/ingestion/
 COPY src/lib/egress/ ./src/lib/egress/
 COPY src/lib/knowledge/core/ ./src/lib/knowledge/core/
+COPY src/lib/knowledge/providers/ ./src/lib/knowledge/providers/
 COPY src/lib/observability/ ./src/lib/observability/
 COPY deploy/ingestion-worker/certs/ ./certs/
-RUN rm -f workers/ingestion/dev-service-role.ts
+RUN rm -f workers/ingestion/dev-service-role.ts workers/ingestion/dev-fake-bedrock.ts \
+    src/lib/knowledge/providers/credentials-vercel.ts src/lib/knowledge/providers/credentials-environment.ts \
+    src/lib/knowledge/providers/configured.ts
 USER node
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["node", "workers/ingestion/healthcheck.ts"]

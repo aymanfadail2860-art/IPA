@@ -4,6 +4,7 @@ import { AccessDenied } from "@/components/common/access-denied";
 import { PageContainer } from "@/components/common/page-container";
 import { PageHeader } from "@/components/common/page-header";
 import { Section } from "@/components/common/section";
+import { RetrievalOperations } from "@/components/knowledge-admin/retrieval-operations";
 import { RetrievalStatus } from "@/components/knowledge-admin/retrieval-status";
 import { SystemStatus } from "@/components/knowledge-admin/system-status";
 import { StatusBadge } from "@/components/status/status-badge";
@@ -13,7 +14,7 @@ import { SHORTCUTS } from "@/config/shortcuts";
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { meetsRequirement } from "@/lib/auth/permissions";
 import { authorize } from "@/lib/auth/server-session";
-import { embeddingSettings, systemStatus } from "@/lib/knowledge/admin-data";
+import { embeddingSettings, retrievalOperations, systemStatus } from "@/lib/knowledge/admin-data";
 import { SETTINGS_MANAGE } from "@/lib/knowledge/admin-requirements";
 import { getRetrievalAvailability } from "@/lib/knowledge/retrieval";
 import { formatDate } from "@/lib/format";
@@ -29,6 +30,7 @@ export default async function AdminSettingsPage() {
   if (!session) return <AccessDenied />;
   const showEmbedding = !isDemoMode() && meetsRequirement(session.grants, SETTINGS_MANAGE);
   const [embedding, availability, status] = showEmbedding ? await Promise.all([embeddingSettings(), getRetrievalAvailability(), systemStatus()]) : [null, null, null];
+  const operations = embedding ? await retrievalOperations(embedding) : null;
 
   return (
     <PageContainer>
@@ -64,6 +66,14 @@ export default async function AdminSettingsPage() {
         {embedding ? (
           <Section title="Systemstatus" description="Kø, fejl, scanning, konfiguration, evaluering og performance. Alarmer sendes af workerens planlagte kontrol.">
             <SystemStatus status={status} />
+          </Section>
+        ) : null}
+        {embedding ? (
+          <Section
+            title="Drift af retrieval"
+            description="Menneskelige beslutninger i livscyklussen: gate-sæt, usikkerhed, godkendelse, aktivering, suspendering, performance-afvigelser og re-embedding. Databasen efterprøver hver handling og auditerer den."
+          >
+            <RetrievalOperations view={operations} />
           </Section>
         ) : null}
         {embedding ? (

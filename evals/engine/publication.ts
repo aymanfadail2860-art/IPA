@@ -176,9 +176,10 @@ export function isDevelopmentConfiguration(configuration: EvaluationReport["conf
 
 /**
  * verifyReport plus what publication requires: the current report format, an unchanged result
- * checksum, the evaluation environment, a runtime that is exactly the declared configuration,
- * the evaluated corpus's document types, and no development implementation. A development or
- * fixture report can therefore never be published as a production approval.
+ * checksum, the evaluation environment, H6 exactly when the runtime is not the declared
+ * configuration (8B-I8 C4), the evaluated corpus's document types, and no development
+ * implementation in the declared configuration. A development or fixture report can therefore
+ * never be published as a production approval, and an H6 run can never pass.
  */
 const SCOPE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -215,7 +216,21 @@ export function verifyForPublication(report: EvaluationReport, gates: GateSet): 
   if (report.configuration.environment !== "evaluation") problems.push(`Kørslen er ikke foretaget i evalueringsmiljøet (miljø: "${report.configuration.environment}").`);
   if (configurationFingerprint(report.configuration.declared) !== report.configuration.declaredFingerprint) problems.push("Det erklærede fingeraftryk stemmer ikke med konfigurationen.");
   if (configurationFingerprint(report.configuration.runtime) !== report.configuration.runtimeFingerprint) problems.push("Runtime-fingeraftrykket stemmer ikke med runtime-konfigurationen.");
-  if (!report.configuration.matches || report.configuration.declaredFingerprint !== report.configuration.runtimeFingerprint) problems.push("Runtime er ikke den erklærede konfiguration.");
+  // H6 (§4.4, 8B-I8 C4): a runtime that is not the declared configuration is publishable only as
+  // exactly what it is — one run-level H6 violation, an invalid, failed run. The database then
+  // decides: for the configuration in service it is a hard regression and suspends it; for any
+  // other it is refused as invalid. A run-level H6 without a fingerprint difference is a forgery.
+  const differs = report.configuration.declaredFingerprint !== report.configuration.runtimeFingerprint;
+  if (report.configuration.matches === differs) problems.push("Rapportens \"matches\" stemmer ikke med fingeraftrykkene.");
+  const runH6 = report.failures.filter((failure) => failure.gate === "H6" && failure.caseId === null).length;
+  if (differs) {
+    const h6 = report.hardGates.find((gate) => gate.id === "H6");
+    if (runH6 !== 1 || h6?.status !== "fail" || report.valid !== false || report.verdict !== "fail") {
+      problems.push("Runtime er ikke den erklærede konfiguration, men rapporten viser ikke netop ét H6-brud på kørselsniveau.");
+    }
+  } else if (runH6 > 0) {
+    problems.push("Rapporten påstår et H6-brud på kørselsniveau, men runtime er den erklærede konfiguration.");
+  }
   if (isDevelopmentConfiguration(report.configuration.declared)) problems.push("Konfigurationen bruger en udviklingsimplementering (test-embedder eller \"none\").");
   const types = report.corpus.documentTypes;
   if (!Array.isArray(types) || types.length === 0 || types.join("\u0000") !== [...new Set(types)].sort().join("\u0000")) problems.push("Korpussets dokumenttyper mangler.");

@@ -4,9 +4,9 @@ import { createEmbedder, createReranker } from "../core/registry.ts";
 import type { RerankingProvider } from "../core/reranker.ts";
 import type { RetrievalContext } from "../core/retrieval-context.ts";
 
-import { EU_SOURCE_REGION } from "./bedrock/cohere-embed-v4.ts";
-import { createSdkBedrockTransport } from "./bedrock/sdk-transport.ts";
 import { createProductionEmbedder, createProductionReranker, type ProviderRuntime } from "./catalog.ts";
+import { VERCEL_CREDENTIAL_SOURCES } from "./credentials-vercel.ts";
+import { providerRuntimeFor } from "./runtime.ts";
 
 export type { ProviderRuntime };
 
@@ -50,10 +50,12 @@ export function providersForContext(context: RetrievalContext, runtime: () => Pr
 let applicationRuntime: ProviderRuntime | null = null;
 
 /**
- * The application's Bedrock runtime (eu-central-1), created on first use: credentials come from
- * the SDK's default chain (federation, D-11) and are only resolved at the first call.
+ * The application's Bedrock runtime (eu-central-1), created on first use (8B-I8 C1). In
+ * production its ONLY credential path is Vercel OIDC → AWS STS → short-lived credentials
+ * (IPA_AWS_ROLE_ARN); a static key, a credentials file or a run outside Vercel fails closed.
+ * Locally the SDK's development chain. The credentials are resolved at the first call.
  */
-export function applicationProviderRuntime(): ProviderRuntime {
-  applicationRuntime ??= { bedrock: createSdkBedrockTransport({ region: EU_SOURCE_REGION }) };
+export function applicationProviderRuntime(env: Record<string, string | undefined> = process.env): ProviderRuntime {
+  applicationRuntime ??= providerRuntimeFor("application", env, VERCEL_CREDENTIAL_SOURCES);
   return applicationRuntime;
 }

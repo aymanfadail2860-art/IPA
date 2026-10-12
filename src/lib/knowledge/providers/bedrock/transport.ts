@@ -73,7 +73,7 @@ export function classifyBedrockError(error: unknown): ProviderError {
   if (!kind && (status === 401 || status === 403)) kind = "access_denied";
   kind ??= "invalid_response";
   // The provider's message may echo input; only the error's name and status are kept.
-  return new ProviderError(kind, BEDROCK_PROVIDER, `Bedrock-kaldet fejlede (${name || "ukendt fejl"}${status ? `, HTTP ${status}` : ""}).`);
+  return new ProviderError(kind, BEDROCK_PROVIDER, `Bedrock-kaldet fejlede (${name || "ukendt fejl"}${status ? `, HTTP ${status}` : ""}).`, { httpStatus: status });
 }
 
 /**

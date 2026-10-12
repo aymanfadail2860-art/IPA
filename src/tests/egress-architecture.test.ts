@@ -79,6 +79,9 @@ const NON_AI_NETWORK: Record<string, RegExp> = {
   // 8B-I7: the evaluation provisioning downloads a PUBLIC source named in the manifest and
   // refuses it unless its SHA-256 matches. It sends nothing.
   "evals/engine/provision.ts": /^ {2}const download = options\.download \?\? \(async \(url: string\) => new Uint8Array\(await \(await fetch\(url\)\)\.arrayBuffer\(\)\)\);$/m,
+  // 8B-I8: the evaluation job's credential source reads the temporary credentials GitHub OIDC put
+  // in the job's environment. It reaches no AI provider and sends no content.
+  "src/lib/knowledge/providers/credentials-environment.ts": /^import \{ fromEnv \} from "@aws-sdk\/credential-provider-env";$/m,
 };
 
 describe("external transports: only allowlisted, and only behind the egress check", () => {
@@ -117,18 +120,29 @@ describe("external transports: only allowlisted, and only behind the egress chec
   it("the only AI/cloud SDK dependency is the Bedrock runtime client", () => {
     const pkg = JSON.parse(read(path.join(REPO, "package.json")));
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
-    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual(["@aws-sdk/client-bedrock-runtime"]);
+    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual([
+      "@aws-sdk/client-bedrock-runtime",
+      // 8B-I8: credential sources, one per runtime (no AI transport).
+      "@aws-sdk/credential-provider-env",
+    ]);
+    expect(deps.filter((name) => /^(@smithy\/|@vercel\/)/.test(name)).sort()).toEqual(["@smithy/credential-provider-imds", "@vercel/oidc-aws-credentials-provider"]);
   });
 });
 
 describe("adapters authorize before they invoke", () => {
   it("every module that invokes a provider transport calls authorizeEgress first", () => {
+    const METRICS = "src/lib/knowledge/providers/provider-metrics.ts";
     const invokers = sources.filter(({ text }) => /\.transport\.invoke\(|\btransport\.invoke\(/.test(text));
     expect(invokers.map(({ file }) => file).sort()).toEqual([
       "src/lib/knowledge/providers/bedrock/cohere-embed-v4.ts",
       "src/lib/knowledge/providers/bedrock/cohere-rerank-3-5.ts",
+      METRICS,
     ]);
-    for (const { file, text } of invokers) {
+    // The metrics decorator (8B-I8 C3) forwards the already authorized call unchanged and builds nothing.
+    const metrics = invokers.find(({ file }) => file === METRICS)!.text;
+    expect(metrics.match(/transport\.invoke\(([^)]*)\)/g)).toEqual(["transport.invoke(call)"]);
+    expect(metrics).not.toMatch(/body\s*:|egress\s*:|authorizeEgress|\.texts/);
+    for (const { file, text } of invokers.filter(({ file }) => file !== METRICS)) {
       const authorize = text.indexOf("authorizeEgress(");
       expect(authorize, file).toBeGreaterThan(-1);
       expect(text.indexOf("transport.invoke("), file).toBeGreaterThan(authorize);
@@ -166,8 +180,13 @@ describe("the policy cannot be configured", () => {
 describe("classification constructors are used only where their provenance is true", () => {
   const callers = (pattern: RegExp) => sources.filter(({ text }) => pattern.test(text)).map(({ file }) => file).sort();
 
-  it("synthetic text only in the evaluation engine (and tests)", () => {
-    expect(callers(/egress\/synthetic/).filter((file) => !file.startsWith("evals/"))).toEqual([]);
+  it("synthetic text only in the evaluation engine (and tests) — and for the fixed embedding control set", () => {
+    // 8B-I8 C6: the control set classifies ONLY its own frozen, checksummed texts; it takes no text from a caller.
+    const CONTROL = "src/lib/knowledge/core/control-set.ts";
+    expect(callers(/egress\/synthetic/).filter((file) => !file.startsWith("evals/"))).toEqual([CONTROL]);
+    const control = read(path.join(REPO, CONTROL));
+    expect(control.match(/syntheticText\([^)]*\)/g)).toEqual(["syntheticText(entry.text)"]);
+    expect(control).toMatch(/if \(set !== EMBEDDING_CONTROL_SET\) throw/);
     expect(callers(/\bmakeSyntheticInternal\b/)).toEqual(["src/lib/egress/classification.ts", "src/lib/egress/synthetic.ts"]);
   });
 

@@ -496,6 +496,81 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect((await admin<{ n: number }[]>`select count(*)::int as n from knowledge.evaluation_runs where run_id = ${tampered.runId}`)[0]!.n).toBe(0);
   });
 
+  it("H6 in service suspends through the real publication step; forged or misdirected H6 does not; a replay changes nothing (8B-I8 C4)", async () => {
+    await takeOutOfService();
+    const declared = material({ minScore: 0.29 });
+    const base = report("it-config-d", { configuration: declared });
+    await publish(base);
+    configurations.d = await configurationOf(base.configuration.declaredFingerprint);
+    expect(await approve(configurations.d, await latestRun(configurations.d))).toBeNull();
+    expect(await activate(adminClient, configurations.d)).toBeNull();
+    const status = async (id: string) => (await admin<{ status: string }[]>`select status from knowledge.retrieval_configurations where id = ${id}`)[0]!.status;
+
+    const alerts: Alert[] = [];
+    const logged: Record<string, unknown>[] = [];
+    const sink: AlertSink = { send: async (alert) => void alerts.push(alert) };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ipa-eval-"));
+    const filesOf = (reportX: EvaluationReport, performance: PerformanceMeasurement | null) => {
+      const written = writeVersionedReport(fs.mkdtempSync(path.join(dir, "run-")), reportX, performance);
+      return {
+        files: Object.fromEntries(written.filter((file) => !file.endsWith(".sha256")).map((file) => [path.basename(file), fs.readFileSync(file, "utf8")])),
+        checksums: fs.readFileSync(written.find((file) => file.endsWith(".sha256"))!, "utf8"),
+      };
+    };
+    const publishFiles = (reportX: EvaluationReport, performance: PerformanceMeasurement | null, written = filesOf(reportX, performance)) =>
+      publishEvaluation({ report: reportX, gates: GATES_V1, performance, requestedMode: "regression", ...written }, publisherSql as unknown as SqlClient, sink, (event) => void logged.push(event));
+
+    // A forged H6 (a run-level H6 while the runtime IS the declared configuration) is refused before anything is sent.
+    const forged = report("it-config-d", { configuration: declared, violations: [{ gate: "H6", caseId: null, explanation: "Fiktivt: påstået afvigelse." }] });
+    expect(await publishFiles(forged, null)).toMatchObject({ status: "refused", invalidRun: false });
+    expect(alerts.map((alert) => alert.code)).toEqual(["publication_refused"]);
+    // …and the database refuses it on its own too, over the publisher's connection.
+    await expect(publisherSql`select knowledge.publish_evaluation_run(${publisherSql.json(forged as never)}, 'regression')`).rejects.toThrow(/h6_evidence/);
+    expect(await status(configurations.d)).toBe("active");
+    alerts.length = 0;
+
+    // H6 in a report about ANOTHER configuration (a candidate): invalid, never a suspension of D.
+    const other = report("it-config-e", { configuration: material({ minScore: 0.31 }), runtime: material({ minScore: 0.31, topK: 3 }) });
+    expect(await publishFiles(other, null)).toMatchObject({ status: "refused", invalidRun: true });
+    expect(alerts.map((alert) => alert.code)).toEqual(["evaluation_invalid"]);
+    expect(await status(configurations.d)).toBe("active");
+    alerts.length = 0;
+
+    // The real thing: evaluated as D, but the runtime was another configuration — H6 in service.
+    const h6 = report("it-config-d", { configuration: declared, runtime: material({ minScore: 0.29, topK: 3 }) });
+    expect(h6.configuration.matches).toBe(false);
+    const performance = buildPerformanceMeasurement({
+      runId: h6.runId, configurationFingerprint: h6.configuration.runtimeFingerprint, environment: "evaluation",
+      retrieval: { total: [700], queryEmbedding: [120], search: [80], rerank: [200] },
+      ingestion: { documents: [{ pages: 52, seconds: 200 }], corpusPages: 52, corpusSeconds: 200 },
+    });
+    const written = filesOf(h6, performance);
+    expect(await publishFiles(h6, performance, written)).toMatchObject({ status: "published", classification: "hard_gate_regression", performanceId: null });
+    expect(alerts.map((alert) => [alert.code, alert.severity])).toEqual([["hard_gate_regression", "critical"]]);
+    expect(alerts[0]!.details).toMatchObject({ failed_hard_gates: "H6", suspended: "true", configuration_id: configurations.d });
+    expect(logged.map((event) => event.event)).toContain("eval_performance_skipped");
+    const [row] = await admin<{ status: string; suspension_reason: string; suspension_run_id: string }[]>`
+      select status, suspension_reason, suspension_run_id from knowledge.retrieval_configurations where id = ${configurations.d}`;
+    expect(row).toMatchObject({ status: "suspended", suspension_reason: "hard_gate_failed" });
+    expect((await admin<{ n: number }[]>`select count(*)::int as n from knowledge.performance_measurements where measurement_id = ${performance.measurementId}`)[0]!.n).toBe(0);
+    // No ProductionEvidenceSet after the suspension (P3).
+    const set = await retrieve(advisorClient);
+    expect(set.retrieval.grade).toBe("development");
+    expect(set.retrieval.unmet).toContain("P3");
+    expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
+
+    // A replay of exactly the same files: nothing changes in the database; the alarm goes out again, marked.
+    alerts.length = 0;
+    expect(await publishFiles(h6, performance, written)).toMatchObject({ status: "published", classification: "hard_gate_regression" });
+    expect(logged.map((event) => event.event)).toContain("eval_publication_replayed");
+    expect(alerts[0]!.details).toMatchObject({ replayed: "true" });
+    const [counts] = await admin<{ runs: number; suspensions: number; audits: number }[]>`
+      select (select count(*)::int from knowledge.evaluation_runs where run_id = ${h6.runId}) as runs,
+             (select count(*)::int from knowledge.retrieval_configuration_transitions where configuration_id = ${configurations.d} and to_status = 'suspended') as suspensions,
+             (select count(*)::int from audit.audit_log where action = 'knowledge.evaluation_run.published' and entity_id = ${row!.suspension_run_id}) as audits`;
+    expect(counts).toEqual({ runs: 1, suspensions: 1, audits: 1 });
+  });
+
   it("history explains every decision with ids, checksums and fingerprints — never document text", async () => {
     const { data: runs, error } = await knowledge(adminClient).from("evaluation_runs").select("report_checksum, gate_set_checksum, configuration_fingerprint, tier, verdict").eq("configuration_id", configurations.a);
     expect(error).toBeNull();

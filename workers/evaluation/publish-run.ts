@@ -23,7 +23,10 @@ import { createAlert, type AlertSink } from "../../src/lib/observability/alerts.
  *     The requested mode is logged and shown beside it; it decides nothing.
  *   * A run the database refuses as invalid (H7, or H6 outside service) raises
  *     "evaluation_invalid"; any other refusal "publication_refused" — never silence, and never a
- *     baseline or a pass.
+ *     baseline or a pass. H6 in service (runtime ≠ declared) reaches the database, which
+ *     suspends the configuration (8B-I8 C4); its times are not recorded as the configuration's.
+ *   * Publishing the same files again is idempotent in the database (replayed): nothing is
+ *     registered, audited or suspended twice; the alarms are sent again, marked as a replay.
  */
 
 export interface PublishInput {
@@ -93,18 +96,23 @@ export async function publishEvaluation(input: PublishInput, sql: SqlClient, sin
   }
   const { event } = published;
   log({
-    event: "eval_published", run_id: input.report.runId, registered_id: published.runId, verdict: input.report.verdict,
+    event: event.replayed ? "eval_publication_replayed" : "eval_published", run_id: input.report.runId, registered_id: published.runId, verdict: input.report.verdict,
     classification: event.classification, requested_mode: requestedMode, requested_mode_matches: requestedModeMatches(event),
     configuration_status: event.configurationStatus, suspended: event.suspended,
   });
+  // The alarms first: a hard regression has already suspended the configuration, and its alarm
+  // must not depend on the measurement below. A replay sends them again (marked), never silence.
+  for (const alert of classificationAlerts(event)) await sink.send(alert);
 
   let performanceId: string | null = null;
-  if (input.performance) {
+  if (input.performance && !input.report.configuration.matches) {
+    // An H6 run did not run the declared configuration: its times do not measure it (8B-I8 C4).
+    log({ event: "eval_performance_skipped", run_id: input.report.runId, reason: "runtime_not_declared" });
+  } else if (input.performance) {
+    // Idempotent in the database: the same measurement again returns the registered one.
     const rows = await sql.unsafe("select knowledge.record_performance_measurement($1::text::jsonb) as id", [JSON.stringify(input.performance)]);
     performanceId = String(rows[0]?.id);
     log({ event: "eval_performance_recorded", run_id: input.report.runId, measurement_id: performanceId });
   }
-
-  for (const alert of classificationAlerts(event)) await sink.send(alert);
   return { status: "published", runId: published.runId, classification: event.classification, performanceId };
 }

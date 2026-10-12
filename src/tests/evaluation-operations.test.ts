@@ -13,6 +13,7 @@ import { checkFileSums, publishEvaluation } from "../../workers/evaluation/publi
 import type { Alert } from "@/lib/observability/alerts";
 
 import { FIXTURE_PERFORMANCE } from "./fixtures/evaluation-performance";
+import { fixtureMaterial } from "./fixtures/production-config";
 import { buildReport, GATES_V1, qualityRegressionReport } from "./fixtures/evaluation-report";
 
 /**
@@ -45,6 +46,7 @@ function runEvent(classification: RunClassification, requestedMode: EvaluationMo
     corpusChecksum: quality.corpus.checksumAfter,
     failedHardGates: classification === "hard_gate_regression" ? ["H1"] : [],
     failedQualityGates: classification === "quality_regression" ? ["Q1", "Q2", "Q3"] : [],
+    replayed: false,
     ...overrides,
   };
 }
@@ -137,7 +139,7 @@ describe("versioned output", () => {
 });
 
 describe("publication as evaluation_publisher", () => {
-  function fakeSql(options: { failWith?: { code: string; message?: string }; classification?: RunClassification } = {}) {
+  function fakeSql(options: { failWith?: { code: string; message?: string }; classification?: RunClassification; replayed?: boolean } = {}) {
     const calls: string[] = [];
     const parameters: unknown[][] = [];
     const sql: SqlClient = {
@@ -148,7 +150,7 @@ describe("publication as evaluation_publisher", () => {
         if (query.includes("register_evaluation_gate_set")) return [{ id: "g" }];
         if (query.includes("publish_evaluation_run")) {
           const requested = (params[1] ?? null) as EvaluationMode | null;
-          return [{ event: { ...runEvent(options.classification ?? "baseline", requested), id: "r" } }];
+          return [{ event: { ...runEvent(options.classification ?? "baseline", requested), id: "r", replayed: options.replayed ?? false } }];
         }
         return [{ id: "m" }];
       },
@@ -200,6 +202,29 @@ describe("publication as evaluation_publisher", () => {
       await publishEvaluation(input(buildReport(), mode), q.sql, sinkOf(warnings), () => {});
       expect(codes(warnings)).toEqual([["quality_regression", "warning"]]);
     }
+  });
+
+  it("H6 in service (runtime ≠ declared) reaches the database, which suspends; its times are not recorded (8B-I8 C4)", async () => {
+    const runtime = fixtureMaterial({ params: { ...fixtureMaterial().params, topK: 3 } });
+    const { sql, calls } = fakeSql({ classification: "hard_gate_regression" });
+    const alerts: Alert[] = [];
+    const logged: Record<string, unknown>[] = [];
+    const outcome = await publishEvaluation(input(buildReport({ runtime }), "regression"), sql, sinkOf(alerts), (event) => void logged.push(event));
+    expect(outcome).toMatchObject({ status: "published", classification: "hard_gate_regression", performanceId: null });
+    expect(calls).toEqual(["knowledge.register_evaluation_gate_set", "knowledge.publish_evaluation_run"]);
+    expect(codes(alerts)).toEqual([["hard_gate_regression", "critical"]]);
+    expect(logged.map((event) => event.event)).toContain("eval_performance_skipped");
+  });
+
+  it("a replay changes nothing in the database and is logged as one; the alarm is sent again, marked (8B-I8 C4)", async () => {
+    const { sql } = fakeSql({ classification: "hard_gate_regression", replayed: true });
+    const alerts: Alert[] = [];
+    const logged: Record<string, unknown>[] = [];
+    await publishEvaluation(input(buildReport(), "regression"), sql, sinkOf(alerts), (event) => void logged.push(event));
+    expect(logged.map((event) => event.event)).toContain("eval_publication_replayed");
+    expect(logged.map((event) => event.event)).not.toContain("eval_published");
+    expect(codes(alerts)).toEqual([["hard_gate_regression", "critical"]]);
+    expect(alerts[0]!.details).toMatchObject({ replayed: "true" });
   });
 
   it("an invalid run refused by the database is neither a baseline nor a pass — whatever was requested", async () => {

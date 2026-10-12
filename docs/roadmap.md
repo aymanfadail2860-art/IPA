@@ -15,10 +15,11 @@ ProductionEvidenceSet) er gennemført og godkendt og endeligt lukket med 8B-I6.1
 og pilot-scope) og 8B-I6.2 (stabil produktidentitet i pilot-scope), som begge er gennemført og
 godkendt. 8B-I7 (Evaluation Operations, Monitoring & Regression
 Guardrails) er gennemført og godkendt og lukket med 8B-I7.1 (kanonisk klassifikation).**
-Afslutningsauditten (2026-10-09, `docs/08b` §21.14) viser, at 8B **ikke** er fuldt implementeret
-og **ikke** afsluttet. Der er seks små kodehuller (C1–C6), og deployment, validering, compliance
-og indhold udestår. Hvert nyt deltrin kræver godkendelse. 8C — Copilot
-klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
+Afslutningsauditten (2026-10-09, `docs/08b` §21.14) fandt kodehullerne C1–C7. C7 blev fundet ved
+starten af I8. **8B-I8 (Final Implementation Closure, B-034) har lukket dem: 8B IMPLEMENTATION
+COMPLETE — PHASE NOT YET COMPLETE** (`docs/08b` §21.15). I8 afventer din godkendelse. 8B er
+**ikke** afsluttet: deployment, validering med de rigtige udbydere, compliance og indhold udestår.
+8C — Copilot klar til brug er ikke påbegyndt. Masterfase 9–21 er ikke påbegyndt.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på
@@ -52,7 +53,7 @@ kompleksitet kræver det. Uden eksplicit godkendelse må ingen:
 | 7 | Knowledge Engine | 🔒 Gennemført og låst | `docs/07-knowledge-engine.md` |
 | 8 | AI Copilot | 🔨 I gang — se underfaserne | — |
 | 8A | AI Gateway | 🔒 Gennemført og låst | `docs/08-ai-gateway.md` |
-| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført og godkendt. Ikke afsluttet: kodehuller C1–C6 og eksterne forudsætninger (§21.14) | `docs/08b-production-foundation.md` |
+| 8B | Produktionsgrundlag | 🔨 Specifikation låst (B-020). 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført og godkendt. 8B-I8 har lukket kodehullerne C1–C7 (implementation complete, afventer godkendelse). Ikke afsluttet: eksterne forudsætninger (§21.15) | `docs/08b-production-foundation.md` |
 | 8C | Copilot klar til brug | ⬜ Ikke påbegyndt | — |
 | 9 | Learn | ⬜ Ikke påbegyndt | — |
 | 10 | Practice | ⬜ Ikke påbegyndt | — |
@@ -486,18 +487,32 @@ godkendelse.
   klassificerer en registreret kørsel (baseline, regression, hård regression, kvalitetsregression),
   og alarmen følger klassifikationen. CI-jobbets mode er kun diagnostik. Detaljer i `docs/08b`
   §21.13.
-- **Udestående før 8B kan afsluttes (afslutningsauditten 2026-10-09, `docs/08b` §21.14):**
-  - Kode:
-    - C1: appens Vercel-OIDC-credentials til Bedrock;
-    - C2: en menneskelig betjeningsvej til godkendelserne;
-    - C3: udbyderens fejltype i loglinjerne (429-rate);
-    - C4: H6 i regression ved runtime-afvigelse, som kræver din beslutning;
-    - C5: CI for lint, typecheck, test, build og evalueringssættet;
-    - C6: kontrolsættet af embedding-vektorer.
-  - Deployment: AWS-konti og -ressourcer, Supabase-projekter til evaluering og pilot/produktion,
-    ClamAV 1.4.6, worker og `worker-storage`.
-  - Validering: kontrakttest mod Bedrock, baseline, performance-målinger, alarmer og et udstedt
-    ProductionEvidenceSet.
+- **8B-I8 — Final Implementation Closure: ✅ implementeret 2026-10-12 (B-034), afventer din
+  godkendelse.** Kodehullerne fra afslutningsauditten er lukket:
+  - C7: ingestion-workeren bygger production-embedderen gennem kataloget, med ECS-taskrollen;
+  - C1: appens AWS-credentials via Vercel OIDC → STS, og én credential-vej pr. runtime;
+  - C2: Drift af retrieval i Admin over de eksisterende livscyklusfunktioner;
+  - C3: udbyderens fejltype, 429 og timeout pr. kald, og en versioneret alarmspecifikation;
+  - C4: H6 i drift suspenderer gennem den rigtige publiceringsvej, og publiceringen er idempotent;
+  - C5: et CI-workflow med lint, typecheck, test, build, evalueringsdata, en frisk database,
+    pgTAP og integration;
+  - C6: kontrolsættet af embedding-vektorer ved workerens start og dagligt og i evalueringen.
+
+  Detaljer i `docs/08b` §21.15.
+- **Udestående før 8B kan afsluttes (eksterne forudsætninger, `docs/08b` §21.15):**
+  - Deployment:
+    - AWS-konti og -ressourcer;
+    - OIDC for GitHub og Vercel;
+    - Supabase-projekter til evaluering og pilot/produktion;
+    - ClamAV 1.4.6, worker og `worker-storage`;
+    - Embed v4-modelrækken med en migration ved indførelsen;
+    - branch protection på `main`.
+  - Validering:
+    - kontrakttest mod Bedrock;
+    - baseline og performance-målinger;
+    - kontrolsættets reference (VALIDATION PENDING);
+    - alarmer;
+    - en aktiv konfiguration og et udstedt ProductionEvidenceSet.
   - Compliance: Å-2 (databehandleraftaler) og Å-6 (licens).
   - Indhold: pilotsættet `terms-v1`, Å-3 og Å-4.
   - Afgørelse: Å-5 (modtager af alarmer).

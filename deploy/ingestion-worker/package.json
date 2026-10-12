@@ -7,6 +7,8 @@
     "node": ">=22.18"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "3.1146.0",
+    "@smithy/credential-provider-imds": "4.5.2",
     "pdfjs-dist": "6.3.289",
     "postgres": "3.4.9"
   }

@@ -102,6 +102,10 @@
           "value": "300000"
         },
         {
+          "name": "IPA_CONTROL_CHECK_INTERVAL_MS",
+          "value": "86400000"
+        },
+        {
           "name": "IPA_ALERT_SINK",
           "value": "log"
         },

@@ -147,6 +147,9 @@ describe.skipIf(!configured)("Knowledge administration in the running app", () =
     const page = await get("/admin/settings", "admin");
     expect(page.body).toContain("Embedding");
     expect(page.body).toContain("test:test-hash-embedder@1");
+    // 8B-I8 C2: the human decisions of the 8B lifecycle, for system.settings.manage only.
+    expect(page.body).toContain("Drift af retrieval");
+    expect(page.body).not.toContain("Driftsoplysningerne kunne ikke læses fra databasen.");
   });
 
   it("answers an unknown document or version as not found", async () => {

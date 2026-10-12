@@ -35,6 +35,7 @@ export const ALERT_CATALOGUE = {
   publication_refused: { severity: "warning", summary: "En evalueringsrapport blev afvist ved publiceringen." },
   retrieval_unavailable: { severity: "critical", summary: "Retrieval er utilgængelig (systemfejl, ikke et tomt resultat)." },
   configuration_mismatch: { severity: "critical", summary: "Runtime-fingeraftrykket svarer ikke til den aktive konfiguration. Evidensen er development." },
+  embedding_model_changed: { severity: "critical", summary: "Embedding-modellen svarer ikke længere som den godkendte reference (kontrolsættet). Workeren embedder ikke med modellen, før en ny version er registreret og evalueret." },
 } as const satisfies Record<string, { severity: AlertSeverity; summary: string }>;
 
 export type AlertCode = keyof typeof ALERT_CATALOGUE;

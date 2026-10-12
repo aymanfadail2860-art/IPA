@@ -1,4 +1,5 @@
 import { syntheticText } from "../../src/lib/egress/synthetic.ts";
+import { withControlDriftMarker } from "../../src/lib/knowledge/core/control-set.ts";
 import type { EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
 import { retrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
@@ -43,6 +44,11 @@ export interface DatabaseRetrievalOptions {
   now?: () => Date;
   /** Step timings of the main run (not the Q7 baseline). */
   observe?: RetrievalObserver;
+  /**
+   * The embedding model failed the control check (8B-I8 C6): the runtime reports a marked model
+   * version, so the runtime fingerprint differs from the declared one (H6).
+   */
+  controlDrift?: boolean;
 }
 
 /** Captures what the SQL functions returned (H2) without changing it. */
@@ -80,7 +86,7 @@ export function createDatabaseRetrieval(options: DatabaseRetrievalOptions): Retr
 
   function configuration(reranker: RerankingProvider): ConfigurationInput {
     return retrievalFingerprintMaterial({
-      embedding: options.embedder.descriptor,
+      embedding: options.controlDrift ? withControlDriftMarker(options.embedder.descriptor) : options.embedder.descriptor,
       reranker: reranker.descriptor,
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...config },

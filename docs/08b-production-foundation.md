@@ -1208,8 +1208,9 @@ produktionsbrug:**
 ## 21. Implementeringsstatus
 
 Specifikationen ovenfor er låst (B-020). Afsnittet her registrerer, hvad der er implementeret.
-8B implementeres i deltrin, og hvert deltrin kræver din godkendelse. **8B er ikke fuldt
-implementeret, og fasen er ikke afsluttet.** Status efter afslutningsauditten står i §21.14.
+8B implementeres i deltrin, og hvert deltrin kræver din godkendelse. **Status efter 8B-I8: 8B
+IMPLEMENTATION COMPLETE — PHASE NOT YET COMPLETE.** Kodehullerne fra afslutningsauditten (§21.14)
+er lukket. Fasen afsluttes først, når de eksterne forudsætninger i §21.15 er opfyldt.
 
 | Deltrin | Indhold | Status |
 |---------|---------|--------|
@@ -1226,7 +1227,8 @@ implementeret, og fasen er ikke afsluttet.** Status efter afslutningsauditten st
 | **8B-I6.2** | Stabil produktidentitet i pilot-scope: produkt-id og dokumenttype, navnet som historisk øjebliksbillede (§21.11) | ✅ Gennemført og godkendt 2026-10-07 (B-031). 8B-I6 er hermed endeligt lukket |
 | **8B-I7** | Evaluation Operations, Monitoring & Regression Guardrails: evalueringsmiljø, provisionering, publicering som særskilt trin, regressionsaudit og -alarmer, AlertSink, sundhedskontrol, Systemstatus og performance-målinger (§21.10, §21.12) | ✅ Gennemført og godkendt 2026-10-09 (B-032, B-033). Lukket med I7.1 |
 | **8B-I7.1** | Kanonisk klassifikation: databasen klassificerer en registreret kørsel; CI-jobbets mode er kun diagnostik (§21.13) | ✅ Gennemført 2026-10-09 (B-033) |
-| Øvrige | Kodehullerne C1–C6, baseline med et rigtigt pilotsæt, aktivering i et miljø med de rigtige udbydere (§21.14) | Ikke påbegyndt |
+| **8B-I8** | Final Implementation Closure: kodehullerne C1–C7 (production-embedder i workeren, credentials pr. runtime, Drift af retrieval i Admin, udbyderens fejltype i loglinjer, H6 i drift suspenderer, CI og kontrolsættet) (§21.15) | ✅ Implementeret 2026-10-12 (B-034). Afventer din godkendelse |
+| Øvrige | Deployment, baseline med et rigtigt pilotsæt, validering med de rigtige udbydere, compliance og indhold (§21.15) | Eksterne forudsætninger |
 
 ### 21.1 8B-I1 — Evalueringsframework og gates
 
@@ -2844,7 +2846,12 @@ i I7.
 
 **Kørsel mod den lokale database:** hele kæden med provisionering, de rigtige SQL-funktioner, RLS
 og evalueringsbrugere. H1–H5 og H7 består. H6 fejler som forventet, fordi de lokale udbydere er
-udviklingsimplementeringer. Rigtige tal kræver evalueringsmiljøet med Bedrock.
+udviklingsimplementeringer.
+
+**Rettelse (8B-I8, C7):** I7 er kun verificeret med test-embedderen. Workeren kunne på det
+tidspunkt ikke bygge production-embedderen (Embed v4), så evalueringsvejen med rigtige
+production-udbydere fungerede ikke: provisioneringen kunne ikke få korpusset embedded. Det
+rettes i I8 (§21.15, C7). Først derefter kan evalueringsmiljøet køre med Bedrock.
 
 **Tests:**
 
@@ -2930,10 +2937,15 @@ Først derefter kan baselinen med et rigtigt pilotsæt og de rigtige performance
 
 ### 21.14 Status efter afslutningsauditten (2026-10-09)
 
+> **Opdatering (8B-I8, B-034):** kodehullerne C1–C7 er lukket. Status og de eksterne forudsætninger
+> står i §21.15. Tabellen nedenfor er auditten, som den blev skrevet.
+
 **Status: implementeringen er ikke fuldt gennemført, og fasen er ikke afsluttet.** Det skyldes et
-lille antal afgrænsede kodehuller (C1–C6) og forudsætninger, der kræver deployment, validering,
+lille antal afgrænsede kodehuller (C1–C7) og forudsætninger, der kræver deployment, validering,
 compliance og indhold. Ingen af hullerne svækker en sikkerhedsgrænse i den nuværende kode.
-Exit-kriterierne i §17 er ikke opfyldt. Auditten tilføjede ingen funktionalitet.
+Exit-kriterierne i §17 er ikke opfyldt. Auditten tilføjede ingen funktionalitet. C7 blev fundet
+efter auditten, da I8 begyndte, og føjet til listen (godkendt 2026-10-09). Hullerne lukkes i
+8B-I8 (§21.15).
 
 **Kode, der mangler (C):**
 
@@ -2945,6 +2957,7 @@ Exit-kriterierne i §17 er ikke opfyldt. Auditten tilføjede ingen funktionalite
 | C4 | H6 i en regression, hvor runtime ikke er den erklærede konfiguration: publiceringens lokale verifikation afviser rapporten, før databasen kan suspendere. §4.4 siger "suspenderes automatisk". Production beskyttes fortsat af P4. Kræver din beslutning | §4.4 (H6), D-8 | Ingen exit direkte; en afvigelse fra specifikationen |
 | C5 | Ingen CI-workflow kører lint, typecheck, test, build og valideringen af evalueringssættet ved ændringer | D-16 ("med CI-kontrol"), §17 pkt. 1 | Exit 1 bevises kun lokalt |
 | C6 | Kontrolsættet af embedding-vektorer ved workerens start og dagligt, mod at udbyderen skifter modellen bag samme id | §2.5, §15 | Ingen exit direkte; et udestående trusselsmodtiltag |
+| C7 | Ingestion-workeren kan ikke bygge production-embedderen. Den henter embeddere fra udviklingsregistret, som kun kender test-embedderen. Så snart Embed v4 er registreret, stopper workeren ved start (fail-closed), og intet dokument kan få production-embeddings, heller ikke i evalueringsmiljøet | §2, §6, D-10 | Exit 3, 4 og 6; forudsætning for C1 (workerens credentials) og C6 |
 
 **Forudsætninger uden for repoet:**
 - *Deployment:* AWS-konti (produktion og evaluering) med:
@@ -2970,3 +2983,466 @@ Exit-kriterierne i §17 er ikke opfyldt. Auditten tilføjede ingen funktionalite
   - vedligeholder (Å-3);
   - retningslinjer for fiktive dokumenter og kalibreringsprocedure (Å-4).
 - *Afgørelse:* modtager og tjeneste for alarmer (Å-5).
+
+### 21.15 8B-I8 — Final Implementation Closure
+
+8B-I8 lukker kodehullerne C1–C7 fra afslutningsauditten (§21.14). C7 blev fundet, da I8 begyndte,
+og lukkes først, fordi resten af production- og evalueringsvejen afhænger af det. I8 tilføjer
+ingen 8C-funktionalitet. Beslutningen er B-034.
+
+**Status: 8B IMPLEMENTATION COMPLETE — PHASE NOT YET COMPLETE.** Koden har ingen kendte huller.
+Fasen afsluttes først, når de eksterne forudsætninger sidst i dette afsnit er opfyldt.
+
+#### C7 — Production-embedderen i ingestion-workeren
+
+**Én vej fra model til embedder i alle runtimes** (`src/lib/knowledge/providers/runtime.ts`):
+
+```
+embedding-modellens række (knowledge.embedding_models)
+  → production-kataloget (findEmbeddingDescriptor)
+  → runtimens provider-transport (Bedrock med runtimens ene credential-vej)
+  → embedder
+```
+
+- Registret afgør fortsat, hvilke modeller der er aktive eller kandidater. Workeren har ingen
+  egen modeltilstand og ingen modelkonfiguration: den udfører den model, registret har
+  autoriseret.
+- En model i production-kataloget får sin production-adapter (i dag Cohere Embed v4,
+  `aws-bedrock:cohere.embed-v4:0@eu-1024-v1`, 1024 dimensioner). En ny godkendt model tilføjes i
+  kataloget, ikke i pipelinen.
+- Alle andre modeller går til udviklingsregistret, som kun bygger test-embedderen, og kun lokalt
+  og i test.
+- **Intet fallback.** Workeren stopper ved start (`worker_startup_failed`), hvis en aktiv eller
+  kandidat-model:
+  - har en ukendt udbyder;
+  - er fra en production-udbyder, men med ukendt model, version eller dimension;
+  - er en udviklingsmodel i produktion;
+  - ikke kan konstrueres (fx fordi runtimens credentials mangler).
+
+  Den vælger aldrig test-embedderen, en anden model eller en udviklingsudbyder og fortsætter
+  aldrig uden embeddings.
+- **Startkontrollen** (`checkEmbeddingModels`) bygger embedderen for hver model og kontrollerer
+  dimensionerne, før job-løkken starter. Den laver intet netværkskald.
+- **Egress:** dokumenter embeddes som `search_document` under I2.5's grænse. Chunks bærer
+  klassifikationen `knowledge`, og transporten afviser alt, politikken ikke har autoriseret
+  (`embed_document`).
+
+**Udbydervej og credentials pr. runtime** (`src/lib/knowledge/providers/aws-credentials.ts`):
+
+| Runtime | Udbydervej | Credentials | Modul |
+|---|---|---|---|
+| App og server-retrieval (Vercel) | Den aktive konfigurations model → kataloget → Bedrock | Vercel OIDC → AWS STS (AssumeRoleWithWebIdentity) → kortlivede credentials (C1) | `credentials-vercel.ts`, kun importeret af `configured.ts` |
+| Ingestion-worker (ECS/Fargate, produktion og evalueringsmiljøet) | Aktive og kandidat-modeller → kataloget → Bedrock | ECS-taskrollen via containerens credential-endpoint (`fromContainerMetadata`) | `credentials-container.ts`, kun importeret af `workers/ingestion/providers.ts` |
+| Evalueringskørslen (GitHub Actions, jobbet `evaluate`) | Konfigurationens model → kataloget → Bedrock | GitHub OIDC → `configure-aws-credentials` → midlertidige credentials med session-token i jobbets miljø | `credentials-environment.ts`, kun importeret af `evals/engine/cli.ts` |
+| Publiceringen (jobbet `evaluation-publication`) | Ingen udbyder | GitHub OIDC → rollen `ipa-evaluation-publisher` → publisher-secretten (uændret fra I7) | `workers/evaluation/publish.ts` |
+| Lokalt og test | Test-embedder eller fake transport | SDK'ens standardkæde (kun lokalt) eller ingen | — |
+
+- Ingen production-vej bruger statiske nøgler. Workeren afviser at starte, og appens retrieval
+  er utilgængelig, hvis miljøet har `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`,
+  `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE` eller
+  `AWS_ROLE_ARN` i miljøet. Evalueringsjobbet kræver netop de midlertidige værdier, som OIDC-trinnet
+  sætter, inklusive session-token, og afviser de implicitte kilder.
+- Hver runtime får kun sin egen credential-kilde. Uden den fejler planen lukket, og
+  fejlbeskederne nævner variabelnavne, aldrig værdier.
+- Workerens taskrolle har uændret kun `bedrock:InvokeModel` på Embed v4 via EU-inferensprofilen
+  (`eu.cohere.embed-v4:0` i `eu-central-1`). ClamAV har stadig ingen taskrolle.
+- Workerens image indeholder nu `src/lib/knowledge/providers/` og dependencies
+  `@aws-sdk/client-bedrock-runtime` og `@smithy/credential-provider-imds`, i samme versioner som
+  rodens lockfil. Vercels og evalueringens credential-moduler, appens `configured.ts` og den falske
+  transport fjernes fra imaget.
+
+**Evalueringsvejen:**
+- Provisioneringen sikrer nu, at korpusset er embedded med hver model, kørslen bruger. Mangler
+  dækningen for en ny model, beder den om re-embedding (`request_reembedding`) og venter på
+  workeren. Docstringen lovede det før, men koden gjorde det ikke.
+- CLI'en bygger Embed v4 gennem samme `createRuntimeEmbedder`. Q7-baselinen uden reranker kommer
+  fra `createEvaluationBaselineReranker`, som kun evalueringens CLI må kalde (guardrail). Før
+  afviste `createReranker("none")` den i CI's production-runtime, så kørslen med rigtige
+  udbydere ville stoppe.
+- Konfigurationen `bedrock-embed-v4-eu-1024-rerank-3-5-structure-1` erklærer workerens chunker
+  (`structure/1`) og er standard for `--adapter evaluation`. Den gamle Bedrock-konfiguration
+  erklærede fixture-chunkeren, så runtime aldrig kunne matche den erklærede konfiguration i
+  evalueringsmiljøet (H6).
+- I automatiske tests kører workeren med den falske Bedrock-transport
+  (`workers/ingestion/dev-fake-bedrock.ts`, `IPA_DEV_FAKE_BEDROCK=1`): de rigtige adaptere, den
+  rigtige egress-autorisation og dimensionskontrol, men feature-hashing i stedet for netværket.
+  Den afvises i produktion og findes ikke i imaget. Dens vektorer er aldrig production-evidens.
+  Rigtig Bedrock bruges først ved den eksterne validering.
+
+**Tests (C7):**
+
+| Lag | Hvad |
+|---|---|
+| Enhed | `worker-production-embedder` (16): workeren starter med Embed v4 og fake transport; et dokument embeddes med `search_document`, 1024 dimensioner og egress `knowledge`/`embed_document`; ECS bruger containerens credential-provider, og Bedrock-klienten får præcis den; statiske, midlertidige, profil-, fil- og web-identity-credentials afvises; manglende endpoint eller kilde fejler lukket; fejl lækker ingen værdier; lokal/test er uændret; ukendt udbyder, model, version eller dimension, udviklingsmodel i produktion og en runtime, der ikke kan bygges, stopper starten; intet fallback til test-embedderen; den falske transport afvises i produktion; guardrail: hver model i production-kataloget kan bygges i appen, workeren og evalueringen med hver runtimes credential-vej; taskrollen dækker præcis adapterens inferensprofil, og ClamAV har ingen taskrolle |
+| Integration | `evaluation-operations`: provisionering med Embed v4 gennem workeren (fake transport), hvert chunk har en 1024-dimensioneret Embed v4-embedding, og samme model bruges af retrieval og evaluering med samme fingeraftryk (H1–H7 består) |
+| Guardrails | Hver credential-kilde importeres kun af sin runtime; workerens importgraf og image (moduler, dependencies, versioner mod rodens lockfil); main bygger kun embeddere gennem den fælles vej; kun evalueringens CLI kalder Q7-baselinen; den erklærede chunker matcher workerens |
+
+#### C1 — Appens AWS-credentials på Vercel
+
+**Vej:** Vercels OIDC-token → udveksling til audience `sts.amazonaws.com` → AWS STS
+`AssumeRoleWithWebIdentity` i `eu-central-1` → kortlivede credentials → Bedrock-klienten.
+
+- Implementeret med Vercels officielle `@vercel/oidc-aws-credentials-provider` (3.3.8, én ny
+  dependency i appen). Den bruges kun i `credentials-vercel.ts`, som kun importeres af
+  `providers/configured.ts` (server).
+- Konfiguration, ikke hemmeligheder: `IPA_AWS_ROLE_ARN` (skal være en IAM-rolle-ARN) og eventuelt
+  `IPA_AWS_OIDC_AUDIENCE` (standard `sts.amazonaws.com`, hvis trust-politikken kræver en anden).
+  STS-regionen er sat eksplicit i koden.
+- **Fail-closed:** appens retrieval er utilgængelig, når:
+  - production kører uden for Vercel (`VERCEL` er ikke `1`);
+  - rollen mangler eller ikke er en rolle-ARN;
+  - Vercel-kilden ikke er koblet på;
+  - miljøet har statiske eller implicitte AWS-credentials (nøgler, session-token, profil,
+    credential- eller config-fil, web-identity-fil, `AWS_ROLE_ARN`).
+
+  Der er intet fallback til SDK'ens standardkæde i produktion. Lokalt og i test bruges
+  standardkæden eller den falske transport.
+- Credentials forlader aldrig serveren:
+  - ingen klientkomponent når udbyder-, credential- eller Bedrock-koden (importgraf-guardrail);
+  - ingen `NEXT_PUBLIC_`-variabel bærer AWS-konfiguration;
+  - planen logger intet;
+  - fejl nævner variabelnavne, aldrig værdier.
+- Deployment-specifikation i `deploy/application/`:
+  - trust-politikken tillader kun projektets production-miljø med audience `sts.amazonaws.com`;
+  - politikken giver kun `bedrock:InvokeModel` på Embed v4 via EU-inferensprofilen og på
+    Rerank 3.5 i `eu-central-1`.
+
+  At Vercels token-udveksling og trust-politikken passer sammen, verificeres ved første
+  deployment [AFKLARES].
+
+**Tests (C1):** `application-aws-credentials` (18):
+- Vercel bruger OIDC-provideren med rolle, audience, sessionsnavn og STS-region, og en anden
+  audience kun via konfiguration.
+- Bedrock-klienten får præcis den provider, og konstruktionen laver intet netværkskald.
+- Manglende eller forkert rolle, production uden for Vercel og en manglende kilde fejler lukket.
+- Otte slags statiske eller implicitte credentials afvises, og fejl lækker ingen værdier.
+- Retrieval bliver utilgængelig i stedet for at falde tilbage.
+- Lokal/test, ECS-workeren og evalueringsjobbet er uberørte.
+- Importgrafen fra alle klientkomponenter er fri for credential-kode, og kun `configured.ts`
+  importerer Vercel-kilden.
+- Planen logger intet, og IAM-politikkerne er låst til kataloget.
+
+#### C2 — Menneskelig betjeningsvej i Admin
+
+Afsnittet **Drift af retrieval** under Admin → Systemindstillinger samler livscyklussens
+menneskelige beslutninger. Det er bevidst minimalt; fase 14 (Admin) ejer den færdige skærm.
+
+| Handling | Databasefunktion (uændret) | Begrundelse |
+|---|---|---|
+| Godkend gate-sæt | `approve_evaluation_gate_set` | — |
+| Acceptér statistisk usikkerhed i en pilot-kørsel | `accept_evaluation_uncertainty` | Mindst 20 tegn |
+| Godkend konfiguration på en registreret kørsel | `approve_retrieval_configuration` | Én årsagsnote pr. fejl i rapporten, mindst 10 tegn |
+| Aktivér godkendt konfiguration (skifter model i samme transaktion) | `activate_retrieval_configuration` | — |
+| Suspendér konfigurationen i drift | `suspend_retrieval_configuration` | Mindst 10 tegn |
+| Udfas en kandidat, godkendt eller suspenderet konfiguration | `retire_retrieval_configuration` | Mindst 10 tegn |
+| Godkend performance-afvigelser | `accept_performance_deviation` | Mindst 20 tegn |
+| Start re-embedding med en kandidatmodel | `request_reembedding` | — |
+
+- **Kun eksisterende funktioner.** Der er ingen ny migration, ingen direkte tabelskrivning og
+  ingen ændring af RLS eller rettigheder. Server-actions (`operations-actions.ts`) kalder
+  funktionerne som den indloggede bruger.
+- **Dobbelt kontrol.** Hver handling kræver `system.settings.manage` i appen og igen i databasen
+  (`require_settings_manager`). Databasen efterprøver alle invarianter og skriver audit.
+- **Bekræftelse.** Hver handling kræver en eksplicit bekræftelse i en dialog, og server-actionen
+  afviser et kald uden. Hvor funktionen kræver en begrundelse, kræver dialogen og server-actionen
+  samme minimum. Databasens afvisning vises for brugeren.
+- **Ingen publisher-funktion.** Kørsler, gate-sæt og målinger registreres kun af
+  `evaluation_publisher` i CI. Ingen applikationskode kan nå de funktioner (guardrail), så en
+  administrator kan ikke fabrikere et evalueringsresultat. Admin viser resultaterne og beslutter
+  på dem.
+- **Modellen.** En separat aktivering af embedding-modellen er ikke nødvendig, fordi modellen
+  skiftes ved aktiveringen af konfigurationen (§2.5, §10.2). Kandidatmodellens række og dens
+  partielle HNSW-indeks oprettes med en migration, når modellen indføres i et miljø (§21.2). Det
+  er en deployment-forudsætning. Når rækken findes, startes re-embedding herfra.
+
+**Tests (C2):**
+- `retrieval-operations` (18):
+  - hver handling kalder præcis sin funktion i `knowledge` med de rigtige argumenter og ingen
+    tabel;
+  - afvisning uden rettighed, i demoen, uden bekræftelse, med for kort eller for lang begrundelse
+    og med et id, der ikke er et uuid;
+  - databasens afvisning når frem til brugeren, og intern fejltekst gør ikke;
+  - guardrails: kun livscyklusfunktionerne og ingen publisher-funktion i applikationskoden;
+  - visningen og de handlinger, en status tillader.
+- Integration: `knowledge-admin-routes` viser afsnittet for administratoren. Funktionerne selv er
+  dækket af pgTAP og integrationstestene fra I6, I6.1 og I7.
+
+#### C3 — Udbyderens fejltype i loglinjerne
+
+- **`provider_call`** (`providers/provider-metrics.ts`): én linje pr. kald til udbyderen, også
+  hvert genforsøg. En 429, som et genforsøg senere klarer, tæller derfor med. Felterne er:
+  - `runtime`, `provider`, `operation`, `model`;
+  - `outcome` og `duration_ms`;
+  - fejlfelterne `provider_error_kind`, `throttled`, `timeout`, `retryable`, `http_status` og
+    `error_class`;
+  - `correlation_id` (egress-autorisationen);
+  - i appen også `request_id`, `configuration_id` og `configuration_fingerprint`.
+
+  Et forsøg, som genforsøgspolitikken afbryder, logges som timeout. Linjen bygges af en
+  dekoratør om transporten, som sender det allerede autoriserede kald uændret videre
+  (guardrail). Logning kan aldrig få et kald til at fejle.
+- **`retrieval`** har nu `request_id` og, hvis et trin fejlede hos udbyderen, `provider_errors`
+  med trin, fejltype, throttled, timeout, HTTP-status og antal forsøg.
+- **Workerens fejllinje** (`job_step` med `outcome`) har nu altid `step` og `ms`. Ved udbyderfejl
+  har den også `provider`, `operation`, `provider_error_kind`, `throttled`, `timeout`,
+  `http_status` og `attempts`.
+- `ProviderError` har fået `httpStatus`. Klassifikationen gemmer status og navn, aldrig
+  udbyderens fejltekst, og genforsøgspolitikken bevarer begge.
+- **Aldrig i en linje:** udbyderens fejltekst, forespørgslen, dokumenttekst eller credentials.
+- **Alarmspecifikationen** er versioneret i `deploy/monitoring/aggregate-alarms.json` (version 1)
+  og forklaret i `aggregate-alarms.md` med de faktiske feltnavne:
+  - A6 (429-rate) kan nu bygges, og A2 måles pr. udbyderkald;
+  - udbyderens fejlrate og timeout-raten kan beregnes, men har ingen alarm, fordi §14 ikke
+    fastsætter en tærskel for dem;
+  - B-033's regel (version 1, godkendt): rate- og p95-alarmer vurderes kun med mindst 20
+    relevante forsøg i vinduet (`minimumSamples`); enkelthændelser er undtaget
+    (`singleEventAlarms`).
+
+**Tests (C3):**
+- `provider-metrics` (11):
+  - to throttlede forsøg og et vellykket giver tre linjer og en 429-rate på 2/3;
+  - en timeout med appens labels;
+  - ingen udbydertekst, forespørgsel eller dokumenttekst i linjerne;
+  - kaldet sendes uændret videre, og en fejlende log stopper ikke kaldet;
+  - HTTP-status overlever klassifikation og genforsøg;
+  - `provider_errors` i retrieval-linjen, og ingen ved andre fejl;
+  - workerens fejllinje med trin, varighed og fejltype;
+  - specifikationen bruger felter, som koden faktisk skriver, og markdown og JSON stemmer
+    overens.
+- Egress-guardrailen tillader dekoratøren, men kun som uændret videresendelse.
+
+#### C4 — H6 i regression suspenderer sikkert
+
+§4.4 siger, at en kørsel, hvis runtime ikke er den erklærede konfiguration (H6), suspenderer
+konfigurationen i drift automatisk. Indtil I8 afviste publiceringstrinnet sådan en rapport
+lokalt, så databasen aldrig så den. Migrationen `20261009000200_h6_regression_and_replay.sql`
+og publiceringstrinnet retter det.
+
+**Vejen:** evalueringsmotoren → verificeret rapport → publiceringstrinnet (`evaluation_publisher`)
+→ `publish_evaluation_run` → `record_evaluation_run`. Databasen genberegner alt igen og
+suspenderer atomisk, med audit og en kritisk alarm.
+
+- **Kun `evaluation_publisher` kan indsende.** Rettigheder og publisher-API er uændrede, og en
+  administrator kan ikke kalde funktionerne (pgTAP).
+- **H6 skal kunne bevises af rapporten:**
+  - Et H6-brud på kørselsniveau findes netop, når de fingeraftryk, databasen selv genberegner fra
+    materialet, afviger.
+  - Et påstået brud uden afvigelse (forfalsket H6) og en afvigelse uden brud (skjult H6) afvises
+    med `h6_evidence`.
+  - Gate-status genberegnes altid fra bruddene, så en kalders boolean afgør aldrig noget.
+  - H6-brud pr. spørgsmål (udviklingsimplementering, anden model eller reranker, chunker-version)
+    er motorens observationer, bundet af checksums og talt igen af databasen ligesom H1–H5.
+- **Målet er den erklærede konfiguration, og kun hvis den er i drift.** En H6-rapport om en
+  kandidat afvises som ugyldig (`invalid_run`), så en rapport om B aldrig kan suspendere A.
+- **H7** afvises stadig som ugyldig med alarmen `evaluation_invalid`, uden suspendering.
+- **Ændrede filer eller checksums** afvises, før noget sendes, og igen i databasen.
+- **Publiceringstrinnet** sender en konsistent H6-rapport videre: netop ét brud på kørselsniveau,
+  ugyldig og ikke bestået. Databasen afgør resten. H6-kørslens performance-måling registreres
+  ikke, fordi tiderne ikke måler konfigurationen. Databasen afviser den også. Alarmerne sendes
+  før målingen.
+- **Idempotent gentagelse:** præcis samme rapport igen giver den registrerede kørsels hændelse
+  med `replayed: true` og ingen ny kørsel, audit eller suspendering. Alarmen sendes igen og er
+  markeret som gentagelse, så den aldrig går tabt. En anden rapport med samme kørsels-id afvises
+  (`duplicate`). Samme performance-måling igen giver den registrerede.
+- **P3 og P4 beskytter fortsat.** Efter suspenderingen udstedes ingen ProductionEvidenceSet.
+
+**Tests (C4):**
+- pgTAP `retrieval_configuration_registry` (219, før 202):
+  - aktiv konfiguration med rigtigt H6 suspenderes, og suspenderingen peger på kørslen;
+  - forfalsket og skjult H6, ændret checksum, H6 om B og H7 i drift efterlader ingen kørsel, og
+    konfigurationen forbliver aktiv;
+  - efter suspenderingen er der ingen production-evidens;
+  - gentagelse er idempotent, og et andet indhold med samme kørsels-id afvises;
+  - måling fra en H6-kørsel afvises, og samme måling to gange giver én række.
+- Enhed:
+  - `evaluation-publisher`: konsistent H6 kan publiceres, men skjult H6, forkert `matches` og
+    forfalsket H6 afvises lokalt;
+  - `evaluation-operations`: H6 i drift giver kritisk alarm uden måling, og en gentagelse logges
+    og markeres.
+- Integration `retrieval-configuration` (16): hele vejen over publisherens forbindelse:
+  - forfalsket H6 afvises lokalt og i databasen;
+  - H6 for en kandidat er ugyldig, og D forbliver aktiv;
+  - rigtigt H6 for D suspenderer med kritisk alarm, og målingen springes over;
+  - retrieval giver derefter development (P3);
+  - gentagelse ændrer intet i databasen.
+
+#### C6 — Kontrolsættet af embedding-vektorer
+
+**Sættet** (`src/lib/knowledge/core/control-set.ts`, version 1, checksum fastlåst i en test):
+- otte fiktive danske forsikringstekster: tre forespørgsler og fem dokumentpassager;
+- tre relationer: en forespørgsel ligger nærmere sin relaterede passage end en klart anden.
+
+Teksterne er de eneste, modulet klassificerer som syntetiske (`evaluation_synthetic`). Modulet
+tager ingen tekst fra en kalder (guardrail).
+
+**Reference** (`ControlReference`):
+- er bundet til kontrolsættet (id, version og checksum), udbyder, model, versionsetiket,
+  dimension og indstillinger (inklusive input-typerne);
+- er bundet til embedding-delen af konfigurationens fingeraftryksmateriale;
+- indeholder vektorerne, de kalibrerede tolerancer, hvordan referencen blev optaget
+  (runtime og credential-vej) og godkendelsen.
+
+**Kun en godkendt, kalibreret optagelse med en rigtig udbyder** kan være production-reference
+(`productionReferenceProblems`). Afvist er:
+- en kladde (ikke godkendt eller ikke kalibreret);
+- en optagelse via udviklingskæden eller med testmodellen;
+- et andet kontrolsæt;
+- vektorer fra den falske transport, som genkendes ved sammenligning med hash-embeddingen af
+  teksten.
+
+Godkendte referencer lægges i `control-references.ts` som en gennemset kodeændring med en
+beslutning i `docs/decisions.md`. Der er ingen endnu: **VALIDATION PENDING**.
+
+**Sammenligningen:**
+- dimension og invarianter (endelige vektorer, ikke nul);
+- identitet: model, versionsetiket, indstillinger og fingeraftryksdel;
+- cosinus til referencevektoren pr. tekst;
+- relationerne.
+
+Tolerancerne (minimum cosinus og minimum margin) er versionerede og hører til referencen. De
+kalibreres ved den første godkendte baseline med den rigtige udbyder ud fra gentagne optagelser
+[AFKLARES ved kalibreringen]. Der er ikke opfundet en production-tærskel.
+
+**Ved afvigelse accepteres intet automatisk:**
+- *Workeren* tjekker ved start og dagligt (`IPA_CONTROL_CHECK_INTERVAL_MS`, kan ikke slås fra i
+  produktion).
+  - Ved afvigelse embedder den ikke længere med modellen (fail-closed, så vektorer fra to
+    modelversioner aldrig blandes) og rejser den kritiske alarm `embedding_model_changed`. En ny
+    versionsetiket, re-embedding og en ny evaluering er en menneskelig beslutning.
+  - En udbyderfejl er ikke en afvigelse: den logges med sin fejltype.
+  - Uden reference logges `embedding_control_unverified`.
+- *Evalueringen* tjekker før kørslen.
+  - Ved afvigelse rapporterer runtime modelversionen med mærket `+control-drift`. Runtime-
+    fingeraftrykket afviger da fra det erklærede, og kørslen fejler H6. For konfigurationen i
+    drift er det en hård regression med suspendering (C4); ellers er kørslen ugyldig.
+  - En udbyderfejl får kørslen til at fejle med alarmen `evaluation_failed`.
+
+**Fingeraftryk og kontrolsæt:** fingeraftrykket identificerer det erklærede materiale og kan ikke
+se, at udbyderen ændrer modellen bag samme id. Det kan kontrolsættet. Referencen er bundet til
+fingeraftrykkets embedding-del, så en ny versionsetiket, dimension eller indstilling kræver en ny
+reference. Et nyt kontrolsæt kræver nye referencer.
+
+**Optagelse af en kladde:**
+- `npm run eval:retrieval -- --providers bedrock --capture-control-reference <fil>`;
+- i CI via workflowets valg `capture_control_reference`, som gemmes som artefakt.
+
+Kladden er aldrig godkendt eller kalibreret.
+
+**Tests (C6):**
+- `embedding-control-set` (16):
+  - sættet: version, checksum, input-typer, relationer og fiktivt indhold; det embeddes gennem
+    egress-grænsen som `evaluation_synthetic`;
+  - samme model består;
+  - afvigelse, forkert dimension, forkert input-type, forkert version og en vendt relation
+    fejler;
+  - en kladde er ikke godkendt;
+  - en falsk baseline afvises, også godkendt og kalibreret, og det samme gælder udviklingskæden,
+    testmodellen og et andet sæt;
+  - alle committede referencer er gyldige;
+  - workeren: bestået, afvigelse (modellen spærres og kritisk alarm uden tekster), ingen
+    reference og udbyderfejl;
+  - evalueringen: afvigelse giver H6, og rapporten kan publiceres som netop det.
+- `worker-runtime`: kontrolintervallet. Guardrails: egress (kun kontrolsættets egne tekster er
+  syntetiske).
+
+#### C5 — CI
+
+`.github/workflows/ci.yml` kører ved hvert push og hver pull request. Den bruger ingen
+production-credentials, ingen AWS-adgang og ingen secrets. De eneste nøgler er dem, den lokale
+Supabase genererer i jobbet.
+
+| Job | Trin |
+|---|---|
+| **Lint, typecheck, unit, build, eval data** | `npm ci` (låst lockfil) → lint → typecheck (app og workers) → enhedstests og guardrails → evalueringsdata (sæt, schemaer, gate-filer uden hårde gates, konfigurationer, kontrolsættet, ingen kundedata) → en evalueringskørsel med fixture-adapteren → build |
+| **Fresh database, pgTAP and integration** | Frisk lokal Supabase (CLI'en fra devDependencies) → alle migrationer fra bunden (`supabase db reset`) og udviklingsseedet → pgTAP (`supabase test db`) → appen bygget og startet i test- og production-runtime → integrationstests |
+
+- **ClamAV** kører i sine egne workflows: EICAR mod den godkendte 1.4.6-motor
+  (`clamav-engine-candidate.yml`, `clamav-signatures.yml`). I CI bruger upload-sikkerhedstestene
+  udviklingsscanneren. Den clamd-baserede EICAR-integrationstest springes over uden
+  `IPA_TEST_CLAMD_HOST`. ClamAV-signaturerne hentes eksternt, så kørslen er ikke
+  reproducerbar i et almindeligt CI-job.
+- **Evalueringsdata-guarden** (`eval-retrieval-data`, `embedding-control-set`) kontrollerer:
+  - manifester og JSONL mod schemaerne og ankrene;
+  - at gate-filerne kun har Q1–Q7, så de hårde gates aldrig er justerbare tærskler;
+  - at hver erklæret konfiguration er gyldig, og at kun fixture-konfigurationen bruger
+    udviklingsimplementeringer;
+  - at hverken sæt, fixtures eller kontrolsæt indeholder kundedata.
+- **Branch protection** er en ekstern forudsætning, der sættes i GitHub [AFKLARES ved
+  opsætningen]. `main` skal kræve de to checks ovenfor. Workflowet kan ikke håndhæve det selv.
+- **Tests (C5):** `ci-workflow` (5) kontrollerer:
+  - udløsere;
+  - trin og rækkefølge i begge jobs;
+  - ingen secrets, AWS eller OIDC og kun læseret;
+  - at de krævede checks er dokumenteret.
+
+  `eval-retrieval-data` (13, +2) dækker konfigurationerne og kontrolsættet.
+
+#### Verifikation (I8)
+
+**Kørsel mod en frisk lokal database** (alle migrationer fra bunden og seedet):
+
+| Kontrol | Resultat |
+|---|---|
+| Lint og typecheck (app og workers) | Bestået |
+| Enhedstests og guardrails | 893 bestået (4 sprunget over: kræver eksterne værktøjer) |
+| pgTAP | 870 i 15 filer, heraf `retrieval_configuration_registry` 220 |
+| Integration | 155 i 15 filer, inklusive appens ruter i test- og production-runtime og EICAR mod lokal ClamAV |
+| Build | Bestået. Klientbundtet indeholder ingen credential- eller Bedrock-kode |
+
+**Mutationer:** I8 har 47 mutationer, som dækker C1–C7: 38 i TypeScript, 8 i SQL og 1 i
+integration. Hver fjerner en regel eller et tjek, og alle 47 fanges.
+- M05 overlevede første gennemløb: startkontrollen ignorerede en dimensionsafvigelse. Der er nu
+  en test af det.
+- I01 ramte først den ældre dækningsløkke efter publiceringen, som er en ækvivalent mutation.
+  Den blev flyttet til I8's løkke før publiceringen og fanges.
+
+**Krav fra I1–I8:** ingen grænse er svækket.
+- *Egress:* hvert udbyderkald autoriseres. Metrik-dekoratøren sender uændret videre (guardrail),
+  og kontrolsættet klassificerer kun sine egne tekster.
+- *RLS og rettigheder:* ingen ændring. Den nye migration bruger `create or replace` og bevarer
+  rettighederne.
+- *Workerens mindste rettigheder:* aldrig service_role. Taskrollen kan kun kalde Embed v4.
+  ClamAV har ingen taskrolle.
+- *Upload-sikkerhed og ClamAV:* uændret.
+- *Publisherens isolation:* kun `evaluation_publisher` registrerer. Ingen applikationskode kan nå
+  publisher-funktionerne (guardrail).
+- *P1–P9 og ProductionEvidenceSet:* uændret. Efter en suspendering (også ved H6 og afvigelse i
+  kontrolsættet) er evidensen development.
+
+**Kode uden forklaring:** ingen TODO, FIXME eller stub uden forklaring i den kritiske vej.
+Udviklingsimplementeringerne er markeret, afvises uden for local/test og findes ikke i workerens
+image:
+- test-embedderen;
+- "none";
+- stub-modellen (8A);
+- den falske Bedrock-transport.
+
+#### Eksterne forudsætninger før 8B kan afsluttes
+
+Ingen af dem er et kodehul. De kræver deployment, validering, compliance eller indhold:
+
+- **Deployment:**
+  - AWS-konti (produktion og evaluering) med Bedrock-adgang og kvoter (Å-1);
+  - OIDC for GitHub og for Vercel (`deploy/application/`; trust-politik og audience verificeres
+    ved første deployment);
+  - ECR, VPC, NAT, Secrets Manager, CloudWatch og en alarmtopic;
+  - Supabase-projekter til evaluering og pilot/produktion;
+  - worker, ClamAV 1.4.6 og `worker-storage`;
+  - kandidatmodellens række og dens partielle HNSW-indeks med en migration, når Embed v4
+    indføres i et miljø (§21.2, B-034);
+  - branch protection på `main` med de to CI-checks (C5);
+  - de aggregerede alarmer i logplatformen (`deploy/monitoring/`), før Copilot-piloten.
+- **Validering:**
+  - kontrakttest mod den rigtige Bedrock;
+  - baseline med et rigtigt pilotsæt;
+  - performance-målinger;
+  - kontrolsættets reference med rigtig udbyder (VALIDATION PENDING), med kalibrering og
+    godkendelse;
+  - en aktiv production-konfiguration;
+  - et udstedt ProductionEvidenceSet;
+  - alarmerne afprøvet i miljøet.
+- **Compliance og indhold:**
+  - databehandleraftaler (Å-2) og licens (Å-6);
+  - pilotsættet `terms-v1`;
+  - vedligeholder (Å-3) og retningslinjer (Å-4);
+  - modtager af alarmer (Å-5).

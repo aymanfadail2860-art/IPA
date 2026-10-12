@@ -41,6 +41,8 @@ export interface RegisteredRunEvent {
   corpusChecksum: string;
   failedHardGates: string[];
   failedQualityGates: string[];
+  /** True when exactly this report was already registered (a retried job, 8B-I8 C4): nothing changed. */
+  replayed: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -75,6 +77,7 @@ export function parseRunEvent(data: unknown): RegisteredRunEvent {
     corpusChecksum: str(event.corpusChecksum),
     failedHardGates: strings(event.failedHardGates),
     failedQualityGates: strings(event.failedQualityGates),
+    replayed: event.replayed === true,
   };
 }
 
@@ -109,6 +112,8 @@ export function classificationAlerts(event: RegisteredRunEvent, now: () => Date 
     gate_set_checksum: event.gateSet.checksum,
     runtime_fingerprint: event.runtimeFingerprint,
     corpus_checksum: event.corpusChecksum,
+    // A replay (8B-I8 C4) changed nothing; the alarm is sent again so it is never lost.
+    ...(event.replayed ? { replayed: "true" } : {}),
   };
   return event.classification === "hard_gate_regression"
     ? [createAlert("hard_gate_regression", { ...details, failed_hard_gates: event.failedHardGates.join(",") }, now)]

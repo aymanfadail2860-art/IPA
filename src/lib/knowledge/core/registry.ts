@@ -47,6 +47,18 @@ export function createEmbedder(model: EmbeddingModelSpec, environment: RuntimeEn
   throw new ProviderNotConfiguredError(label);
 }
 
+/**
+ * The Q7 comparison of an evaluation run (docs/08b §4.4, 8B-I8 C7): the SAME retrieval without
+ * reranking, so the reranker's contribution can be measured. It is a measurement, never
+ * evidence: its results go only into the report's comparison, and the evaluated configuration
+ * itself can never be "none" (H6, D-4). That is why it is allowed in a production runtime (the
+ * evaluation job in CI) where createReranker refuses "none". Only the evaluation engine calls it
+ * (guardrail test).
+ */
+export function createEvaluationBaselineReranker(): RerankingProvider {
+  return createNoneReranker();
+}
+
 /** The configured reranker: IPA_RERANKER, default "none". */
 export function createReranker(id: string = process.env.IPA_RERANKER || NONE_RERANKER_ID, environment: RuntimeEnv = runtimeEnv()): RerankingProvider {
   if (id === NONE_RERANKER_ID) {

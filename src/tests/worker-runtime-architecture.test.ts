@@ -47,11 +47,18 @@ describe("production worker code (8B-I4)", () => {
   const graph = importGraph("workers/ingestion/main.ts");
 
   it("contains no service-role client, no Supabase SDK and no app-only code", () => {
-    expect([...graph.packages].filter((name) => !name.startsWith("node:")).sort()).toEqual(["pdfjs-dist", "postgres"]);
+    // 8B-I8 C7: plus the Bedrock runtime client and the ECS container credential provider — no
+    // other runtime's credential source (Vercel, CI environment) and no SDK credential chain.
+    expect([...graph.packages].filter((name) => !name.startsWith("node:")).sort()).toEqual(["@aws-sdk/client-bedrock-runtime", "@smithy/credential-provider-imds", "pdfjs-dist", "postgres"]);
     expect(graph.files.has("workers/ingestion/dev-service-role.ts")).toBe(false);
+    expect(graph.files.has("workers/ingestion/dev-fake-bedrock.ts")).toBe(false);
+    for (const forbidden of ["credentials-vercel.ts", "credentials-environment.ts", "configured.ts"]) {
+      expect(graph.files.has(`src/lib/knowledge/providers/${forbidden}`), forbidden).toBe(false);
+    }
     for (const file of graph.files) {
       expect(
-        file.startsWith("workers/ingestion/") || file.startsWith("src/lib/egress/") || file.startsWith("src/lib/knowledge/core/") || file.startsWith("src/lib/observability/"),
+        file.startsWith("workers/ingestion/") || file.startsWith("src/lib/egress/") || file.startsWith("src/lib/knowledge/core/") ||
+          file.startsWith("src/lib/knowledge/providers/") || file.startsWith("src/lib/observability/"),
         file,
       ).toBe(true);
       // config.ts names the key only to refuse it in production (next test).
@@ -59,13 +66,28 @@ describe("production worker code (8B-I4)", () => {
     }
   });
 
-  it("loads the development service-role adapter only behind the validated local/test configuration", () => {
-    expect(graph.dynamic).toEqual([{ from: "workers/ingestion/main.ts", spec: "./dev-service-role.ts" }]);
+  it("loads the development adapters (service role, fake Bedrock) only behind the validated local/test configuration", () => {
+    expect(graph.dynamic).toEqual([
+      { from: "workers/ingestion/main.ts", spec: "./dev-service-role.ts" },
+      { from: "workers/ingestion/main.ts", spec: "./dev-fake-bedrock.ts" },
+    ]);
     const main = stripComments(read("workers/ingestion/main.ts"));
     expect(main).toMatch(/if \(config\.db\.kind === "postgres"\) \{[\s\S]*?\} else \{[\s\S]*?await import\("\.\/dev-service-role\.ts"\)/);
+    expect(main).toMatch(/if \(config\.providers === "development-fake"\) \{[\s\S]*?await import\("\.\/dev-fake-bedrock\.ts"\)[\s\S]*?\} else \{\s*providerRuntime = \(\) => workerProviderRuntime\(process\.env\);/);
     const config = stripComments(read("workers/ingestion/config.ts"));
     expect(config).toMatch(/if \(production && serviceKey\)/);
     expect(config).toMatch(/if \(!production && serviceKey && !env\.IPA_WORKER_DB_HOST\)/);
+    expect(config).toMatch(/if \(fakeBedrock && production\) problems\.push/);
+    expect(config).toMatch(/providers: fakeBedrock && !production \? "development-fake" : "aws"/);
+  });
+
+  it("embeds only through the shared resolution path, with the embedders checked before the job loop (8B-I8 C7)", () => {
+    const main = stripComments(read("workers/ingestion/main.ts"));
+    expect(main).not.toMatch(/createEmbedder\(|createProductionEmbedder\(/);
+    expect(main).toMatch(/const embedderProblems = checkEmbeddingModels\(models, embedderFor\);[\s\S]*process\.exit\(1\)[\s\S]*createWorkerRuntime\(config, \{[^\n]*\bembedderFor \}\)/);
+    const providers = stripComments(read("workers/ingestion/providers.ts"));
+    expect(providers).toMatch(/return providerRuntimeFor\("worker", env, CONTAINER_CREDENTIAL_SOURCES\);/);
+    expect(providers).toMatch(/createRuntimeEmbedder\(model, runtime, options\.environment\)/);
   });
 
   it("the database adapter calls only the locked knowledge.worker_* API — no tables, admin or ops functions", () => {
@@ -179,24 +201,31 @@ describe("production image (8B-I4)", () => {
       "workers/ingestion/",
       "src/lib/egress/",
       "src/lib/knowledge/core/",
+      // 8B-I8 C7: the production embedding adapters and the worker's credential path.
+      "src/lib/knowledge/providers/",
       // 8B-I7: the alarm sink and the health evaluation (no dependencies).
       "src/lib/observability/",
       "deploy/ingestion-worker/certs/",
     ]);
     expect(instructions).toMatch(/npm ci --omit=dev --omit=optional --ignore-scripts/);
-    expect(instructions).toMatch(/rm -f workers\/ingestion\/dev-service-role\.ts/);
+    expect(instructions).toMatch(/rm -f workers\/ingestion\/dev-service-role\.ts workers\/ingestion\/dev-fake-bedrock\.ts/);
+    // 8B-I8: the other runtimes' credential sources and the app's provider selection are removed too.
+    for (const file of ["credentials-vercel.ts", "credentials-environment.ts", "configured.ts"]) expect(instructions).toContain(`src/lib/knowledge/providers/${file}`);
     const ignore = read(".dockerignore");
-    for (const entry of ["**/.env", "**/.env.*", "workers/ingestion/dev-service-role.ts", "node_modules", ".git"]) expect(ignore).toContain(entry);
+    for (const entry of ["**/.env", "**/.env.*", "workers/ingestion/dev-service-role.ts", "workers/ingestion/dev-fake-bedrock.ts", "node_modules", ".git"]) expect(ignore).toContain(entry);
   });
 
   it("the image's dependency manifest is minimal and matches the root lockfile", () => {
     const manifest = json(`${DEPLOY}/package.json`) as { dependencies: Record<string, string>; devDependencies?: unknown };
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(["pdfjs-dist", "postgres"]);
+    expect(Object.keys(manifest.dependencies).sort()).toEqual(["@aws-sdk/client-bedrock-runtime", "@smithy/credential-provider-imds", "pdfjs-dist", "postgres"]);
     expect(manifest.devDependencies).toBeUndefined();
     const lock = json("package-lock.json") as { packages: Record<string, { version: string }> };
     for (const [name, version] of Object.entries(manifest.dependencies)) expect(lock.packages[`node_modules/${name}`]!.version, name).toBe(version);
     const imageLock = read(`${DEPLOY}/package-lock.json`);
-    expect(imageLock).not.toMatch(/@supabase|"next"|"react"/);
+    expect(imageLock).not.toMatch(/@supabase|"next"|"react"|@vercel/);
+    // Every package of the image is the version of the root lockfile (8B-I8).
+    const imagePackages = (JSON.parse(imageLock) as { packages: Record<string, { version?: string }> }).packages;
+    for (const [name, entry] of Object.entries(imagePackages)) if (name) expect(entry.version, name).toBe(lock.packages[name]?.version);
   });
 
   it("contains no credential, certificate key or connection string in any deployment file", () => {

@@ -81,8 +81,16 @@ export interface WorkerConfig {
   scanner: ScannerConfig;
   /** The scheduled health check (docs/08b §14, 8B-I7): every 5 minutes; 0 = off (only outside production). */
   healthCheckMs: number;
+  /** The embedding control check (8B-I8 C6): how often, besides startup. 0 = off (local/test only). */
+  controlCheckMs: number;
   /** The alarm channel (D-15): "log" always, plus the webhook when configured (Å-5). */
   alerts: { sink: "log" | "webhook" };
+  /**
+   * Where production embedding providers run (8B-I8 C7): "aws" = the real Bedrock transport with
+   * the runtime's credential path (the ECS task role in production); "development-fake" = a
+   * deterministic fake Bedrock transport, ONLY in local/test (IPA_DEV_FAKE_BEDROCK=1).
+   */
+  providers: "aws" | "development-fake";
 }
 
 /** blue/green login role, with the Supavisor tenant suffix (<role>.<project-ref>) in production. */
@@ -189,6 +197,9 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
   const healthCheckMs = int(env, "IPA_HEALTH_CHECK_INTERVAL_MS", 300_000, 0, 3_600_000, problems);
   if (healthCheckMs !== 0 && healthCheckMs < 30_000) problems.push("IPA_HEALTH_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 30000.");
   if (production && healthCheckMs === 0) problems.push("Den planlagte sundhedskontrol kan ikke slås fra i produktion (docs/08b §14).");
+  const controlCheckMs = int(env, "IPA_CONTROL_CHECK_INTERVAL_MS", 86_400_000, 0, 7 * 86_400_000, problems);
+  if (controlCheckMs !== 0 && controlCheckMs < 3_600_000) problems.push("IPA_CONTROL_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 3600000.");
+  if (production && controlCheckMs === 0) problems.push("Kontrollen af embedding-modellen kan ikke slås fra i produktion (docs/08b §2.5).");
   let alertSink: "log" | "webhook" = "log";
   try {
     createAlertSink(env, "ingestion-worker", { write: () => {} });
@@ -196,6 +207,9 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
   } catch (error) {
     problems.push(error instanceof AlertConfigError ? error.message : "Alarmkanalen kunne ikke konfigureres.");
   }
+  const fakeBedrock = env.IPA_DEV_FAKE_BEDROCK === "1";
+  if (fakeBedrock && production) problems.push("IPA_DEV_FAKE_BEDROCK må kun bruges lokalt og i test (IPA_RUNTIME_ENV=local/test).");
+  if (env.IPA_DEV_FAKE_BEDROCK !== undefined && env.IPA_DEV_FAKE_BEDROCK !== "" && env.IPA_DEV_FAKE_BEDROCK !== "1") problems.push("IPA_DEV_FAKE_BEDROCK skal være 1 eller ikke sat.");
   const config: WorkerConfig = {
     runtimeEnv: environment,
     workerLabel,
@@ -212,7 +226,9 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
     livenessFile: env.IPA_WORKER_LIVENESS_FILE || null,
     scanner,
     healthCheckMs,
+    controlCheckMs,
     alerts: { sink: alertSink },
+    providers: fakeBedrock && !production ? "development-fake" : "aws",
   };
   if (config.idle.maxMs < config.idle.initialMs) problems.push("IPA_WORKER_POLL_MAX_MS må ikke være mindre end IPA_WORKER_POLL_MS.");
   if (problems.length > 0) throw new ConfigError(problems);
@@ -242,6 +258,8 @@ export function describeConfig(config: WorkerConfig): Record<string, unknown> {
     lease_seconds: config.leaseSeconds,
     heartbeat_ms: config.heartbeatMs,
     health_check_ms: config.healthCheckMs,
+    control_check_ms: config.controlCheckMs,
     alert_sink: config.alerts.sink,
+    providers: config.providers,
   };
 }

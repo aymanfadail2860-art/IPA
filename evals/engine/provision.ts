@@ -167,6 +167,24 @@ export async function provisionEvaluationCorpus(options: ProvisionOptions): Prom
     else await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
+  // Every model under test covers the whole corpus (8B-I8 C7): versions processed before a model
+  // was registered are embedded again by the environment's worker with that model's production
+  // adapter. The run must never search a model that sees only part of the corpus.
+  for (const modelId of models) {
+    for (let requested = false; ; ) {
+      const coverage = await ok<{ chunks: number; embedded: number }>(admin.rpc("embedding_coverage", { p_model_id: modelId }), "dækning");
+      if (Number(coverage.embedded) >= Number(coverage.chunks)) break;
+      if (!requested) {
+        await ok(admin.rpc("request_reembedding", { p_model_id: modelId }), "genembedding");
+        requested = true;
+        log({ event: "eval_provision_reembedding", model: modelId, embedded: coverage.embedded, chunks: coverage.chunks });
+      }
+      if (now().getTime() > deadline) throw new Error(`Modellen ${modelId} dækker ikke korpusset i tide (${coverage.embedded} af ${coverage.chunks} chunks).`);
+      if (options.awaitWorker) await options.awaitWorker();
+      else await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
+
   // Ingestion times (§12): upload → the process job finished, per version uploaded in this run.
   const ingestion: IngestionSamples = { documents: [], corpusPages: 0, corpusSeconds: null };
   let snapshot = await env.snapshot(manifest);

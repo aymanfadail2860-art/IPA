@@ -12,16 +12,34 @@ driften anvender med AWS CLI, når produktionskontoen findes. Pladsholdere står
 | Fil | Indhold |
 |-----|---------|
 | `Dockerfile` | Image i flere trin, kun runtime-dependencies, ikke-root, ingen build-argumenter eller hemmeligheder |
-| `package.json`, `package-lock.json` | Imagets eneste dependencies: `postgres` og `pdfjs-dist` (samme versioner som rodens lockfil) |
+| `package.json`, `package-lock.json` | Imagets eneste dependencies: `postgres`, `pdfjs-dist`, `@aws-sdk/client-bedrock-runtime` og `@smithy/credential-provider-imds` (samme versioner som rodens lockfil) |
 | `task-definition.json` | ECS-taskdefinition: Fargate, 1 vCPU/2 GB, kun worker-containeren, skrivebeskyttet rodfilsystem, `/tmp`-volumen, miljø (inkl. det faste scanner-endpoint), secrets, healthcheck, logs |
 | `../clamav/` | ClamAV som egen service uden taskrolle (8B-I5.5) — se `deploy/clamav/README.md` |
 | `service.json` | ECS-service: 1 task, rullende deployment med circuit breaker, private subnets, ingen offentlig IP |
 | `security-group.json` | Ingen indgående trafik. Udgående kun 443, 6543 og 3310 til ClamAV-tjenestens security group |
 | `iam/execution-role-policy.json` | Execution-rollen: image-pull, logs, injektion af den ene secret |
-| `iam/task-role-policy.json` | Task-rollen: forberedt Bedrock Embed v4 via EU-inferensprofilen, intet andet |
+| `iam/task-role-policy.json` | Task-rollen: Bedrock Embed v4 via EU-inferensprofilen, intet andet. Workeren bruger den til document-embeddings (8B-I8 C7) |
 | `iam/ecs-tasks-trust-policy.json` | Kun ECS-tasks i kontoen kan påtage sig rollerne |
 | `certs/` | Supabases CA (offentligt certifikat), som lægges her, før imaget bygges |
 | `alarms.json` | Metric filters og alarmer (8B-I7): kritiske alarmer og advarsler fra den planlagte sundhedskontrol, og en alarm, hvis kontrollen tier stille i 15 minutter |
+
+> **Embedding-udbyder (8B-I8 C7):** workeren bygger embedderen for hver aktiv eller kandidat-model
+> i registret gennem production-kataloget (i dag Cohere Embed v4 på Bedrock i `eu-central-1`).
+> Credentials kommer kun fra ECS-taskrollen via containerens credential-endpoint
+> (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, som ECS sætter). Workeren afviser at starte, hvis
+> miljøet har statiske eller implicitte AWS-credentials (`AWS_ACCESS_KEY_ID`, `AWS_PROFILE`,
+> `AWS_SHARED_CREDENTIALS_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE` m.fl.), eller hvis en model ikke kan
+> bygges. Der er intet fallback til test-embedderen. Den falske Bedrock-transport
+> (`IPA_DEV_FAKE_BEDROCK=1`) findes kun lokalt og i test; den afvises i produktion og er ikke i
+> imaget (`docs/08b` §21.15).
+
+> **Kontrolsættet (8B-I8 C6):** ved start og dagligt (`IPA_CONTROL_CHECK_INTERVAL_MS`, standard
+> 24 timer; kan ikke slås fra i produktion) embedder workeren et lille fast sæt syntetiske tekster
+> med hver aktiv eller kandidat-model, der har en godkendt reference
+> (`src/lib/knowledge/core/control-references.ts`), og sammenligner med referencen. Ved afvigelse
+> embedder workeren ikke længere med modellen og rejser den kritiske alarm
+> `embedding_model_changed`. Uden godkendt reference (VALIDATION PENDING) logges
+> `embedding_control_unverified` (`docs/08b` §21.15).
 
 > **Sundhedskontrol (8B-I7):** workeren læser hvert 5. minut `knowledge.worker_system_health()`
 > (kø, fejl, scanner, konfiguration, regression — kun tal og id'er) og sender alarmer gennem

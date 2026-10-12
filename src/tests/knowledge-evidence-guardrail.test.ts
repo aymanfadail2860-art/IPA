@@ -251,6 +251,25 @@ describe("static guardrails — the mechanisms cannot be bypassed elsewhere in t
     expect(offenders).toEqual([]);
   });
 
+  it("only the evaluation CLI asks for the Q7 baseline reranker (8B-I8 C7)", () => {
+    // createEvaluationBaselineReranker builds "none" in any runtime, for the Q7 measurement only.
+    // Nothing in the application, the worker or the publication path may reach it.
+    const ROOT = path.resolve(SRC, "..");
+    const scan = (dir: string): string[] =>
+      fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) return rel === "src/tests" || entry.name === "node_modules" ? [] : scan(rel);
+        return /\.(ts|tsx|mts|mjs|js)$/.test(entry.name) ? [rel] : [];
+      });
+    const callers = ["src", "workers", "evals"]
+      .flatMap(scan)
+      .filter((file) => /\bcreateEvaluationBaselineReranker\(/.test(fs.readFileSync(path.join(ROOT, file), "utf8")))
+      .sort();
+    expect(callers).toEqual(["evals/engine/cli.ts", "src/lib/knowledge/core/registry.ts"]);
+    const registry = fs.readFileSync(path.join(ROOT, "src/lib/knowledge/core/registry.ts"), "utf8");
+    expect(registry).toMatch(/export function createEvaluationBaselineReranker\(\): RerankingProvider \{\n\s*return createNoneReranker\(\);\n\}/);
+  });
+
   it("application code runs the pipeline only through retrieveEvidence, which takes no implementations", () => {
     const callers = sources.filter(({ text }) => /\brunRetrieval\b/.test(text)).map(({ file }) => file).sort();
     expect(callers).toEqual(["lib/knowledge/retrieval-core.ts", "lib/knowledge/retrieval.ts"]);

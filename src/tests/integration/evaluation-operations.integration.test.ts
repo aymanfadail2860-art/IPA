@@ -10,8 +10,14 @@ import { runEvaluationOperation } from "../../../evals/engine/operations.ts";
 import { performanceResults } from "../../../evals/engine/performance.ts";
 import { provisionEvaluationCorpus } from "../../../evals/engine/provision.ts";
 import { runEvaluation } from "../../../evals/engine/runner.ts";
-import { createEmbedder, createReranker } from "@/lib/knowledge/core/registry";
+import { createEmbedder, createEvaluationBaselineReranker, createReranker } from "@/lib/knowledge/core/registry";
 import { TEST_EMBEDDER } from "@/lib/knowledge/core/test-embedder";
+import { EMBED_V4_EU_1024_DESCRIPTOR } from "@/lib/knowledge/providers/bedrock/cohere-embed-v4";
+import { COHERE_RERANK_35_ID } from "@/lib/knowledge/providers/bedrock/cohere-rerank-3-5";
+import { createProductionReranker, embeddingModelRow } from "@/lib/knowledge/providers/catalog";
+import { createRuntimeEmbedder } from "@/lib/knowledge/providers/runtime";
+
+import { devFakeBedrockTransport } from "../../../workers/ingestion/dev-fake-bedrock.ts";
 
 import { env, integrationConfigured } from "./helpers";
 import { RUN, runWorkerOnce, workerConfigured } from "./knowledge-helpers";
@@ -30,8 +36,12 @@ import { RUN, runWorkerOnce, workerConfigured } from "./knowledge-helpers";
  *   * a corpus that changes during the run is an H7 breach.
  *
  * The local database plays the evaluation environment for this file only (ops.environment is
- * set and restored). Development providers: the run is invalid by H6 — on purpose; the
- * production path is covered in retrieval-configuration.integration.test.ts.
+ * set and restored). Development providers: the run is invalid by H6 — on purpose.
+ *
+ * 8B-I8 C7: the PRODUCTION adapters (Cohere Embed v4, Rerank 3.5) on the development fake
+ * Bedrock transport, end to end: provisioning registers Embed v4, the real worker (a separate
+ * process, IPA_DEV_FAKE_BEDROCK=1) embeds the corpus with it, and the evaluation retrieves with
+ * the same model — every hard gate passes, H6 included.
  */
 
 const adminUrl = process.env.IPA_TEST_DB_ADMIN_URL ?? "";
@@ -163,6 +173,63 @@ describe.skipIf(!configured)("evaluation operations against a local evaluation e
     expect(performance.retrieval.queryEmbedding).toHaveLength(active);
     expect(performance.results).toEqual(performanceResults(performance.retrieval, performance.ingestion));
   }, 300_000);
+
+  it("the production adapters run end to end: Embed v4 in the worker, the same model in retrieval and evaluation (8B-I8 C7)", async () => {
+    const previous = process.env.IPA_DEV_FAKE_BEDROCK;
+    process.env.IPA_DEV_FAKE_BEDROCK = "1";
+    // The model row comes with a migration in production (§2.5); another suite may have retired the same fixture row.
+    const row = embeddingModelRow(EMBED_V4_EU_1024_DESCRIPTOR);
+    await admin`
+      insert into knowledge.embedding_models (provider, model_name, model_version, dimensions, status)
+      values (${row.provider}, ${row.model_name}, ${row.model_version}, ${row.dimensions}, 'candidate')
+      on conflict (provider, model_name, model_version) do update set status = 'candidate', retired_at = null`;
+    let modelId = "";
+    try {
+      const runtime = () => ({ bedrock: devFakeBedrockTransport() });
+      const v4 = createRuntimeEmbedder({ id: "00000000-0000-4000-b000-0000000000c7", ...row }, runtime, "test");
+      const rerank35 = createProductionReranker(COHERE_RERANK_35_ID, runtime());
+      expect(v4.grade).toBe("production");
+
+      // Provisioning: the corpus (already ingested with the development model) gets Embed v4 —
+      // re-embedding requested and done by the worker with the production adapter.
+      await provisionEvaluationCorpus({ env: evaluation, manifest: inputs.set.manifest, fixtures: inputs.fixtures, embedders: [v4], awaitWorker: async () => void (await runWorkerOnce()) });
+      modelId = await embeddingModelIdFor(evaluation, v4);
+      const snapshot = await evaluation.snapshot(inputs.set.manifest);
+      const versionIds = [...snapshot.versions.keys()];
+      const [mine] = await admin<{ chunks: number; embedded: number; wrong: number; distinct: number }[]>`
+        select count(distinct c.id)::int as chunks, count(e.chunk_id)::int as embedded,
+               count(*) filter (where e.chunk_id is not null and extensions.vector_dims(e.embedding) <> 1024)::int as wrong,
+               count(distinct e.embedding::text)::int as distinct
+        from knowledge.document_chunks c
+        left join knowledge.chunk_embeddings e on e.chunk_id = c.id and e.embedding_model_id = ${modelId}
+        where c.document_version_id = any(${versionIds}::uuid[])`;
+      // Every chunk of the evaluation corpus, 1024 dimensions, real per-text vectors (not a fixture constant).
+      expect(mine!.embedded).toBe(mine!.chunks);
+      expect(mine!.wrong).toBe(0);
+      expect(mine!.distinct).toBeGreaterThan(1);
+      const [model] = await admin<{ provider: string; model_name: string; model_version: string; dimensions: number }[]>`
+        select provider, model_name, model_version, dimensions from knowledge.embedding_models where id = ${modelId}`;
+      expect(model).toEqual(row);
+
+      // The evaluation: the declared production configuration, run with exactly these adapters.
+      const declared = loadInputs({ set: "example-v1", gates: "gates-v1", configuration: "bedrock-embed-v4-eu-1024-rerank-3-5-structure-1" }).declared;
+      const { report } = await runEvaluationOperation({
+        inputs: { ...inputs, declared }, mode: "baseline", embedder: v4, reranker: rerank35, baselineReranker: createEvaluationBaselineReranker(), env: evaluation, provision: false,
+      });
+      // Ingestion, retrieval and evaluation agree on the model and the configuration.
+      expect(report.configuration.runtime.embedding).toMatchObject({ provider: row.provider, model: row.model_name, modelVersion: row.model_version, dimensions: row.dimensions });
+      expect({ declared: report.configuration.declared, runtime: report.configuration.runtime }).toEqual({ declared: report.configuration.runtime, runtime: report.configuration.runtime });
+      expect(report.configuration.matches).toBe(true);
+      expect(report.configuration.runtimeFingerprint).toBe(report.configuration.declaredFingerprint);
+      expect(report.hardGates.map((gate) => [gate.id, gate.status])).toEqual(["H1", "H2", "H3", "H4", "H5", "H6", "H7"].map((id) => [id, "pass"]));
+    } finally {
+      if (previous === undefined) delete process.env.IPA_DEV_FAKE_BEDROCK;
+      else process.env.IPA_DEV_FAKE_BEDROCK = previous;
+      // The other suites' workers run without the fake transport: the model must not stay a candidate.
+      await admin`update knowledge.embedding_models set status = 'retired', retired_at = now()
+        where provider = ${row.provider} and model_name = ${row.model_name} and model_version = ${row.model_version} and status in ('active', 'candidate')`;
+    }
+  }, 600_000);
 
   it("a corpus that changes during the run is an H7 breach", async () => {
     const snapshot = await evaluation.snapshot(inputs.set.manifest);

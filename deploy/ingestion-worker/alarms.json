@@ -28,7 +28,7 @@
   "Alarms": [
     {
       "AlarmName": "ipa-critical-alert",
-      "AlarmDescription": "The worker's scheduled health check raised a critical alarm (docs/08b §14): a suspended retrieval configuration, a hard-gate regression. The log line names the code and the ids.",
+      "AlarmDescription": "The worker raised a critical alarm (docs/08b §14, §2.5): a suspended retrieval configuration, a hard-gate regression, or an embedding model that no longer answers as its approved control-set reference (embedding_model_changed). The log line names the code and the ids.",
       "Namespace": "IPA/Operations",
       "MetricName": "CriticalAlerts",
       "Statistic": "Sum",

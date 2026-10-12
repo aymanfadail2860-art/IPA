@@ -123,6 +123,10 @@ describe("the scheduled health check and the alarm channel (8B-I7)", () => {
   it("cannot be switched off in production, and never runs more often than every 30 seconds", () => {
     expect(problems(production({ IPA_HEALTH_CHECK_INTERVAL_MS: "0" }))).toContain("Den planlagte sundhedskontrol kan ikke slås fra i produktion (docs/08b §14).");
     expect(problems(production({ IPA_HEALTH_CHECK_INTERVAL_MS: "1000" }))).toContain("IPA_HEALTH_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 30000.");
+    // 8B-I8 C6: the embedding control check runs daily by default and cannot be switched off in production.
+    expect(problems(production({ IPA_CONTROL_CHECK_INTERVAL_MS: "0" }))).toContain("Kontrollen af embedding-modellen kan ikke slås fra i produktion (docs/08b §2.5).");
+    expect(problems(production({ IPA_CONTROL_CHECK_INTERVAL_MS: "60000" }))).toContain("IPA_CONTROL_CHECK_INTERVAL_MS skal være 0 (slået fra) eller mindst 3600000.");
+    expect(loadConfig({ IPA_RUNTIME_ENV: "local", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "k" }, [], exists).controlCheckMs).toBe(86_400_000);
     expect(loadConfig({ IPA_RUNTIME_ENV: "local", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SERVICE_ROLE_KEY: "k", IPA_HEALTH_CHECK_INTERVAL_MS: "0" }, [], exists).healthCheckMs).toBe(0);
   });
 

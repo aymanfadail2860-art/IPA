@@ -123,7 +123,8 @@ export interface RetrievalDeps {
 
 /** The measured steps (§12): the whole chain, query embedding, the database search and reranking. */
 export type RetrievalStep = "total" | "query_embedding" | "search" | "rerank";
-export type RetrievalObserver = (step: RetrievalStep, milliseconds: number, ok: boolean) => void;
+/** `error` is what the step threw (only on failure), so telemetry can classify provider errors (8B-I8 C3). */
+export type RetrievalObserver = (step: RetrievalStep, milliseconds: number, ok: boolean, error?: unknown) => void;
 
 const clock = (): number => globalThis.performance?.now?.() ?? Date.now();
 
@@ -131,18 +132,22 @@ const clock = (): number => globalThis.performance?.now?.() ?? Date.now();
 async function timed<T>(observe: RetrievalObserver | undefined, step: RetrievalStep, run: () => Promise<T>): Promise<T> {
   if (!observe) return run();
   const started = clock();
-  let ok = false;
-  try {
-    const result = await run();
-    ok = true;
-    return result;
-  } finally {
+  const report = (ok: boolean, error?: unknown) => {
     try {
-      observe(step, Math.max(0, clock() - started), ok);
+      observe(step, Math.max(0, clock() - started), ok, error);
     } catch {
       // Measurement never changes retrieval.
     }
+  };
+  let result: T;
+  try {
+    result = await run();
+  } catch (error) {
+    report(false, error);
+    throw error;
   }
+  report(true);
+  return result;
 }
 
 /** One row of knowledge.search_chunks. */

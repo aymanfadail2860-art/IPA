@@ -15,6 +15,7 @@ import type {
   VersionStatus,
 } from "./admin-types";
 import { securityStatus, type SecurityStatus } from "./admin-types";
+import { operationsView, type OperationsRows, type RetrievalOperationsView } from "./operations-view";
 
 /*
  * Reads for the Knowledge Engine administration (docs/07 §12). Every query runs as the
@@ -487,4 +488,41 @@ export async function systemStatus(): Promise<SystemStatusView | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Systemindstillinger → Drift af retrieval (8B-I8 C2): gate-sæt, konfigurationer med deres
+ * seneste kørsler, performance-afvigelser og kandidatmodeller. RLS: system.settings.manage.
+ * Only identifiers, statuses and the engine's failure list — never report content beyond it.
+ */
+export async function retrievalOperations(embedding: EmbeddingSettings): Promise<RetrievalOperationsView | null> {
+  const db = await knowledge();
+  const [gateSets, configurations, runs, acceptances, measurements, deviationAcceptances] = await Promise.all([
+    db.from("evaluation_gate_sets").select("id, gate_set_id, version, decision, checksum, registered_at, approved_at").order("registered_at", { ascending: false }).limit(20),
+    db
+      .from("retrieval_configurations")
+      .select("id, label, version, fingerprint, status, tier, status_changed_at, suspension_reason")
+      .order("status_changed_at", { ascending: false })
+      .limit(20),
+    db
+      .from("evaluation_runs")
+      .select("id, run_id, configuration_id, gate_set_id, outcome, tier, registered_at, registered_while, failures")
+      .order("registered_at", { ascending: false })
+      .limit(100),
+    db.from("evaluation_uncertainty_acceptances").select("run_id"),
+    db.from("performance_measurements").select("id, measurement_id, configuration_id, deviations, measured_at").order("registered_at", { ascending: false }).limit(20),
+    db.from("performance_deviation_acceptances").select("measurement_id"),
+  ]);
+  if ([gateSets, configurations, runs, acceptances, measurements, deviationAcceptances].some((result) => result.error)) return null;
+  const rows: OperationsRows = {
+    gateSets: (gateSets.data ?? []) as OperationsRows["gateSets"],
+    configurations: (configurations.data ?? []) as OperationsRows["configurations"],
+    runs: (runs.data ?? []) as OperationsRows["runs"],
+    acceptedRuns: ((acceptances.data ?? []) as { run_id: string }[]).map((row) => row.run_id),
+    measurements: (measurements.data ?? []) as OperationsRows["measurements"],
+    acceptedMeasurements: ((deviationAcceptances.data ?? []) as { measurement_id: string }[]).map((row) => row.measurement_id),
+    models: embedding.models.map((model) => ({ id: model.id, label: model.label, status: model.status, embeddings: model.embeddings })),
+    publishedChunks: embedding.publishedChunks,
+  };
+  return operationsView(rows);
 }

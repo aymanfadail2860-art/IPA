@@ -45,3 +45,4 @@ next-env.d.ts
 
 # retrieval evaluation output (docs/08b §4.5) — reports are registered, not committed
 /evals/retrieval/reports/
+/evals/retrieval/control-drafts/

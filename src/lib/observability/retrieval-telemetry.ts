@@ -1,4 +1,5 @@
 import type { EvidenceSet } from "../knowledge/core/evidence.ts";
+import { ProviderError, providerErrorFields } from "../knowledge/core/provider.ts";
 import type { RetrievalObserver, RetrievalStep } from "../knowledge/retrieval-core.ts";
 
 import { createAlert, type AlertCode, type AlertSink, type LineWriter } from "./alerts.ts";
@@ -9,6 +10,9 @@ import { createAlert, type AlertCode, type AlertSink, type LineWriter } from "./
  *   * One JSON line per retrieval (event "retrieval"): the outcome, the grade, the unmet
  *     conditions, the configuration id and the duration of each step (§12: the whole chain,
  *     query embedding, database search, reranking). Never the query, a title or any content.
+ *   * A step that failed at the provider carries the provider error fields (8B-I8 C3):
+ *     provider_errors = [{ step, provider, provider_error_kind, throttled, timeout, …, attempts }].
+ *     The per-attempt lines ("provider_call", providers/provider-metrics.ts) share request_id.
  *   * Alarms: retrieval unavailable (a system failure, B-007) and a runtime fingerprint that
  *     does not match the active configuration (P4 unmet while a configuration is in service).
  *     At most one per alarm code per 10 minutes and process — a burst of failing requests is
@@ -21,6 +25,8 @@ export interface RetrievalTelemetryDeps {
   sink: AlertSink;
   write?: LineWriter;
   now?: () => number;
+  /** Correlates the retrieval line with its provider_call lines. */
+  requestId?: string;
 }
 
 export interface RetrievalTelemetry {
@@ -44,6 +50,7 @@ export function createRetrievalTelemetry(deps: RetrievalTelemetryDeps): Retrieva
   const now = deps.now ?? Date.now;
   const steps: Partial<Record<RetrievalStep, number>> = {};
   const failedSteps: RetrievalStep[] = [];
+  const providerErrors: Record<string, unknown>[] = [];
 
   async function alert(code: AlertCode, details: Record<string, unknown>): Promise<void> {
     const at = now();
@@ -55,16 +62,30 @@ export function createRetrievalTelemetry(deps: RetrievalTelemetryDeps): Retrieva
 
   const line = (fields: Record<string, unknown>) => {
     try {
-      write(JSON.stringify({ event: "retrieval", at: new Date(now()).toISOString(), ...fields, steps_ms: steps, ...(failedSteps.length ? { failed_steps: failedSteps } : {}) }));
+      write(
+        JSON.stringify({
+          event: "retrieval",
+          at: new Date(now()).toISOString(),
+          ...(deps.requestId ? { request_id: deps.requestId } : {}),
+          ...fields,
+          steps_ms: steps,
+          ...(failedSteps.length ? { failed_steps: failedSteps } : {}),
+          ...(providerErrors.length ? { provider_errors: providerErrors } : {}),
+        }),
+      );
     } catch {
       // Telemetry never fails a request.
     }
   };
 
   return {
-    observe(step, milliseconds, ok) {
+    observe(step, milliseconds, ok, error) {
       steps[step] = Math.round(milliseconds);
       if (!ok) failedSteps.push(step);
+      // The step where the provider failed (not "total", which only repeats it).
+      if (!ok && step !== "total" && error instanceof ProviderError) {
+        providerErrors.push({ step, provider: error.provider, ...providerErrorFields(error), attempts: error.attempts });
+      }
     },
     async succeeded(set) {
       const { retrieval } = set;

@@ -10,6 +10,86 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-034 — 8B-I8: Final Implementation Closure (C1–C7)
+
+**Dato:** 12. oktober 2026
+**Område:** `docs/08b-production-foundation.md` §21.12, §21.14 og §21.15, `src/lib/knowledge/providers/`,
+`src/lib/knowledge/core/control-set.ts`, `workers/ingestion/`, `evals/engine/`, `workers/evaluation/`,
+`src/lib/knowledge/operations-*.ts`, `supabase/migrations/20261009000200_h6_regression_and_replay.sql`,
+`deploy/application/`, `deploy/monitoring/`, `.github/workflows/ci.yml`
+
+**Beslutning:**
+- **8B-I8 lukker kodehullerne C1–C7** fra afslutningsauditten. C7 blev fundet, da I8 begyndte,
+  godkendt som et reelt fund og implementeret først.
+  - **C7:** én udbydervej fra modelrække til katalog til runtimens transport og embedder i appen,
+    workeren og evalueringen. Der er intet fallback.
+  - **C1:** appen får AWS-credentials via Vercel OIDC → STS → kortlivede credentials. Hver
+    runtime har netop én credential-vej:
+    - Vercel: OIDC;
+    - ECS: taskrollen;
+    - evalueringsjobbet: GitHub OIDC;
+    - lokalt: udviklingskæden.
+
+    Ingen statiske nøgler.
+  - **C2:** et minimalt område, Drift af retrieval, i Admin over de eksisterende
+    livscyklusfunktioner. Der er ingen publisher-funktion i applikationen.
+  - **C3:** udbyderens fejltype pr. kald (`provider_call`).
+  - **C4:** H6 i drift suspenderer gennem den rigtige publiceringsvej. H6 skal kunne bevises af
+    rapporten, og publiceringen er idempotent.
+  - **C5:** et CI-workflow uden production-credentials.
+  - **C6:** et versioneret kontrolsæt af embedding-vektorer, der sammenlignes med en godkendt
+    reference.
+- **B-033's minimum er godkendt (version 1):** rate- og p95-alarmer vurderes kun med mindst 20
+  relevante forsøg i vinduet. Minimummet er versioneret i `deploy/monitoring/aggregate-alarms.json`.
+  Enkelthændelser er undtaget: hård regression, suspendering, ugyldig evaluering, utilgængelig
+  scanner, malware, utilgængelig retrieval, konfigurationsafvigelse og ændret embedding-model.
+- **Vercel OIDC:** audience er `sts.amazonaws.com` som standard og kan konfigureres
+  (`IPA_AWS_OIDC_AUDIENCE`), hvis trust-politikken kræver en anden. Rollens ARN er konfiguration.
+  STS kaldes i `eu-central-1`. At udvekslingen og trust-politikken passer, verificeres ved første
+  deployment.
+- **Kandidatmodellens række** (Embed v4) og dens partielle HNSW-indeks oprettes fortsat med en
+  migration, når modellen indføres i et miljø (§21.2). Det er en deployment-forudsætning. En
+  global migration nu ville få hver lokal worker og testworker til at kalde Bedrock.
+- **Kontrolsættets reference** er VALIDATION PENDING:
+  - Den optages med den rigtige udbyder og kalibreres ud fra gentagne optagelser.
+  - Den godkendes med en ny beslutning og lægges i koden.
+  - Der er ikke opfundet en tolerance.
+  - Uden reference logges kontrollen som ikke verificeret.
+
+**Overvejede alternativer:**
+- *Workerens credentials via SDK'ens standardkæde (C7/C1).* Fravalgt: den læser statiske nøgler,
+  profiler og filer stiltiende. Hver runtime får sin ene kilde, og resten fejler lukket.
+- *Lade publiceringstrinnet afvise H6 som før (C4).* Fravalgt: §4.4 kræver suspendering af
+  konfigurationen i drift. Afgørelsen hører til databasen, som genberegner fingeraftrykkene.
+- *Fjerne `record_evaluation_run` fra publisherens API (C4).* Fravalgt: H6-beviset ligger i
+  selve registreringen, så begge indgange er dækket uden at ændre rettighederne.
+- *Gemme kontrolreferencen i databasen med en Admin-godkendelse (C6).* Fravalgt i I8: det
+  kræver nyt skema og en ny godkendelsesflade. En gennemset kodeændring med en beslutning er
+  enklere og lige så sporbar.
+- *Køre ClamAV i CI (C5).* Fravalgt: signaturerne hentes eksternt, så kørslen er ikke
+  reproducerbar. EICAR mod 1.4.6 er dækket af scannerens egne workflows.
+
+**Begrundelse:** hver lukning holder de eksisterende grænser:
+- egress-autorisationen går forud for hvert kald;
+- workeren har mindst mulige rettigheder og aldrig service_role;
+- publisheren er isoleret, og en administrator kan ikke fabrikere et resultat;
+- P1–P9 er uændrede.
+
+Det, der kun kan bevises i det rigtige miljø, er markeret som en ekstern forudsætning frem for
+at blive antaget.
+
+**Udledt (til bekræftelse):**
+1. En gentaget publicering sender alarmen igen, markeret som gentagelse. En dublet er bedre end
+   en mistet kritisk alarm.
+2. Ved afvigelse i kontrolsættet stopper workeren med at embedde med modellen (fail-closed),
+   frem for at fortsætte og blande vektorer fra to modelversioner i indekset.
+3. Uden godkendt reference skrives en loglinje, ikke en alarm. Ellers ville alarmen gentage sig
+   dagligt, indtil kalibreringen er sket.
+4. Kontrollen kører dagligt som standard og kan ikke slås fra i produktion.
+5. En H6-kørsels performance-måling registreres ikke, fordi tiderne ikke måler konfigurationen.
+
+---
+
 ## B-033 — Kanonisk klassifikation af evalueringskørsler (8B-I7.1); B-032 afgjort; 8B-I7 lukket
 
 **Dato:** 9. oktober 2026

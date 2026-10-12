@@ -9,20 +9,25 @@ import { assertNoStaticKeys, BEDROCK_PROVIDER, classifyBedrockError, type Bedroc
 /**
  * The real Bedrock transport (8B-I2), on @aws-sdk/client-bedrock-runtime (InvokeModel only).
  *
- *   * Credentials are resolved by the SDK's default provider chain — web identity/OIDC, the ECS
- *     task role or SSO — or by a provider passed in (e.g. Vercel OIDC federation, D-11). No key
- *     is ever written in code or configuration, and static long-lived keys are refused in
- *     production (assertNoStaticKeys).
+ *   * Credentials are the runtime's one explicit path (providers/aws-credentials.ts, 8B-I8):
+ *     Vercel OIDC in the app, the ECS task role in the worker, GitHub OIDC in the evaluation
+ *     job; the SDK's default chain only locally. No key is ever written in code or
+ *     configuration, and static long-lived keys are refused in production (assertNoStaticKeys).
  *   * The SDK's own retries are switched off (maxAttempts 1): the provider-agnostic retry
  *     policy in core/provider.ts is the only one, so attempts and timeouts are predictable.
  *   * The client is created on the first call, so constructing a transport never needs
  *     credentials or network.
  */
 
+/** A provider of short-lived AWS credentials, as the Bedrock client takes it. */
+export type AwsCredentials = NonNullable<BedrockRuntimeClientConfig["credentials"]>;
+
 export interface SdkTransportOptions {
   region: string;
   credentials?: BedrockRuntimeClientConfig["credentials"];
   env?: Record<string, string | undefined>;
+  /** Only for tests: how the client is created (to see which credential provider it gets). */
+  createClient?: (config: BedrockRuntimeClientConfig) => Pick<BedrockRuntimeClient, "send">;
 }
 
 const encoder = new TextEncoder();
@@ -30,14 +35,15 @@ const decoder = new TextDecoder();
 
 export function createSdkBedrockTransport(options: SdkTransportOptions): BedrockTransport {
   assertNoStaticKeys(options.env ?? process.env, runtimeEnv(options.env?.IPA_RUNTIME_ENV ?? process.env.IPA_RUNTIME_ENV));
-  let client: BedrockRuntimeClient | null = null;
+  let client: Pick<BedrockRuntimeClient, "send"> | null = null;
+  const createClient = options.createClient ?? ((config: BedrockRuntimeClientConfig) => new BedrockRuntimeClient(config));
   return Object.freeze({
     region: options.region,
     async invoke(call: BedrockInvocation): Promise<unknown> {
       // The external-AI data boundary: nothing is transmitted without a genuine authorization of
       // exactly these texts (8B-I2.5). Checked before the client even exists.
       assertTransmittable(call.egress, { provider: BEDROCK_PROVIDER, modelId: call.modelId, body: call.body });
-      client ??= new BedrockRuntimeClient({ region: options.region, maxAttempts: 1, ...(options.credentials ? { credentials: options.credentials } : {}) });
+      client ??= createClient({ region: options.region, maxAttempts: 1, ...(options.credentials ? { credentials: options.credentials } : {}) });
       let output;
       try {
         output = await client.send(

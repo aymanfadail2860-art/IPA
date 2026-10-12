@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 
 import { createRedactor } from "@/lib/ai/core/redaction";
 
-import { validateGateSet } from "../../evals/engine/schema.ts";
+import { EMBEDDING_CONTROL_SET } from "@/lib/knowledge/core/control-set";
+
+import { isDevelopmentConfiguration } from "../../evals/engine/publication.ts";
+import { validateDeclaredConfiguration, validateGateSet } from "../../evals/engine/schema.ts";
 import { loadExample } from "./fixtures/eval-retrieval";
 
 /**
@@ -71,6 +74,22 @@ describe("the versioned evaluation files", () => {
       redactor.redact(fs.readFileSync(file, "utf8"));
       expect(redactor.counts, path.relative(REPO, file)).toEqual({});
     }
+  });
+
+  it("every declared configuration validates; only the fixture configuration uses development implementations (8B-I8 C5)", () => {
+    const configurations = files(path.join(EVALS, "retrieval/configurations"), (name) => name.endsWith(".json"));
+    expect(configurations.length).toBeGreaterThan(1);
+    for (const file of configurations) {
+      const declared = validateDeclaredConfiguration(JSON.parse(fs.readFileSync(file, "utf8")));
+      const development = isDevelopmentConfiguration(declared.configuration);
+      expect(development, path.basename(file)).toBe(path.basename(file) === "fixture-development.json");
+    }
+  });
+
+  it("the embedding control set contains no customer data either (8B-I8 C6)", () => {
+    const redactor = createRedactor();
+    for (const entry of EMBEDDING_CONTROL_SET.texts) redactor.redact(entry.text);
+    expect(redactor.counts).toEqual({});
   });
 
   it("the detectors would catch customer data (the scan is not vacuous)", () => {

@@ -1,5 +1,6 @@
 import { knowledgeText } from "../../src/lib/egress/classification.ts";
 import { embeddingInput, inputHash, modelLabel, type Embedder, type EmbeddingModelSpec } from "../../src/lib/knowledge/core/embedding.ts";
+import { ProviderError, providerErrorFields } from "../../src/lib/knowledge/core/provider.ts";
 import { createEmbedder } from "../../src/lib/knowledge/core/registry.ts";
 
 import { CHUNKER_VERSION, chunkDocument, type Chunk } from "./chunker.ts";
@@ -129,7 +130,11 @@ export interface PipelineDeps {
   gate: SecurityGate;
   /** Scan jobs only. Without them a scan job fails closed (technical scan failure). */
   scan?: ScanTools;
-  /** Defaults to the fail-closed registry (docs/07 §9.1). */
+  /**
+   * The worker's embedder resolution (providers.ts: catalogue → runtime transport, 8B-I8 C7);
+   * main.ts always passes it (guardrail). Without it — only in unit tests — the fail-closed
+   * development registry (docs/07 §9.1), which refuses every production model.
+   */
   embedderFor?: (model: EmbeddingModelSpec) => Embedder;
   /** Aborted by the runtime with { kind: AbortKind }. */
   signal?: AbortSignal;
@@ -182,8 +187,10 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
     const kind = abortKind(deps.signal);
     if (kind) throw new JobAborted(kind);
   };
+  let current = "start";
   const step = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
     checkAborted();
+    current = name;
     const begin = Date.now();
     const result = await run();
     log({ job: job.job_id, version: job.version_id, step: name, ms: Date.now() - begin });
@@ -304,7 +311,10 @@ export async function processJob(job: ClaimedJob, deps: PipelineDeps): Promise<J
     const name = (error as { name?: string }).name ?? "Error";
     const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : undefined;
     const outcome = await failOrLost("processing_error", `Behandlingen fejlede (${name}). Der forsøges igen automatisk.`, true);
-    log({ job: job.job_id, version: job.version_id, outcome, error: name, ...(code ? { code } : {}) });
+    // A provider failure carries its class (8B-I8 C3): kind, throttled, timeout, HTTP status, attempts.
+    const provider =
+      error instanceof ProviderError ? { provider: error.provider, operation: current === "embedding" ? "embed_document" : null, attempts: error.attempts, ...providerErrorFields(error) } : {};
+    log({ job: job.job_id, version: job.version_id, outcome, step: current, ms: Date.now() - started, error: name, ...(code ? { code } : {}), ...provider });
     return outcome;
   }
 }

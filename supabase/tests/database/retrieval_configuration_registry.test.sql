@@ -11,7 +11,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(202);
+select plan(220);
 
 -- ----------------------------------------------------------------------------
 -- Hjælpere (kun i testens transaktion)
@@ -772,7 +772,10 @@ select ok((select configuration_id = pg_temp.cfg('pgtap-bedrock', 4)
                   and deviations = array['retrieval_total_p95', 'query_embedding_p95', 'rerank_p95', 'ingestion_corpus_2000_pages_seconds']
            from knowledge.performance_measurements where checksum = (select m ->> 'checksum' from pgtap_m)),
   'målingen hører til kørslen og konfigurationen; ikke-nåede og ikke-målte mål er afvigelser');
-select throws_like($$ select pg_temp.record_measurement((select m from pgtap_m)) $$, '%duplicate key%', 'samme måling registreres kun én gang');
+select is(pg_temp.record_measurement((select m from pgtap_m)), (select id from knowledge.performance_measurements where checksum = (select m ->> 'checksum' from pgtap_m)),
+  'samme måling igen giver den registrerede — idempotent, ingen ny række (8B-I8 C4)');
+select throws_like($$ select pg_temp.record_measurement(pg_temp.reseal_measurement(jsonb_set((select m from pgtap_m), '{measuredAt}', '"2026-10-08T09:00:00.000Z"'))) $$,
+  '%duplicate key%', 'en anden måling med samme måling-id registreres ikke');
 select throws_like($$ select set_config('knowledge.registry_write', 'on', true); update knowledge.performance_measurements set deviations = '{}' $$,
   '%kan ikke ændres eller slettes%', 'en måling er append-only');
 select ok(exists (select 1 from audit.audit_log where action = 'knowledge.performance_measurement.recorded' and details ->> 'run_id' = 'run-q1'), 'registreringen auditeres');
@@ -907,6 +910,93 @@ select ok(knowledge.evaluation_run_event((select (e ->> 'id')::uuid from pgtap_e
 select ok((ops.system_health() -> 'evaluation') @> '{"classification": "hard_gate_regression", "regression": true, "requestedMode": "baseline"}'::jsonb
           and ops.system_health() #>> '{configuration,status}' = 'suspended',
   'systemstatus viser databasens klassifikation og den suspenderede konfiguration');
+
+-- ----------------------------------------------------------------------------
+-- 13. 8B-I8 C4: H6 i regression suspenderer sikkert; publiceringen er idempotent
+-- ----------------------------------------------------------------------------
+
+-- Konfiguration C (minScore 0.77) kommer i drift.
+insert into pgtap_events select 'k6', pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-k6'), 'baseline');
+create temp table pgtap_c as select (e ->> 'configurationId')::uuid as cfg, (e ->> 'id')::uuid as run from pgtap_events where name = 'k6';
+grant select on pgtap_c to public;
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select lives_ok($$ select knowledge.approve_retrieval_configuration((select cfg from pgtap_c), (select run from pgtap_c), '[]') $$, 'C godkendes på sin beståede kørsel');
+select lives_ok($$ select knowledge.activate_retrieval_configuration((select cfg from pgtap_c)) $$, 'C aktiveres');
+reset role;
+
+-- Et forfalsket H6-brud: runtime ER den erklærede konfiguration.
+create function pg_temp.with_forged_h6(r jsonb) returns jsonb language sql as $f$
+  select pg_temp.reseal(
+    jsonb_set(jsonb_set(jsonb_set(jsonb_set(r,
+      '{failures}', '[{"caseId":null,"gate":"H6","explanation":"pgTAP: påstået afvigelse","rootCauseNote":null}]'),
+      '{hardGates,5}', '{"id":"H6","status":"fail","violations":1}'),
+      '{valid}', 'false'),
+      '{verdict}', '"fail"'))
+$f$;
+-- En skjult afvigelse: runtime er en anden, men rapporten viser intet H6-brud.
+create function pg_temp.with_hidden_h6(r jsonb) returns jsonb language sql as $f$
+  select pg_temp.reseal(
+    jsonb_set(jsonb_set(jsonb_set(r,
+      '{configuration,runtime}', jsonb_set(r #> '{configuration,declared}', '{params,topK}', '3')),
+      '{configuration,runtimeFingerprint}', to_jsonb(knowledge.retrieval_fingerprint(jsonb_set(r #> '{configuration,declared}', '{params,topK}', '3')))),
+      '{configuration,matches}', 'false'))
+$f$;
+
+select throws_like($$ select pg_temp.publish_as(pg_temp.with_forged_h6(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-f6')), 'regression') $$,
+  '%Afvist (h6_evidence)%påstår%', 'et forfalsket H6-brud (fingeraftrykkene matcher) afvises');
+select throws_like($$ select pg_temp.publish_as(pg_temp.with_hidden_h6(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-s6')), 'regression') $$,
+  '%Afvist (h6_evidence)%netop ét H6-brud%', 'en afvigelse uden H6-brud afvises — den kan ikke registreres som bestået');
+select throws_like($$ select pg_temp.publish_as(jsonb_set(pg_temp.with_h6_breach(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-x6')), '{metrics,mrr_at_k,value}', '0.01'), 'regression') $$,
+  '%Afvist (report_checksum)%', 'en ændret rapport (checksum) afvises');
+select throws_like($$ select pg_temp.publish_as(pg_temp.with_h6_breach(pg_temp.adapt(pg_temp.ts_report(), 0.88, 'run-b6')), 'regression') $$,
+  '%Afvist (invalid_run)%H6%', 'H6 i en rapport om B (ikke i drift) afvises som ugyldig');
+select throws_like($$ select pg_temp.publish_as(pg_temp.reseal(jsonb_set(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-e7'), '{configuration,environment}', '"fixture"')), 'regression') $$,
+  '%Afvist (invalid_run)%H7%', 'H7 for konfigurationen i drift er ugyldig og suspenderer ikke');
+select ok((select status = 'active' from knowledge.retrieval_configurations where id = (select cfg from pgtap_c))
+          and (select count(*) = 0 from knowledge.evaluation_runs where run_id in ('run-f6', 'run-s6', 'run-x6', 'run-b6', 'run-e7')),
+  'ingen af dem efterlader en kørsel, og C er fortsat i drift');
+
+-- Det rigtige H6-brud i drift: registreres og suspenderer C i samme transaktion.
+create temp table pgtap_h6 as select pg_temp.with_h6_breach(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-h6')) as r;
+grant select on pgtap_h6 to public;
+insert into pgtap_events select 'h6', pg_temp.publish_as((select r from pgtap_h6), 'regression');
+select ok((select e @> '{"classification": "hard_gate_regression", "registeredWhile": "active", "configurationStatus": "suspended", "suspended": true, "replayed": false}'::jsonb
+                  and e -> 'failedHardGates' = '["H6"]'::jsonb
+                  and (e ->> 'configurationId')::uuid = (select cfg from pgtap_c)
+           from pgtap_events where name = 'h6'),
+  'H6 for konfigurationen i drift er en hård regression, og netop den konfiguration suspenderes');
+select ok((select status = 'suspended' and suspension_reason = 'hard_gate_failed' and suspension_run_id = (select (e ->> 'id')::uuid from pgtap_events where name = 'h6')
+           from knowledge.retrieval_configurations where id = (select cfg from pgtap_c)),
+  'suspenderingen peger på H6-kørslen');
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select is(knowledge.retrieval_context() #>> '{configuration,productionReady}', 'false', 'efter suspenderingen kan der ikke udstedes production-evidens (P3)');
+reset role;
+
+-- Idempotent: samme rapport igen ændrer intet.
+insert into pgtap_events select 'h6r', pg_temp.publish_as((select r from pgtap_h6), 'regression');
+select ok((select (r.e ->> 'id') = (o.e ->> 'id') and r.e @> '{"replayed": true, "classification": "hard_gate_regression"}'::jsonb
+           from pgtap_events r, pgtap_events o where r.name = 'h6r' and o.name = 'h6'),
+  'samme rapport igen giver den registrerede kørsels hændelse (replayed)');
+select ok((select count(*) = 1 from knowledge.evaluation_runs where run_id = 'run-h6')
+          and (select count(*) = 1 from audit.audit_log where action = 'knowledge.evaluation_run.published' and entity_id = (select e ->> 'id' from pgtap_events where name = 'h6'))
+          and (select count(*) = 1 from knowledge.retrieval_configuration_transitions where configuration_id = (select cfg from pgtap_c) and to_status = 'suspended'),
+  'ingen ny kørsel, audit eller suspendering ved gentagelsen');
+select throws_like($$ select pg_temp.publish_as(pg_temp.adapt(pg_temp.ts_report(), 0.77, 'run-h6'), 'regression') $$,
+  '%Afvist (duplicate)%', 'en anden rapport med samme kørsels-id er ikke en gentagelse');
+select throws_like($$ select pg_temp.publish_as(jsonb_set((select r from pgtap_h6), '{metrics,mrr_at_k,value}', '0.01'), 'regression') $$,
+  '%Afvist (report_checksum)%', 'en ændret rapport med den registreredes checksum er ikke en gentagelse — den efterprøves og afvises');
+
+-- Performance: H6-kørslens tider måler ikke konfigurationen; samme måling igen er idempotent.
+select throws_like($$ select pg_temp.record_measurement(pg_temp.measurement(pg_temp.ts_performance(), 'run-h6', (select runtime_fingerprint from knowledge.evaluation_runs where run_id = 'run-h6'))) $$,
+  '%Afvist (run)%H6%', 'en måling fra en H6-kørsel registreres ikke');
+create temp table pgtap_m6 as select pg_temp.measurement(pg_temp.ts_performance(), 'run-k6', (select runtime_fingerprint from knowledge.evaluation_runs where run_id = 'run-k6')) as m;
+grant select on pgtap_m6 to public;
+create temp table pgtap_m6_ids as select pg_temp.record_measurement((select m from pgtap_m6)) as id union all select pg_temp.record_measurement((select m from pgtap_m6));
+select ok((select count(distinct id) = 1 and count(*) = 2 from pgtap_m6_ids)
+          and (select count(*) = 1 from knowledge.performance_measurements where measurement_id = (select m ->> 'measurementId' from pgtap_m6)),
+  'samme måling to gange giver én registrering');
 
 select * from finish();
 rollback;

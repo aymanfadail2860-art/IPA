@@ -94,7 +94,9 @@ export class ProviderError extends Error {
   /** For input errors: the index of the offending text or document, so it can be isolated. */
   readonly inputIndex: number | null;
   readonly attempts: number;
-  constructor(kind: ProviderErrorKind, provider: string, message: string, options: { inputIndex?: number; attempts?: number; cause?: unknown } = {}) {
+  /** The provider's HTTP status, when it answered with one (8B-I8 C3). Never its message. */
+  readonly httpStatus: number | null;
+  constructor(kind: ProviderErrorKind, provider: string, message: string, options: { inputIndex?: number; attempts?: number; httpStatus?: number; cause?: unknown } = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = "ProviderError";
     this.kind = kind;
@@ -102,7 +104,37 @@ export class ProviderError extends Error {
     this.retryable = RETRYABLE_ERROR_KINDS.includes(kind);
     this.inputIndex = options.inputIndex ?? null;
     this.attempts = options.attempts ?? 1;
+    this.httpStatus = options.httpStatus ?? null;
   }
+}
+
+/**
+ * The provider error fields of an operational log line (docs/08b §14, 8B-I8 C3): the kind,
+ * whether it was throttling (429) or a timeout, and the HTTP status — enough to compute the
+ * provider error, throttling and timeout rates. Never the provider's message, a query or a text.
+ */
+export interface ProviderErrorFields {
+  provider_error_kind: ProviderErrorKind | null;
+  throttled: boolean;
+  timeout: boolean;
+  retryable: boolean | null;
+  http_status: number | null;
+  error_class: string;
+}
+
+export function providerErrorFields(error: unknown): ProviderErrorFields {
+  if (error instanceof ProviderError) {
+    return {
+      provider_error_kind: error.kind,
+      throttled: error.kind === "throttled" || error.httpStatus === 429,
+      timeout: error.kind === "timeout",
+      retryable: error.retryable,
+      http_status: error.httpStatus,
+      error_class: error.name,
+    };
+  }
+  const name = typeof (error as { name?: unknown })?.name === "string" ? (error as { name: string }).name : "Error";
+  return { provider_error_kind: null, throttled: false, timeout: false, retryable: null, http_status: null, error_class: name };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -153,7 +185,12 @@ export async function withRetry<T>(provider: string, policy: RetryPolicy, operat
       const classified =
         error instanceof ProviderError ? error : new ProviderError("invalid_response", provider, "Uventet fejl i provider-adapteren.", { cause: error });
       if (!classified.retryable || attempt >= policy.maxAttempts) {
-        throw new ProviderError(classified.kind, provider, classified.message, { inputIndex: classified.inputIndex ?? undefined, attempts: attempt, cause: classified.cause ?? classified });
+        throw new ProviderError(classified.kind, provider, classified.message, {
+          inputIndex: classified.inputIndex ?? undefined,
+          attempts: attempt,
+          httpStatus: classified.httpStatus ?? undefined,
+          cause: classified.cause ?? classified,
+        });
       }
       await sleep(backoffDelay(policy, attempt, deps.random));
     } finally {

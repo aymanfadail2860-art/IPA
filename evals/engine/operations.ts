@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
+import { CONTROL_REFERENCES } from "../../src/lib/knowledge/core/control-references.ts";
+import { referenceFor, runControlCheck, type ControlReference } from "../../src/lib/knowledge/core/control-set.ts";
+import { modelLabel, type EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
 
 import { createDatabaseRetrieval, embeddingModelIdFor } from "./database-retrieval.ts";
@@ -48,6 +50,8 @@ export interface EvaluationOperationOptions {
   awaitWorker?: () => Promise<void>;
   now?: () => Date;
   log?: (event: Record<string, unknown>) => void;
+  /** The approved control-set references (8B-I8 C6). Default: core/control-references.ts. */
+  controlReferences?: readonly ControlReference[];
 }
 
 export interface EvaluationOperationResult {
@@ -71,6 +75,7 @@ export async function runEvaluationOperation(options: EvaluationOperationOptions
     });
     ingestion = provisioned.ingestion;
   }
+  const control = await controlCheck(options.embedder, options.controlReferences ?? CONTROL_REFERENCES, options.log);
   const snapshot = await env.snapshot(inputs.set.manifest);
   const recorder = createPerformanceRecorder();
   const retrieval = createDatabaseRetrieval({
@@ -83,6 +88,7 @@ export async function runEvaluationOperation(options: EvaluationOperationOptions
     baselineReranker: options.baselineReranker,
     now: options.now,
     observe: recorder.observer,
+    controlDrift: control === "fail",
   });
   const report = await runEvaluation({
     set: inputs.set,
@@ -121,4 +127,32 @@ export function writeVersionedReport(out: string, report: EvaluationReport, perf
   const sums = files.map(([name, content]) => `${sha256(content)}  ${name}`).join("\n");
   fs.writeFileSync(path.join(out, `${report.runId}.sha256`), `${sums}\n`);
   return [...files.map(([name]) => path.join(out, name)), path.join(out, `${report.runId}.sha256`)];
+}
+
+/**
+ * The embedding control set before the run (docs/08b §2.5, 8B-I8 C6). With an approved reference
+ * for the model, the runtime model must still answer as it; a failure marks the runtime model
+ * version, so the run fails H6 — never accepted. A provider error fails the run (evaluation_failed).
+ */
+async function controlCheck(
+  embedder: EmbeddingProvider,
+  references: readonly ControlReference[],
+  log: ((event: Record<string, unknown>) => void) | undefined,
+): Promise<"pass" | "fail" | "unverified"> {
+  const d = embedder.descriptor;
+  const model = { provider: d.provider, model_name: d.model, model_version: d.modelVersion, dimensions: d.dimensions };
+  const reference = referenceFor(model, references);
+  if (!reference) {
+    if (d.provider !== "test") log?.({ event: "eval_control_unverified", model: modelLabel(model), reason: "no_approved_reference" });
+    return "unverified";
+  }
+  const result = await runControlCheck(embedder, reference);
+  log?.({
+    event: result.status === "pass" ? "eval_control_passed" : "eval_control_failed",
+    model: modelLabel(model),
+    problems: result.problems.join(","),
+    min_cosine: result.minCosine,
+    min_margin: result.minMargin,
+  });
+  return result.status;
 }

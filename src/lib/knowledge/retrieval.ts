@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { getServerSession } from "@/lib/auth/server-session";
 import { AlertConfigError, createAlertSink, logAlertSink, type AlertSink } from "@/lib/observability/alerts";
@@ -9,6 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import type { EvidenceSet } from "./core/evidence";
 import { applicationProviderRuntime, providersForContext } from "./providers/configured";
+import { observedRuntime, type ProviderCallLog } from "./providers/provider-metrics";
 import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
 import {
   DEFAULT_RETRIEVAL_CONFIG,
@@ -75,9 +78,10 @@ export interface RetrievalDevOptions {
 
 export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions = {}): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
-  const telemetry = createRetrievalTelemetry({ sink: alertSink() });
+  const requestId = randomUUID();
+  const telemetry = createRetrievalTelemetry({ sink: alertSink(), requestId });
   try {
-    const set = await retrieveObserved(request, dev, telemetry.observe);
+    const set = await retrieveObserved(request, dev, telemetry.observe, requestId);
     await telemetry.succeeded(set);
     return set;
   } catch (error) {
@@ -87,7 +91,12 @@ export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev:
   }
 }
 
-async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions, observe: RetrievalObserver): Promise<EvidenceSet> {
+/** One JSON line per provider call (8B-I8 C3); the platform aggregates them (deploy/monitoring/). */
+const writeProviderCall: ProviderCallLog = (fields) => {
+  process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...fields })}\n`);
+};
+
+async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions, observe: RetrievalObserver, requestId: string): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   // An active platform user is required. WHICH documents the user may read is decided by the
   // database (docs/07 §4.1): administrators through the role, advisors and leaders through
@@ -100,7 +109,8 @@ async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: Retrie
   // Unavailable is a system failure, never an empty (= "insufficient") result.
   if (availability.state === "unavailable") throw new RetrievalError("unavailable", availability.reason);
   if (!context) throw new RetrievalError("unavailable", "Retrieval-konfigurationen kunne ikke læses fra databasen.");
-  const providers = providersForContext(context, applicationProviderRuntime);
+  const labels = { runtime: "application" as const, request_id: requestId, configuration_id: context.configuration?.id ?? null, configuration_fingerprint: context.configuration?.fingerprint ?? null };
+  const providers = providersForContext(context, () => observedRuntime(applicationProviderRuntime(), labels, writeProviderCall));
   // The configuration's own parameters; without one, the defaults (development).
   const config = context.configuration?.params ?? DEFAULT_RETRIEVAL_CONFIG;
   return runRetrieval(request, {

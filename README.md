@@ -20,8 +20,10 @@ evaluerede produkter og dokumenttyper) og 8B-I6.2 (produktet identificeres ved s
 ved navnet). 8B-I7 (evalueringsdrift, monitorering og regression: evalueringsmiljø, publicering
 som særskilt CI-job, regressionsalarmer, sundhedskontrol, Systemstatus i Admin og
 performance-målinger) er gennemført og godkendt og lukket med 8B-I7.1 (databasen klassificerer
-evalueringskørslen). 8B er ikke afsluttet: små kodehuller og deployment, validering, compliance og
-indhold udestår (`docs/08b` §21.14). 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
+evalueringskørslen). 8B-I8 har lukket de sidste kodehuller (C1–C7: production-embedder i
+workeren, credentials pr. runtime, Drift af retrieval i Admin, udbyderens fejltype i loglinjerne,
+H6 i drift suspenderer, CI og kontrolsættet af embedding-vektorer). 8B er ikke afsluttet:
+deployment, validering, compliance og indhold udestår (`docs/08b` §21.15). 8C er ikke påbegyndt. Master-roadmappen med de 21 låste faser står i `docs/roadmap.md`. Moduler fra senere faser viser stadig fiktive
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 

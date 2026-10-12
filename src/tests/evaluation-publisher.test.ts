@@ -112,9 +112,30 @@ describe("the publisher refuses before anything is sent", () => {
     expect(await refusal(buildReport({ configuration: { ...fixtureMaterial(), embedding: null } }))).toMatch(/udviklingsimplementering/);
   });
 
-  it("evaluated as A, runtime B: the runtime is not the declared configuration", async () => {
+  it("evaluated as A, runtime B: publishable only as an invalid H6 run — the database decides (8B-I8 C4)", async () => {
     const runtime = fixtureMaterial({ params: { ...fixtureMaterial().params, topK: 3 } });
-    expect(await refusal(buildReport({ runtime }))).toMatch(/Runtime er ikke den erklærede konfiguration/);
+    const h6 = buildReport({ runtime });
+    expect(h6.configuration.matches).toBe(false);
+    expect(h6.failures.filter((failure) => failure.gate === "H6" && failure.caseId === null)).toHaveLength(1);
+    expect(h6).toMatchObject({ valid: false, verdict: "fail" });
+    // Consistent: it reaches the database, which suspends the configuration in service or refuses it as invalid.
+    expect(verifyForPublication(h6, GATES_V1)).toEqual({ ok: true });
+
+    // The difference without the H6 violation (it was removed and the report resealed): refused.
+    const hidden = buildReport({ runtime });
+    hidden.failures = hidden.failures.filter((failure) => failure.gate !== "H6");
+    hidden.hardGates = hidden.hardGates.map((gate) => (gate.id === "H6" ? { ...gate, status: "pass", violations: 0 } : gate));
+    expect(await refusal(reseal(hidden))).toMatch(/viser ikke netop ét H6-brud/);
+    // "matches" that contradicts the fingerprints: refused.
+    const lying = buildReport({ runtime });
+    lying.configuration.matches = true;
+    expect(await refusal(reseal(lying))).toMatch(/matches/);
+  });
+
+  it("a forged H6: a run-level H6 violation while the runtime is the declared configuration", async () => {
+    const forged = buildReport({ violations: [{ gate: "H6", caseId: null, explanation: "Påstået afvigelse." }] });
+    expect(forged.configuration.matches).toBe(true);
+    expect(await refusal(forged)).toMatch(/påstår et H6-brud på kørselsniveau/);
   });
 
   it("a fingerprint claim that is not the material's", async () => {

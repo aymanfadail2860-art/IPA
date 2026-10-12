@@ -1,0 +1,133 @@
+# CI (docs/08b D-16, §17 pkt. 1, §21.15 C5; 8B-I8).
+#
+#   checks    npm ci with the locked lockfile → lint → typecheck → unit tests and guardrails →
+#             evaluation data guard (sets, schemas, gates, configurations, no customer data) →
+#             a fixture evaluation run → build
+#   database  a FRESH local Supabase (the CLI from devDependencies, throwaway local keys) →
+#             every migration from scratch and the development seed → pgTAP → the app built and
+#             started in the test runtime and in the production runtime → integration tests
+#
+# No production credentials, no AWS access, no secrets: the only keys are the ones the local
+# Supabase generates for itself inside the job. ClamAV runs in its own workflows (EICAR against
+# the approved 1.4.6 engine: clamav-engine-candidate.yml, clamav-signatures.yml); here the
+# upload-security tests use the development fixture scanner, and the clamd-backed EICAR test is
+# skipped (it needs IPA_TEST_CLAMD_HOST).
+#
+# Branch protection (an external prerequisite, set in GitHub): require both jobs on main.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck, unit, build, eval data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+
+      - name: Install (locked lockfile)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck (app and workers)
+        run: npm run typecheck
+
+      - name: Unit tests and guardrails
+        run: npm test
+
+      - name: Evaluation data guard
+        run: npx vitest run src/tests/eval-retrieval-data.test.ts src/tests/embedding-control-set.test.ts
+
+      - name: Evaluation engine (fixture adapter, development providers)
+        env:
+          IPA_RUNTIME_ENV: test
+        run: |
+          set +e
+          npm run eval:retrieval -- --out "$RUNNER_TEMP/eval"
+          CODE=$?
+          set -e
+          # 0 pass, 1 fail/uncertain (the example set is small): the run completed. 2 or 3 is an error.
+          test "$CODE" -le 1
+
+      - name: Build
+        run: npm run build
+
+  database:
+    name: Fresh database, pgTAP and integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+
+      - name: Install (locked lockfile)
+        run: npm ci
+
+      - name: Start a fresh local Supabase (throwaway local keys only)
+        run: npx supabase start -x studio,imgproxy,realtime,edge-runtime,logflare,vector,supavisor,postgres-meta
+
+      - name: Local test environment (never a production value)
+        run: |
+          eval "$(npx supabase status -o env)"
+          for value in "$API_URL" "$ANON_KEY" "$SERVICE_ROLE_KEY" "$DB_URL"; do test -n "$value"; done
+          PASSWORD=$(openssl rand -hex 16)
+          echo "::add-mask::$PASSWORD"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "IPA_DEV_SEED_PASSWORD=$PASSWORD"
+            echo "IPA_TEST_DB_ADMIN_URL=$DB_URL"
+          } > .env.local
+
+      - name: Every migration from scratch, the seed and the development users
+        run: |
+          npx supabase db reset --local
+          npm run db:seed
+
+      - name: pgTAP
+        run: npx supabase test db
+
+      - name: Build and start the app (test runtime; production runtime for "retrieval unavailable")
+        run: |
+          npm run build
+          (IPA_RUNTIME_ENV=test nohup npx next start -p 3300 > "$RUNNER_TEMP/app-test.log" 2>&1 &)
+          (IPA_RUNTIME_ENV=production nohup npx next start -p 3302 > "$RUNNER_TEMP/app-production.log" 2>&1 &)
+          for port in 3300 3302; do
+            for i in $(seq 1 60); do curl -s -o /dev/null "http://127.0.0.1:$port/login" && break; sleep 1; done
+            curl -s -o /dev/null "http://127.0.0.1:$port/login"
+          done
+
+      - name: Integration tests
+        env:
+          IPA_RUNTIME_ENV: test
+          IPA_APP_URL: http://127.0.0.1:3300
+          IPA_APP_URL_RETRIEVAL_OFF: http://127.0.0.1:3302
+        run: npm run test:integration
+
+      - name: App logs on failure
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP"/app-*.log || true

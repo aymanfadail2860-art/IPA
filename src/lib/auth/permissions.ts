@@ -5,8 +5,8 @@
  * named bundles of permissions. The keys below are the examples fixed in phase 3; the full
  * catalogue is a non-blocking decision that is extended during implementation.
  *
- * In phase 5 these checks only shape the mock UI. They are not a security boundary: real
- * enforcement happens server-side (application layer + RLS) in a later phase.
+ * These checks shape the UI and are repeated server-side. They are not the security boundary
+ * on their own: the database enforces access with RLS and its functions (phase 6).
  */
 
 export type PermissionScope = "own" | "team" | "all";
