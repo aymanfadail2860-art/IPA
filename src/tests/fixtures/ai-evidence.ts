@@ -58,6 +58,7 @@ export function issueEvidence(
     query: { text: "droner", mode: "current", asOf: "2026-10-02", language: "da", filters: {} },
     embedding: embedder ? { embedder, modelId: FIXTURE_MODEL.id } : null,
     reranker,
+    method: "hybrid",
     context: parseRetrievalContext(fixtureContext()),
     algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
     params: { ...DEFAULT_RETRIEVAL_CONFIG },

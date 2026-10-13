@@ -11,7 +11,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(220);
+select plan(265);
 
 -- ----------------------------------------------------------------------------
 -- Hjælpere (kun i testens transaktion)
@@ -997,6 +997,193 @@ create temp table pgtap_m6_ids as select pg_temp.record_measurement((select m fr
 select ok((select count(distinct id) = 1 and count(*) = 2 from pgtap_m6_ids)
           and (select count(*) = 1 from knowledge.performance_measurements where measurement_id = (select m ->> 'measurementId' from pgtap_m6)),
   'samme måling to gange giver én registrering');
+
+-- ----------------------------------------------------------------------------
+-- 14. B-035 (beta, L1): retrieval-metoden product_documents uden embedding og reranker
+-- ----------------------------------------------------------------------------
+
+create function pg_temp.doc_material(p_max int) returns jsonb language sql as $f$
+  select jsonb_build_object('method', 'product_documents', 'embedding', null, 'reranker', null,
+    'algorithmVersion', 'product-documents-1', 'params', jsonb_build_object('maxChars', p_max), 'chunkerVersions', jsonb_build_array('structure/1'))
+$f$;
+-- Den genererede rapport for en product_documents-konfiguration (samme observationer; metoden er
+-- materialet). Mekanikken i registret efterprøves — ikke metodens kvalitet (docs/beta.md §5.1).
+create function pg_temp.doc_report(p_max int, p_run text) returns jsonb language sql stable as $f$
+  select pg_temp.with_material(jsonb_set(pg_temp.adapt(pg_temp.ts_report(), 0.1, p_run), '{configuration,label}', '"pgtap-documents"'),
+    pg_temp.doc_material(p_max), p_run)
+$f$;
+
+-- Den hybride modelkontrol er uændret (B-035 tilpasser den kun for product_documents): C (hybrid,
+-- i drift som suspenderet) melder 'model', når en anden embedding-model er aktiv.
+create temp table pgtap_active_model as select id from knowledge.embedding_models where status = 'active';
+grant select on pgtap_active_model to public;
+update knowledge.embedding_models set status = 'retired', retired_at = now() where status = 'active';
+update knowledge.embedding_models set status = 'active', activated_at = now(), retired_at = null where id = '61000000-0000-4000-a000-000000000002';
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select ok((knowledge.retrieval_context() -> 'configuration' -> 'notReady') ? 'model',
+  'en hybrid konfiguration, hvis model ikke er den aktive, er fortsat ikke klar (model)');
+reset role;
+update knowledge.embedding_models set status = 'candidate', activated_at = null where id = '61000000-0000-4000-a000-000000000002';
+update knowledge.embedding_models set status = 'active', retired_at = null where id in (select id from pgtap_active_model);
+
+-- Materialet
+select is(knowledge.document_retrieval_material_problem(pg_temp.doc_material(360000)), null, 'et gyldigt product_documents-materiale har intet problem');
+select is(knowledge.retrieval_material_method(pg_temp.doc_material(360000)), 'product_documents', 'metoden læses af materialet');
+select is(knowledge.retrieval_material_method(pg_temp.base_report() #> '{configuration,declared}'), 'hybrid', 'et materiale uden "method" er hybridt (8B uændret)');
+select is(knowledge.retrieval_material_problem(m), msg, format('materialet afvises: %s', msg))
+from (values
+  (jsonb_set(pg_temp.doc_material(360000), '{embedding}', pg_temp.base_report() #> '{configuration,declared,embedding}'), 'metoden product_documents har ingen embedding-model'),
+  (jsonb_set(pg_temp.doc_material(360000), '{reranker}', pg_temp.base_report() #> '{configuration,declared,reranker}'), 'metoden product_documents har ingen reranker'),
+  (jsonb_set(pg_temp.doc_material(360000), '{method}', '"hybrid"'), 'ukendt retrieval-metode'),
+  (pg_temp.doc_material(360000) || '{"topK": 8}', 'materialet har ikke de definerende felter'),
+  (jsonb_set(pg_temp.doc_material(360000), '{algorithmVersion}', '"hybrid-rrf-1"'), 'algoritmeversionen er ugyldig'),
+  (pg_temp.doc_material(9999), 'parameteren maxChars er ugyldig'),
+  (jsonb_set(pg_temp.doc_material(360000), '{params,maxChars}', '20000.5'), 'parameteren maxChars er ugyldig'),
+  (jsonb_set(pg_temp.doc_material(360000), '{params}', '{"maxChars": 20000, "minScore": 0.1}'), 'parametrene er ufuldstændige'),
+  (jsonb_set(pg_temp.doc_material(360000), '{chunkerVersions}', '[]'), 'chunker-versionerne er ugyldige')
+) as t(m, msg);
+select ok(not knowledge.retrieval_material_is_development(pg_temp.doc_material(360000)), 'en gyldig product_documents-konfiguration er ikke en udviklingskonfiguration');
+select ok(knowledge.retrieval_material_is_development(jsonb_set(pg_temp.doc_material(360000), '{reranker}', '{"id": "none"}')),
+  'et ugyldigt product_documents-materiale er altid en udviklingskonfiguration');
+select ok(knowledge.retrieval_material_is_development(pg_temp.material('{reranker,id}', '"none"')), 'et hybridt materiale med "none" er fortsat en udviklingskonfiguration');
+
+-- Embedding-modellen følger metoden (constraint), uanset vej ind.
+select throws_ok($$ select set_config('knowledge.registry_write', 'on', true);
+  insert into knowledge.retrieval_configurations (label, version, material, fingerprint, embedding_model_id, created_by_role)
+  values ('pgtap-x', 1, pg_temp.doc_material(360000), knowledge.retrieval_fingerprint(pg_temp.doc_material(360000)), (select id from pgtap_model), 'test') $$,
+  '23514', null, 'en konfiguration uden embedding kan ikke pege på en embedding-model');
+select throws_ok($$ select set_config('knowledge.registry_write', 'on', true);
+  insert into knowledge.retrieval_configurations (label, version, material, fingerprint, embedding_model_id, created_by_role)
+  values ('pgtap-y', 1, pg_temp.material('{params,minScore}', '0.33'), knowledge.retrieval_fingerprint(pg_temp.material('{params,minScore}', '0.33')), null, 'test') $$,
+  '23514', null, 'en hybrid konfiguration skal have sin embedding-model');
+select set_config('knowledge.registry_write', '', true);
+
+-- Registrering: samme vej som en hybrid konfiguration; erklæret og runtime skal være samme metode.
+select throws_like($$ select pg_temp.publish(pg_temp.reseal(jsonb_set(jsonb_set(jsonb_set(pg_temp.doc_report(360000, 'run-pdm'),
+    '{configuration,runtime}', pg_temp.base_report() #> '{configuration,declared}'),
+    '{configuration,runtimeFingerprint}', to_jsonb(knowledge.retrieval_fingerprint(pg_temp.base_report() #> '{configuration,declared}'))),
+    '{configuration,matches}', 'false'))) $$,
+  '%Afvist (configuration)%anden retrieval-metode%', 'en kørsel, der brugte en anden metode end den erklærede, afvises');
+insert into pgtap_runs select 'pd1', pg_temp.publish(pg_temp.doc_report(360000, 'run-pd1'));
+select ok((select status = 'candidate' and embedding_model_id is null and reranker_id is null
+           from knowledge.retrieval_configurations where id = pg_temp.cfg('pgtap-documents')),
+  'product_documents registreres som kandidat uden embedding-model og reranker');
+
+-- Ingen automatisk production-evidens: en kandidat giver intet beredskab.
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select isnt(knowledge.retrieval_context() #>> '{configuration,id}', pg_temp.cfg('pgtap-documents')::text, 'en registreret kandidat er ikke i drift');
+select throws_ok(format($$ select knowledge.approve_retrieval_configuration(%L, %L, '[]') $$, pg_temp.cfg('pgtap-documents'), (select id from pgtap_runs where name = 'pd1')),
+  '42501', null, 'en rådgiver kan ikke godkende');
+reset role;
+
+-- Godkendelse og aktivering af et menneske med system.settings.manage; modellerne røres ikke.
+create temp table pgtap_models_before as select id, status from knowledge.embedding_models;
+grant select on pgtap_models_before to public;
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select lives_ok(format($$ select knowledge.approve_retrieval_configuration(%L, %L, '[]') $$, pg_temp.cfg('pgtap-documents'), (select id from pgtap_runs where name = 'pd1')),
+  'en administrator godkender konfigurationen efter den beståede, registrerede kørsel');
+select lives_ok(format($$ select knowledge.activate_retrieval_configuration(%L) $$, pg_temp.cfg('pgtap-documents')),
+  'og aktiverer den');
+reset role;
+select is((select status from knowledge.retrieval_configurations where id = pg_temp.cfg('pgtap-documents')), 'active', 'product_documents er i drift');
+select ok(not exists (select 1 from knowledge.embedding_models m join pgtap_models_before b on b.id = m.id where m.status <> b.status),
+  'aktiveringen ændrer ingen embedding-model');
+
+-- Retrieval-konteksten: metoden, ingen model eller reranker, beredskab uafhængigt af den aktive model.
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select ok((select c -> 'configuration' @> '{"method": "product_documents", "embeddingModelId": null, "rerankerId": null, "productionReady": true, "notReady": []}'::jsonb
+           from knowledge.retrieval_context() c),
+  'retrieval-konteksten melder metoden og beredskab uden embedding-model og reranker');
+reset role;
+update knowledge.embedding_models set status = 'retired', retired_at = now() where status = 'active';
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select is(knowledge.retrieval_context() #>> '{configuration,productionReady}', 'true', 'også uden nogen aktiv embedding-model');
+reset role;
+
+-- knowledge.product_document_chunks: som brugeren, gennem RLS og adgangsfiltret.
+insert into auth.users (id, email, aud, role, raw_user_meta_data) values
+  ('60000000-0000-4000-a000-0000000000d3', 'r.adv-d3@ipa.test', 'authenticated', 'authenticated', '{"display_name":"pgTAP Rådgiver uden adgang"}');
+insert into identity.user_roles (user_id, role_id)
+select u.id, r.id from identity.users u join identity.roles r on r.key = 'advisor' where u.auth_id = '60000000-0000-4000-a000-0000000000d3';
+insert into knowledge.document_access_grants (document_id, permission_key, grantee_type, user_id)
+select '63000000-0000-4000-a000-000000000001'::uuid, 'knowledge.document.read', 'user', u.id from identity.users u
+where u.auth_id = '60000000-0000-4000-a000-000000000002';
+
+select ok(not has_function_privilege(r, 'knowledge.product_document_chunks(uuid,text,date,text,uuid[],text[],int)', 'EXECUTE'),
+  format('%s kan ikke køre product_document_chunks', r))
+from unnest(array['anon', 'service_role']) r;
+
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select is((select array_agg(chunk_id::text || ':' || version_chunk_count) from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001')),
+  array['65000000-0000-4000-a000-000000000001:1'],
+  'rådgiveren med adgang får hele den publicerede version — og kun den (versionen under behandling indgår ikke)');
+select is((select count(*)::int from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', p_document_types => array['acceptance_rules'])), 0,
+  'dokumenttyperne kan kun snævre ind');
+select throws_ok($$ select * from knowledge.product_document_chunks(null) $$, '22023', null, 'et produkt er påkrævet');
+select throws_ok($$ select * from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', p_max_chars => 5) $$, '22023', null, 'budgettet skal være gyldigt');
+select throws_ok($$ select * from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', 'as_of') $$, '22023', null, 'historisk opslag kræver en dato');
+select is((select count(*)::int from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', 'as_of', '2019-06-01')), 0,
+  'en dato før versionens gyldighed giver intet');
+reset role;
+select pg_temp.as_user('60000000-0000-4000-a000-0000000000d3');
+set local role authenticated;
+select is((select count(*)::int from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001')), 0,
+  'en rådgiver uden adgang til dokumentet får intet (RLS og adgangsfiltret)');
+reset role;
+
+-- Over budgettet afvises kaldet; det afkortes aldrig.
+insert into knowledge.documents (id, product_id, document_type, source_id, title)
+select '63000000-0000-4000-a000-0000000000d3', '62000000-0000-4000-a000-000000000001', 'terms', id, 'pgTAP Lange betingelser'
+from knowledge.sources where type = 'manual_upload';
+insert into knowledge.document_versions (id, document_id, version_label, valid_from, storage_path, checksum_sha256)
+values ('64000000-0000-4000-a000-0000000000d3', '63000000-0000-4000-a000-0000000000d3', '1', '2020-01-01', 'r/d3.pdf', repeat('6', 64));
+select pg_temp.release('64000000-0000-4000-a000-0000000000d3');
+update knowledge.document_versions set status = 'processing' where id = '64000000-0000-4000-a000-0000000000d3';
+insert into knowledge.document_chunks (id, document_version_id, chunk_index, kind, text, heading_path, page_start, page_end,
+  char_start, char_end, content_hash, char_count, token_estimate)
+values ('65000000-0000-4000-a000-0000000000d3', '64000000-0000-4000-a000-0000000000d3', 0, 'prose', repeat('Fiktiv betingelse. ', 600), '{}', 1, 1, 0, 11400, repeat('5', 64), 11400, 2850);
+update knowledge.document_versions set chunker_version = 'structure/1', status = 'processed' where id = '64000000-0000-4000-a000-0000000000d3';
+update knowledge.document_versions set status = 'under_review' where id = '64000000-0000-4000-a000-0000000000d3';
+
+-- K2: uden aktiv embedding-model kræver publicering ikke embeddings; de andre blokeringer gælder.
+select ok(not knowledge.publication_requires_embeddings(), 'uden aktiv embedding-model kræves ingen embeddings');
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select ok(not (knowledge.review_state('64000000-0000-4000-a000-0000000000d3') -> 'blockers') @> '[{"code": "embeddings_missing"}]',
+  'review-tilstanden har ingen embedding-blokering uden aktiv model');
+reset role;
+update knowledge.embedding_models set status = 'active', activated_at = now(), retired_at = null where id = (select id from pgtap_model);
+select ok(knowledge.publication_requires_embeddings(), 'med en aktiv embedding-model kræves embeddings');
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select ok((knowledge.review_state('64000000-0000-4000-a000-0000000000d3') -> 'blockers') @> '[{"code": "embeddings_missing"}]',
+  'og versionen uden embeddings kan ikke godkendes, så længe modellen er aktiv');
+reset role;
+update knowledge.embedding_models set status = 'retired', retired_at = now() where id = (select id from pgtap_model);
+update knowledge.document_versions set status = 'published', approved_at = now(), published_at = now() where id = '64000000-0000-4000-a000-0000000000d3';
+
+select pg_temp.as_user('60000000-0000-4000-a000-000000000001');
+set local role authenticated;
+select throws_ok($$ select * from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', p_max_chars => 10000) $$,
+  '54000', null, 'et grundlag over budgettet afvises — det afkortes aldrig');
+select is((select count(*)::int from knowledge.product_document_chunks('62000000-0000-4000-a000-000000000001', p_max_chars => 20000)), 2,
+  'inden for budgettet: begge publicerede versioner i fuld længde');
+reset role;
+
+-- En fejlet hård gate i regression suspenderer også en product_documents-konfiguration (D-8).
+insert into pgtap_runs select 'pd2', pg_temp.publish(pg_temp.with_h1_breach(pg_temp.doc_report(360000, 'run-pd2'), 'run-pd2'));
+select is((select status from knowledge.retrieval_configurations where id = pg_temp.cfg('pgtap-documents')), 'suspended',
+  'et H1-brud suspenderer product_documents straks');
+select pg_temp.as_user('60000000-0000-4000-a000-000000000002');
+set local role authenticated;
+select is(knowledge.retrieval_context() #>> '{configuration,productionReady}', 'false', 'og der kan ikke udstedes production-evidens');
+reset role;
 
 select * from finish();
 rollback;

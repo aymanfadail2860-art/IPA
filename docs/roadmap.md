@@ -25,7 +25,9 @@ COMPLETE — PHASE NOT YET COMPLETE** (`docs/08b` §21.15). I8 afventer din godk
 Assessment på Vercel, Supabase og Claude API. Advise er udskudt. Som eksplicit undtagelse må
 betaen bygge de nødvendige dele af 8C, 9, 10 og 12 før den oprindelige rækkefølge. Masterfaserne
 nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9) står i
-`docs/beta.md`; åbne punkter for betaen står i `docs/beta.md` §11.
+`docs/beta.md`; åbne punkter for betaen står i `docs/beta.md` §11. **L0 og L1** (retrieval-metoden
+`product_documents` og publicering uden embeddings) er gennemført og afventer godkendelse.
+Kvalitetsgates for den nye metode afventer beslutning (`docs/beta.md` §5.1).
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på

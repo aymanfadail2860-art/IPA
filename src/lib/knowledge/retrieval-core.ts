@@ -3,6 +3,7 @@ import { isClassified, knowledgeText, missingProvenance, narrowed, type Classifi
 
 import { isDocumentTypeKey } from "./document-types";
 import type { Embedder } from "./core/embedding";
+import { PRODUCT_DOCUMENTS, type DocumentRetrievalParams } from "./core/provider";
 import {
   issueEvidenceSet,
   RESTRICTED_CONFLICT_MESSAGE,
@@ -261,6 +262,7 @@ async function retrieve(request: RetrievalRequest, deps: RetrievalDeps): Promise
       query: queryBlock(normalized, now),
       embedding: deps.embedding,
       reranker: deps.reranker,
+      method: "hybrid",
       context: null,
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...config, topK: normalized.topK },
@@ -359,10 +361,166 @@ async function retrieve(request: RetrievalRequest, deps: RetrievalDeps): Promise
     query: queryBlock(normalized, now),
     embedding: deps.embedding,
     reranker: deps.reranker,
+    method: "hybrid",
     context,
     algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
     // The parameters that actually ran: a per-request topK is part of the runtime (P4).
     params: { ...config, topK: normalized.topK },
+    candidateCount: rows.length,
+    generatedAt: now.toISOString(),
+    items,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// product_documents (B-035, docs/beta.md §4): the product's documents in full
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The algorithm version of product_documents: the selection in the database
+ * (knowledge.product_document_chunks), the completeness check, conflicts and the items. Raise it
+ * whenever code in this chain changes results — it is part of the configuration's fingerprint.
+ */
+export const PRODUCT_DOCUMENTS_ALGORITHM_VERSION = "product-documents-1";
+
+/** The budget proposed for the beta (docs/beta.md §4). Configuration — the approved one decides. */
+export const DEFAULT_DOCUMENT_RETRIEVAL_PARAMS: DocumentRetrievalParams = Object.freeze({ maxChars: 360_000 });
+
+/** The most chunk ids the database accepts in one conflict lookup (knowledge.evidence_conflicts). */
+const CONFLICT_LOOKUP_BATCH = 200;
+
+export interface DocumentRetrievalDeps {
+  db: KnowledgeRpcClient;
+  /** The approved configuration's parameters (the budget). */
+  params: DocumentRetrievalParams;
+  now?: () => Date;
+  /** DEVELOPMENT TOOL (B-009), as for hybrid retrieval. Refused unless IPA_RUNTIME_ENV is local/test. */
+  devForceInsufficient?: boolean;
+  observe?: RetrievalObserver;
+}
+
+/** One row of knowledge.product_document_chunks: a search row plus the number of chunks in its version. */
+export interface DocumentRow extends SearchRow {
+  version_chunk_count: number;
+}
+
+/**
+ * Retrieval without embedding and reranker (B-035). The user chooses ONE product; the database
+ * returns — as that user, through RLS and the access filter — every chunk of the published
+ * document versions of the product that are valid on the date, within the requested document
+ * types, in document order. Nothing is ranked, nothing is cut: a version is included whole or not
+ * at all (checked here, fail-closed), and a basis over the budget is refused by the database.
+ *
+ * The query text is not used for selection and is never sent anywhere during retrieval: there is
+ * no query embedding and no reranking. Conflicts and the neutral indicator are attached exactly as
+ * for hybrid retrieval (docs/07 §11.4).
+ */
+export async function runProductDocumentRetrieval(request: RetrievalRequest, deps: DocumentRetrievalDeps): Promise<EvidenceSet> {
+  if (deps.devForceInsufficient) return retrieveDocuments(request, deps);
+  return timed(deps.observe, "total", () => retrieveDocuments(request, deps));
+}
+
+/** Every version in the rows must be complete: all its chunks, each once (fail-closed). */
+export function assertCompleteVersions(rows: readonly DocumentRow[]): void {
+  const byVersion = new Map<string, { expected: number; indexes: Set<number>; rows: number }>();
+  for (const row of rows) {
+    const entry = byVersion.get(row.version_id) ?? { expected: row.version_chunk_count, indexes: new Set<number>(), rows: 0 };
+    if (entry.expected !== row.version_chunk_count) throw new RetrievalError("unavailable", "Dokumentgrundlaget kunne ikke samles helt. Prøv igen.");
+    entry.indexes.add(row.chunk_index);
+    entry.rows += 1;
+    byVersion.set(row.version_id, entry);
+  }
+  for (const entry of byVersion.values()) {
+    if (!Number.isInteger(entry.expected) || entry.expected < 1 || entry.rows !== entry.expected || entry.indexes.size !== entry.expected) {
+      throw new RetrievalError("unavailable", "Dokumentgrundlaget kunne ikke samles helt. Prøv igen.");
+    }
+  }
+}
+
+/** A chunk of the product's documents: included because it belongs to the basis, not ranked. */
+function documentChunk(row: DocumentRow, index: number): RankedChunk {
+  return {
+    row: { ...row, fusedScore: 0 },
+    chunkId: row.chunk_id,
+    versionId: row.version_id,
+    chunkIndex: row.chunk_index,
+    headingPath: row.heading_path,
+    text: row.text,
+    charStart: row.char_start,
+    charEnd: row.char_end,
+    score: 1,
+    rank: index + 1,
+    reasons: [],
+  };
+}
+
+async function retrieveDocuments(request: RetrievalRequest, deps: DocumentRetrievalDeps): Promise<EvidenceSet> {
+  const now = (deps.now ?? (() => new Date()))();
+  const normalized = normalizeRequest(request);
+  if (!normalized.productIds || normalized.productIds.length !== 1) throw new RetrievalError("invalid_request", "Vælg ét produkt.");
+  const params: DocumentRetrievalParams = { maxChars: deps.params.maxChars };
+
+  if (deps.devForceInsufficient) {
+    if (!forceInsufficientAllowed()) throw new RetrievalError("invalid_request", "Udviklingsværktøjet kan kun bruges lokalt og i test.");
+    return issueEvidenceSet({
+      query: queryBlock(normalized, now),
+      embedding: null,
+      reranker: null,
+      method: PRODUCT_DOCUMENTS,
+      context: null,
+      algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+      params,
+      candidateCount: 0,
+      generatedAt: now.toISOString(),
+      items: [],
+      devOverride: "force_insufficient",
+    });
+  }
+
+  const date = normalized.asOf ?? danishDate(now);
+  const rows = await timed(deps.observe, "search", () =>
+    rpcRows<DocumentRow>(deps.db, "product_document_chunks", {
+      p_product_id: normalized.productIds![0],
+      p_mode: normalized.mode,
+      p_as_of: normalized.asOf,
+      p_language: normalized.language,
+      p_document_ids: normalized.documentIds,
+      p_document_types: normalized.documentTypes,
+      p_max_chars: params.maxChars,
+    }),
+  );
+  assertCompleteVersions(rows);
+
+  const chunks = rows.map((row, i) => documentChunk(row, i));
+  const byId = new Map(chunks.map((chunk) => [chunk.chunkId, chunk]));
+  const drafts: Draft[] = chunks.map((chunk) => ({ chunks: [chunk], links: new Map(), restricted: false }));
+
+  await attachConflicts(drafts, {
+    date,
+    conflicts: async (chunkIds) => {
+      const found: ConflictRow[] = [];
+      for (let i = 0; i < chunkIds.length; i += CONFLICT_LOOKUP_BATCH) {
+        found.push(...(await rpcRows<ConflictRow>(deps.db, "evidence_conflicts", { p_chunk_ids: chunkIds.slice(i, i + CONFLICT_LOOKUP_BATCH), p_date: date })));
+      }
+      return found;
+    },
+    chunks: (chunkIds, versionIds) => rpcRows<SearchRow>(deps.db, "evidence_chunks", { p_chunk_ids: chunkIds, p_version_ids: versionIds, p_date: date }),
+    // Without a query there is no "best passage" of a counterpart document: its first chunk is used.
+    bestOfDocument: async () => null,
+    counterpart: (row) => byId.get(row.chunk_id) ?? counterpartChunk(row),
+  });
+
+  const items = drafts.map((draft, i) => toItem(draft, i, drafts));
+  const context = await readRetrievalContext(deps.db);
+
+  return issueEvidenceSet({
+    query: queryBlock(normalized, now),
+    embedding: null,
+    reranker: null,
+    method: PRODUCT_DOCUMENTS,
+    context,
+    algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+    params,
     candidateCount: rows.length,
     generatedAt: now.toISOString(),
     items,
@@ -398,6 +556,8 @@ async function rpcRows<T>(db: KnowledgeRpcClient, fn: string, args: Record<strin
   if (error) {
     if (error.code === "42501") throw new RetrievalError("denied", "Du har ikke adgang til vidensgrundlaget.");
     if (error.code === "22023") throw new RetrievalError("invalid_request", error.message);
+    // product_documents (B-035): the product's documents exceed the budget — refused, never truncated.
+    if (error.code === "54000") throw new RetrievalError("invalid_request", error.message);
     throw new RetrievalError("unavailable", "Søgningen kunne ikke gennemføres. Prøv igen.");
   }
   return (data ?? []) as T[];

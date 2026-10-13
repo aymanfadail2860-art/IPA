@@ -1,3 +1,5 @@
+import { documentMaterialProblem } from "../../src/lib/knowledge/core/provider.ts";
+
 import { checksumOf, configurationFingerprint, gateSetChecksum } from "./checksum.ts";
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "./gates.ts";
 import { computeMetrics } from "./metrics.ts";
@@ -169,8 +171,14 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
   return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }
 
-/** A configuration with the test embedder or the "none" reranker can never be approved (§3.4, §10.2). */
+/**
+ * A configuration with the test embedder or the "none" reranker can never be approved (§3.4,
+ * §10.2). A product_documents configuration (B-035) is no development configuration — but only
+ * with valid material; invalid material always is. The same rule as the database
+ * (knowledge.retrieval_material_is_development).
+ */
 export function isDevelopmentConfiguration(configuration: EvaluationReport["configuration"]["declared"]): boolean {
+  if ("method" in configuration) return documentMaterialProblem(configuration) !== null;
   return configuration.embedding === null || configuration.embedding.provider === "test" || configuration.reranker.id === "none" || configuration.reranker.model === "none";
 }
 

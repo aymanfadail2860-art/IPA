@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "label": "product-documents-fixture",
+  "description": "Retrieval-metoden product_documents (B-035, docs/beta.md §4) over det fiktive fixture-korpus: ingen embedding og ingen reranker; det valgte produkts adgangsgodkendte, publicerede og gyldige dokumentversioner i fuld længde inden for budgettet. Kun til udvikling og CI — fixture-miljøet kan aldrig bestå (H7).",
+  "configuration": {
+    "method": "product_documents",
+    "embedding": null,
+    "reranker": null,
+    "algorithmVersion": "product-documents-1",
+    "params": {
+      "maxChars": 360000
+    },
+    "chunkerVersions": [
+      "fixture-sections/1"
+    ]
+  }
+}

@@ -2,7 +2,15 @@ import type { Embedder, EmbeddingProvider } from "./embedding.ts";
 import type { EvidenceItem, EvidenceQuery } from "./evidence.ts";
 import type { Grade } from "./grade.ts";
 import { isProductionImplementation } from "./production-implementation.ts";
-import { retrievalFingerprint, retrievalFingerprintMaterial, type RetrievalParams } from "./provider.ts";
+import {
+  documentRetrievalMaterial,
+  PRODUCT_DOCUMENTS,
+  retrievalFingerprint,
+  retrievalFingerprintMaterial,
+  type DocumentRetrievalParams,
+  type RetrievalMethod,
+  type RetrievalParams,
+} from "./provider.ts";
 import type { ApprovedScope, RetrievalContext } from "./retrieval-context.ts";
 import { NONE_RERANKER_ID, type Reranker, type RerankingProvider } from "./reranker.ts";
 
@@ -17,23 +25,38 @@ import { NONE_RERANKER_ID, type Reranker, type RerankingProvider } from "./reran
  * were constructed (not what they claim), the database's retrieval context read with the same
  * client that searched, the parameters actually used and the items actually returned. Nothing a
  * caller passes in a request, no column, setting or environment variable can set the grade.
+ *
+ * Two retrieval methods (B-035). For "hybrid" (8B) P1 and P2 are unchanged: a production embedder
+ * of the active model and a production reranker, never "none". For "product_documents" — no
+ * embedding, no reranker — P1 and P2 are adapted EXPLICITLY and only for that method:
+ *   P1: the method that ran is product_documents, the configuration's method is
+ *       product_documents, no embedder was constructed and the configuration has no embedding
+ *       model;
+ *   P2: no reranker ran and the configuration has none.
+ * The method is the code path that ran, never a request value. P3–P9 are the same for both.
  */
 
 export const PRODUCTION_CONDITIONS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"] as const;
 export type ProductionCondition = (typeof PRODUCTION_CONDITIONS)[number];
 
-/** The evidence model version that carries `retrieval.configuration` and per-item chunker versions (D-14). */
-export const PRODUCTION_SCHEMA_VERSION = 2;
+/**
+ * The evidence model version. 2 (D-14): `retrieval.configuration` and per-item chunker versions.
+ * 3 (B-035): `retrieval.method`, and `retrieval.reranker` is null when no ranking step ran.
+ */
+export const PRODUCTION_SCHEMA_VERSION = 3;
 
 export interface ProductionAssessmentInput {
   /** knowledge.retrieval_context() as read by this call; null when it could not be read. */
   context: RetrievalContext | null;
   embedding: { embedder: Embedder; modelId: string } | null;
-  reranker: Reranker;
+  /** The reranker that ran; null exactly when no ranking step ran (product_documents). */
+  reranker: Reranker | null;
+  /** The retrieval method that RAN — set by the code path in retrieval-core.ts, never by a caller's request. */
+  method: RetrievalMethod;
   /** The algorithm version of the code that ran (retrieval-core.ts). */
   algorithmVersion: string;
-  /** The parameters actually used, including a per-request topK. */
-  params: RetrievalParams;
+  /** The parameters actually used, including a per-request topK (hybrid) or the budget (product_documents). */
+  params: RetrievalParams | DocumentRetrievalParams;
   query: EvidenceQuery;
   items: readonly EvidenceItem[];
   devOverride: boolean;
@@ -46,13 +69,16 @@ export interface ProductionAssessment {
   readonly unmet: readonly ProductionCondition[];
   /** Fingerprint of the runtime: the implementations, algorithm and parameters that ran (P4). */
   readonly runtimeFingerprint: string | null;
-  /** The configuration in service, as the set carries it (P9). */
-  readonly configuration: { readonly id: string; readonly fingerprint: string; readonly algorithmVersion: string } | null;
+  /** The configuration in service, as the set carries it (P9), and its method. */
+  readonly configuration: { readonly id: string; readonly fingerprint: string; readonly algorithmVersion: string; readonly method: RetrievalMethod } | null;
   /** The configuration's evaluated chunker versions (P7), kept for the re-check. */
   readonly chunkerVersions: readonly string[];
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
+
+const isDocumentParams = (params: RetrievalParams | DocumentRetrievalParams): params is DocumentRetrievalParams =>
+  Object.keys(params).length === 1 && typeof (params as DocumentRetrievalParams).maxChars === "number";
 
 const descriptorOf = <T extends object>(implementation: unknown): T | null =>
   typeof implementation === "object" && implementation !== null && "descriptor" in implementation ? ((implementation as { descriptor: T }).descriptor ?? null) : null;
@@ -99,29 +125,48 @@ export function assessProduction(input: ProductionAssessmentInput): ProductionAs
   const embeddingDescriptor = descriptorOf<EmbeddingProvider["descriptor"]>(embedder);
   const rerankerDescriptor = descriptorOf<RerankingProvider["descriptor"]>(input.reranker);
 
+  // The runtime's fingerprint, from what ran: for product_documents the method, algorithm and
+  // budget (no implementations exist); for hybrid the implementations' descriptors (8B-I6).
   let runtimeFingerprint: string | null = null;
-  if (embeddingDescriptor && rerankerDescriptor && configuration) {
+  if (configuration) {
     try {
-      runtimeFingerprint = retrievalFingerprint(
-        retrievalFingerprintMaterial({
-          embedding: embeddingDescriptor,
-          reranker: rerankerDescriptor,
-          algorithmVersion: input.algorithmVersion,
-          params: input.params,
-          chunkerVersions: configuration.chunkerVersions,
-        }),
-      );
+      if (input.method === PRODUCT_DOCUMENTS) {
+        if (input.embedding === null && input.reranker === null && isDocumentParams(input.params)) {
+          runtimeFingerprint = retrievalFingerprint(
+            documentRetrievalMaterial({ algorithmVersion: input.algorithmVersion, params: input.params, chunkerVersions: configuration.chunkerVersions }),
+          );
+        }
+      } else if (embeddingDescriptor && rerankerDescriptor && !isDocumentParams(input.params)) {
+        runtimeFingerprint = retrievalFingerprint(
+          retrievalFingerprintMaterial({
+            embedding: embeddingDescriptor,
+            reranker: rerankerDescriptor,
+            algorithmVersion: input.algorithmVersion,
+            params: input.params,
+            chunkerVersions: configuration.chunkerVersions,
+          }),
+        );
+      }
     } catch {
       runtimeFingerprint = null;
     }
   }
 
   const conditions: Record<ProductionCondition, boolean> = {
-    // P1: a production embedder (a real production implementation), whose model is the active
-    // model, which is the configuration's model.
+    // P1 (hybrid): a production embedder (a real production implementation), whose model is the
+    // active model, which is the configuration's model.
+    // P1 (product_documents, B-035): that method ran, the configuration's method is it, no
+    // embedder was constructed and the configuration has no embedding model.
     P1: decide(() => {
+      if (input.method === PRODUCT_DOCUMENTS || configuration?.method === PRODUCT_DOCUMENTS) {
+        return (
+          input.method === PRODUCT_DOCUMENTS && configuration !== null && configuration.method === PRODUCT_DOCUMENTS &&
+          input.embedding === null && embedder === null && configuration.embeddingModelId === null
+        );
+      }
       const model = context?.activeModel;
       return (
+        input.method === "hybrid" && configuration?.method === "hybrid" &&
         input.embedding !== null && embedder !== null && embeddingDescriptor !== null && model !== null && model !== undefined && configuration !== null &&
         isProductionImplementation(embedder) && embedder.grade === "production" && embeddingDescriptor.grade === "production" &&
         model.id === input.embedding.modelId && configuration.embeddingModelId === model.id &&
@@ -130,14 +175,22 @@ export function assessProduction(input: ProductionAssessmentInput): ProductionAs
         embedder.dimensions === model.dimensions
       );
     }),
-    // P2: a production reranker, never "none", and the configuration's reranker.
-    P2: decide(
-      () =>
-        rerankerDescriptor !== null && configuration !== null &&
+    // P2 (hybrid): a production reranker, never "none", and the configuration's reranker.
+    // P2 (product_documents, B-035): no reranker ran and the configuration has none.
+    P2: decide(() => {
+      if (input.method === PRODUCT_DOCUMENTS || configuration?.method === PRODUCT_DOCUMENTS) {
+        return (
+          input.method === PRODUCT_DOCUMENTS && configuration !== null && configuration.method === PRODUCT_DOCUMENTS &&
+          input.reranker === null && configuration.rerankerId === null && configuration.rerankerVersion === null
+        );
+      }
+      return (
+        input.reranker !== null && rerankerDescriptor !== null && configuration !== null &&
         isProductionImplementation(input.reranker) && input.reranker.grade === "production" && rerankerDescriptor.grade === "production" &&
         input.reranker.id !== NONE_RERANKER_ID && rerankerDescriptor.id === input.reranker.id && rerankerDescriptor.version === input.reranker.version &&
-        input.reranker.id === configuration.rerankerId && input.reranker.version === configuration.rerankerVersion,
-    ),
+        input.reranker.id === configuration.rerankerId && input.reranker.version === configuration.rerankerVersion
+      );
+    }),
     // P3: exactly one active configuration with a passed (for pilot: a human-accepted) registered
     // evaluation, not suspended — and the evaluation covers every item (8B-I6.1, B-030): for tier
     // pilot the evaluated pairs of product and document type, for standard the document types.
@@ -185,7 +238,7 @@ export function assessProduction(input: ProductionAssessmentInput): ProductionAs
     unmet: Object.freeze(unmet),
     runtimeFingerprint,
     configuration: configuration
-      ? Object.freeze({ id: configuration.id, fingerprint: configuration.fingerprint, algorithmVersion: configuration.algorithmVersion })
+      ? Object.freeze({ id: configuration.id, fingerprint: configuration.fingerprint, algorithmVersion: configuration.algorithmVersion, method: configuration.method })
       : null,
     chunkerVersions: evaluatedChunkerVersions(configuration?.chunkerVersions),
   });

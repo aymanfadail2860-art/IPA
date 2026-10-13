@@ -54,6 +54,8 @@ export interface CorpusSnapshot {
   texts: Map<string, string>;
   /** chunk id → chunker version (P7/H6). */
   chunkerVersions: Record<string, string>;
+  /** document version id → number of chunks (B-035: H6 verifies product_documents' completeness). */
+  versionChunkCounts: Record<string, number>;
   /** Everything that decides what the evaluation can return — compared before and after (H7). */
   checksum: string;
   /** Version id → status, for provisioning. */
@@ -200,6 +202,7 @@ export function connectEvaluationEnvironment(config: EvaluationEnvironmentConfig
     const binding: CorpusBinding = { products, documents: {}, conflicts: {} };
     const texts = new Map<string, string>();
     const chunkerVersions: Record<string, string> = {};
+    const versionChunkCounts: Record<string, number> = {};
     const versions = new Map<string, { id: string; status: string; documentKey: string; label: string; pageCount: number | null }>();
     const material: unknown[] = [];
     for (const document of manifest.documents) {
@@ -216,6 +219,7 @@ export function connectEvaluationEnvironment(config: EvaluationEnvironmentConfig
       };
       for (const version of own) {
         const ordered = chunks.filter((chunk) => chunk.document_version_id === version.id).sort((a, b) => a.chunk_index - b.chunk_index);
+        versionChunkCounts[version.id] = ordered.length;
         let text = "";
         for (const chunk of ordered) {
           if (version.chunker_version) chunkerVersions[chunk.id] = version.chunker_version;
@@ -238,7 +242,7 @@ export function connectEvaluationEnvironment(config: EvaluationEnvironmentConfig
         material.push(["conflict", conflict.id, row.id, row.status]);
       }
     }
-    return { binding, texts, chunkerVersions, checksum: checksumOf({ setId: manifest.setId, products, material }), versions };
+    return { binding, texts, chunkerVersions, versionChunkCounts, checksum: checksumOf({ setId: manifest.setId, products, material }), versions };
   }
 
   return { url: config.url, admin, assertEvaluation, signInUser, operator, snapshot };

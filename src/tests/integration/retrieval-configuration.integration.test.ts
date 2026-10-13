@@ -566,7 +566,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(alerts[0]!.details).toMatchObject({ replayed: "true" });
     const [counts] = await admin<{ runs: number; suspensions: number; audits: number }[]>`
       select (select count(*)::int from knowledge.evaluation_runs where run_id = ${h6.runId}) as runs,
-             (select count(*)::int from knowledge.retrieval_configuration_transitions where configuration_id = ${configurations.d} and to_status = 'suspended') as suspensions,
+             (select count(*)::int from knowledge.retrieval_configuration_transitions where configuration_id = ${configurations.d} and to_status = 'suspended' and run_id = ${row!.suspension_run_id}) as suspensions,
              (select count(*)::int from audit.audit_log where action = 'knowledge.evaluation_run.published' and entity_id = ${row!.suspension_run_id}) as audits`;
     expect(counts).toEqual({ runs: 1, suspensions: 1, audits: 1 });
   });

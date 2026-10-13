@@ -2,14 +2,17 @@ import { createHash } from "node:crypto";
 
 import { syntheticText } from "../../src/lib/egress/synthetic.ts";
 import { embeddingInput, type EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
-import { retrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
+import { documentRetrievalMaterial, retrievalFingerprintMaterial, type DocumentRetrievalParams } from "../../src/lib/knowledge/core/provider.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
 import { tokenize } from "../../src/lib/knowledge/core/test-embedder.ts";
 import {
   DEFAULT_RETRIEVAL_CONFIG,
+  PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
   RETRIEVAL_ALGORITHM_VERSION,
+  runProductDocumentRetrieval,
   runRetrieval,
   type ConflictRow,
+  type DocumentRow,
   type KnowledgeRpcClient,
   type RetrievalConfig,
   type SearchRow,
@@ -46,18 +49,30 @@ export interface FixtureDocument {
   versions: Record<string, { sections: { heading: string; text: string }[] }>;
 }
 
-export interface FixtureRetrievalOptions {
+interface FixtureRetrievalBase {
   manifest: Manifest;
   /** Fixture files by the path the manifest names. */
   fixtures: Record<string, FixtureDocument>;
-  /** Any declared provider: the development ones, or (with credentials) the production ones (8B-I2). */
-  embedder: EmbeddingProvider;
-  /** The configured reranker, and a reranker that keeps the fusion order (for Q7). */
-  reranker: RerankingProvider;
-  baselineReranker: RerankingProvider;
-  config?: RetrievalConfig;
   now: () => Date;
 }
+
+/**
+ * Hybrid retrieval (8B), or product_documents (B-035) with its budget: then there is no embedder
+ * and no reranker, and no run without reranker (Q7).
+ */
+export type FixtureRetrievalOptions = FixtureRetrievalBase &
+  (
+    | {
+        documents?: undefined;
+        /** Any declared provider: the development ones, or (with credentials) the production ones (8B-I2). */
+        embedder: EmbeddingProvider;
+        /** The configured reranker, and a reranker that keeps the fusion order (for Q7). */
+        reranker: RerankingProvider;
+        baselineReranker: RerankingProvider;
+        config?: RetrievalConfig;
+      }
+    | { documents: DocumentRetrievalParams }
+  );
 
 interface FixtureChunk {
   id: string;
@@ -85,7 +100,7 @@ function cosine(a: readonly number[], b: readonly number[]): number {
 
 export function createFixtureRetrieval(options: FixtureRetrievalOptions): RetrievalUnderTest {
   const { manifest, fixtures } = options;
-  const config = options.config ?? DEFAULT_RETRIEVAL_CONFIG;
+  const config = options.documents ? DEFAULT_RETRIEVAL_CONFIG : (options.config ?? DEFAULT_RETRIEVAL_CONFIG);
 
   const binding: CorpusBinding = {
     products: Object.fromEntries(manifest.products.map((product) => [product.key, product.id ?? fixtureUuid(`product:${product.key}`)])),
@@ -136,9 +151,12 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
   const modelId = fixtureUuid("embedding-model:active");
   let embeddings: Map<string, number[]> | null = null;
 
-  async function embedCorpus(): Promise<Map<string, number[]>> {
+  const versionChunkCounts: Record<string, number> = {};
+  for (const chunk of chunks) versionChunkCounts[chunk.versionId] = (versionChunkCounts[chunk.versionId] ?? 0) + 1;
+
+  async function embedCorpus(embedder: EmbeddingProvider): Promise<Map<string, number[]>> {
     if (!embeddings) {
-      const vectors = await options.embedder.embed(
+      const vectors = await embedder.embed(
         // The fixture corpus is synthetic evaluation material (8B-I2.5).
         chunks.map((chunk) => syntheticText(embeddingInput({ text: chunk.text, lead_in: null, heading_path: [chunk.heading] }))),
         { inputType: "document" },
@@ -149,9 +167,9 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
   }
 
   /** The fingerprint material comes from what the implementations declare (8B-I2). */
-  function configuration(reranker: RerankingProvider): ConfigurationInput {
+  function configuration(embedder: EmbeddingProvider, reranker: RerankingProvider): ConfigurationInput {
     return retrievalFingerprintMaterial({
-      embedding: options.embedder.descriptor,
+      embedding: embedder.descriptor,
       reranker: reranker.descriptor,
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...config },
@@ -287,6 +305,35 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
       return rows;
     }
 
+    // knowledge.product_document_chunks (B-035): the product's whole basis, as the user may read it.
+    function productDocumentChunks(args: Record<string, unknown>): DocumentRow[] | { code: string; message: string } {
+      const date = args.p_mode === "as_of" ? (args.p_as_of as string) : today;
+      const product = args.p_product_id as string | null;
+      if (!product) return { code: "22023", message: "Vælg et produkt" };
+      const documentIds = args.p_document_ids as string[] | null;
+      const types = args.p_document_types as string[] | null;
+      const allowed = chunks.filter((chunk) => {
+        const valid = versionValidOn(chunk.document.versions, date);
+        return (
+          valid?.label === chunk.version &&
+          chunk.document.language === args.p_language &&
+          binding.products[chunk.document.product] === product &&
+          (!documentIds || documentIds.includes(binding.documents[chunk.document.key]!.documentId)) &&
+          (!types || types.includes(chunk.document.type)) &&
+          canRead(chunk.document, chunk.version)
+        );
+      });
+      const chars = allowed.reduce((sum, chunk) => sum + chunk.text.length, 0);
+      if (chars > (args.p_max_chars as number)) return { code: "54000", message: "Dokumentgrundlaget for produktet er for stort til ét samlet svar." };
+      return allowed
+        .sort((a, b) =>
+          a.document.type !== b.document.type ? (a.document.type < b.document.type ? -1 : 1)
+          : a.document.title !== b.document.title ? (a.document.title < b.document.title ? -1 : 1)
+          : a.versionId !== b.versionId ? (a.versionId < b.versionId ? -1 : 1)
+          : a.index - b.index)
+        .map((chunk) => ({ ...row(chunk), version_chunk_count: versionChunkCounts[chunk.versionId]! }));
+    }
+
     function evidenceChunks(args: Record<string, unknown>): SearchRow[] {
       const ids = (args.p_chunk_ids as string[] | null) ?? [];
       const versionIds = (args.p_version_ids as string[] | null) ?? [];
@@ -298,6 +345,12 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
 
     return {
       async rpc(fn, args) {
+        if (fn === "product_document_chunks") {
+          const result = productDocumentChunks(args);
+          if (!Array.isArray(result)) return { data: null, error: result };
+          log.push({ fn, data: result });
+          return { data: result, error: null };
+        }
         const data = fn === "search_chunks" ? searchChunks(args) : fn === "evidence_conflicts" ? evidenceConflicts(args) : fn === "evidence_chunks" ? evidenceChunks(args) : null;
         if (data === null) return { data: null, error: { message: `Ukendt funktion: ${fn}` } };
         log.push({ fn, data });
@@ -306,42 +359,67 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
     };
   }
 
-  function adapter(reranker: RerankingProvider, baseline: boolean): RetrievalUnderTest {
+  function request(evalCase: EvalCase) {
+    const filters = evalCase.filters ?? {};
     return {
-      name: baseline ? "fixture (uden reranker)" : "fixture",
-      environment: "fixture",
-      configuration: () => configuration(reranker),
-      binding: () => binding,
-      versionText: (document, version) => texts.get(`${document}\u0000${version}`) ?? null,
-      corpusChecksum: () => corpusChecksum,
-      async run(evalCase: EvalCase): Promise<RetrievalRun> {
-        const vectors = await embedCorpus();
-        const log: unknown[] = [];
-        const filters = evalCase.filters ?? {};
-        const set = await runRetrieval(
-          {
-            // An evaluation question is synthetic material, scanned for customer data (8B-I2.5).
-            query: syntheticText(evalCase.question),
-            mode: evalCase.mode,
-            ...(evalCase.asOf ? { asOf: evalCase.asOf } : {}),
-            language: evalCase.language,
-            ...(filters.products ? { productIds: filters.products.map((key) => binding.products[key] ?? fixtureUuid(`unknown-product:${key}`)) } : {}),
-            ...(filters.documents ? { documentIds: filters.documents.map((key) => binding.documents[key]?.documentId ?? fixtureUuid(`unknown-document:${key}`)) } : {}),
-            ...(filters.documentTypes ? { documentTypes: filters.documentTypes } : {}),
-          },
-          {
-            db: database(evalCase.actor, vectors, log),
-            embedding: { embedder: options.embedder, modelId },
-            reranker,
-            config,
-            now: options.now,
-          },
-        );
-        return { actor: evalCase.actor, set, raw: log, chunkerVersions };
-      },
-      withoutReranker: () => (baseline ? null : adapter(options.baselineReranker, true)),
+      // An evaluation question is synthetic material, scanned for customer data (8B-I2.5).
+      query: syntheticText(evalCase.question),
+      mode: evalCase.mode,
+      ...(evalCase.asOf ? { asOf: evalCase.asOf } : {}),
+      language: evalCase.language,
+      ...(filters.products ? { productIds: filters.products.map((key) => binding.products[key] ?? fixtureUuid(`unknown-product:${key}`)) } : {}),
+      ...(filters.documents ? { documentIds: filters.documents.map((key) => binding.documents[key]?.documentId ?? fixtureUuid(`unknown-document:${key}`)) } : {}),
+      ...(filters.documentTypes ? { documentTypes: filters.documentTypes } : {}),
     };
   }
 
-  return adapter(options.reranker, false);
+  function common(name: string): Pick<RetrievalUnderTest, "name" | "environment" | "binding" | "versionText" | "corpusChecksum"> {
+    return {
+      name,
+      environment: "fixture",
+      binding: () => binding,
+      versionText: (document, version) => texts.get(`${document}\u0000${version}`) ?? null,
+      corpusChecksum: () => corpusChecksum,
+    };
+  }
+
+  // product_documents (B-035): the real runProductDocumentRetrieval over the emulated database.
+  if (options.documents) {
+    const params = options.documents;
+    return {
+      ...common("fixture (produktdokumenter)"),
+      configuration: () =>
+        documentRetrievalMaterial({ algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION, params, chunkerVersions: [FIXTURE_CHUNKER_VERSION] }),
+      async run(evalCase: EvalCase): Promise<RetrievalRun> {
+        const log: unknown[] = [];
+        const set = await runProductDocumentRetrieval(request(evalCase), { db: database(evalCase.actor, new Map(), log), params, now: options.now });
+        return { actor: evalCase.actor, set, raw: log, chunkerVersions, versionChunkCounts };
+      },
+      // There is no reranker, so there is no run without one (Q7).
+      withoutReranker: () => null,
+    };
+  }
+
+  const hybrid = options;
+  function adapter(reranker: RerankingProvider, baseline: boolean): RetrievalUnderTest {
+    return {
+      ...common(baseline ? "fixture (uden reranker)" : "fixture"),
+      configuration: () => configuration(hybrid.embedder, reranker),
+      async run(evalCase: EvalCase): Promise<RetrievalRun> {
+        const vectors = await embedCorpus(hybrid.embedder);
+        const log: unknown[] = [];
+        const set = await runRetrieval(request(evalCase), {
+          db: database(evalCase.actor, vectors, log),
+          embedding: { embedder: hybrid.embedder, modelId },
+          reranker,
+          config,
+          now: options.now,
+        });
+        return { actor: evalCase.actor, set, raw: log, chunkerVersions };
+      },
+      withoutReranker: () => (baseline ? null : adapter(hybrid.baselineReranker, true)),
+    };
+  }
+
+  return adapter(hybrid.reranker, false);
 }

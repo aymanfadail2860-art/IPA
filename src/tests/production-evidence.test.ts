@@ -62,7 +62,7 @@ function expectOnly(set: EvidenceSet, condition: ProductionCondition) {
 describe("the positive end-to-end fixture: P1–P9 all hold", () => {
   it("issues production evidence that requireProductionEvidence accepts", async () => {
     const set = await retrieve();
-    expect(set.schemaVersion).toBe(2);
+    expect(set.schemaVersion).toBe(3);
     expect(set.retrieval.unmet).toEqual([]);
     expect(set.retrieval.grade).toBe("production");
     const material = fixtureMaterial();
@@ -142,12 +142,13 @@ describe("a check that cannot be decided is not met (fail-closed)", () => {
       context: { ...context, configuration: { ...context.configuration!, chunkerVersions: hostile } },
       embedding: { embedder: providers.embedder, modelId: FIXTURE_MODEL.id },
       reranker: providers.reranker,
+      method: "hybrid",
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...DEFAULT_RETRIEVAL_CONFIG },
       query: { text: "x", mode: "current", asOf: "2026-10-05", language: "da", filters: {} },
       items: [evidenceItem(1)],
       devOverride: false,
-      schemaVersion: 2,
+      schemaVersion: 3,
     });
     expect(assessment.grade).toBe("development");
     expect(assessment.unmet).toContain("P7");
@@ -391,6 +392,7 @@ describe("adversarial: the grade cannot be claimed, forged or bypassed", () => {
       query: { text: "x", mode: "current", asOf: "2026-10-05", language: "da", filters: {} },
       embedding: { embedder: { id: "fake", grade: "production", dimensions: 1024, embed: async () => [] }, modelId: FIXTURE_MODEL.id },
       reranker: fake,
+      method: "hybrid",
       context: parseRetrievalContext(fixtureContext()),
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...DEFAULT_RETRIEVAL_CONFIG },
@@ -422,11 +424,11 @@ describe("providers come from the configuration in service only (8B-I6)", () => 
   it("a configuration in service selects the Bedrock providers; none in service keeps the registry", () => {
     const context = parseRetrievalContext(fixtureContext())!;
     const configured = providersForContext(context, runtime, "production");
-    expect(configured.reranker.id).toBe("aws-bedrock:cohere.rerank-v3-5:0");
+    expect(configured.reranker?.id).toBe("aws-bedrock:cohere.rerank-v3-5:0");
     expect(configured.embedding?.embedder.id).toBe("aws-bedrock:cohere.embed-v4:0@eu-1024-v1");
-    expect(isProductionImplementation(configured.reranker)).toBe(true);
+    expect(isProductionImplementation(configured.reranker!)).toBe(true);
     const none = parseRetrievalContext(fixtureContext({ configuration: null, activeModel: null }))!;
-    expect(providersForContext(none, runtime, "test").reranker.id).toBe("none");
+    expect(providersForContext(none, runtime, "test").reranker?.id).toBe("none");
     expect(() => providersForContext(none, runtime, "production")).toThrow(/udviklingsimplementering/);
   });
 
@@ -444,7 +446,7 @@ describe("providers come from the configuration in service only (8B-I6)", () => 
 
   it("a suspended configuration keeps its providers: no fallback, development evidence", async () => {
     const context = parseRetrievalContext(fixtureContext({ status: "suspended" }))!;
-    expect(providersForContext(context, runtime, "production").reranker.id).toBe("aws-bedrock:cohere.rerank-v3-5:0");
+    expect(providersForContext(context, runtime, "production").reranker?.id).toBe("aws-bedrock:cohere.rerank-v3-5:0");
   });
 });
 

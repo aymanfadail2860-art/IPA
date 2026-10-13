@@ -424,7 +424,7 @@ describe("each hard-gate check stands on its own (one breach, one precise explan
 
   it("H6: a development-grade implementation alone is a breach", async () => {
     const development = productionDouble(fixture, {
-      transform: (set) => ({ ...set, retrieval: { ...set.retrieval, reranker: { ...set.retrieval.reranker, grade: "development" } } }),
+      transform: (set) => ({ ...set, retrieval: { ...set.retrieval, reranker: { ...set.retrieval.reranker!, grade: "development" } } }),
     });
     expect(await explanations(development, "ex-direct-001", "H6")).toEqual(['Rerankeren har graden "development".']);
   });

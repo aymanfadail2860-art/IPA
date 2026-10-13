@@ -1,5 +1,5 @@
 import { RESTRICTED_CONFLICT_MESSAGE, type EvidenceItem, type EvidenceSet } from "../../src/lib/knowledge/core/evidence.ts";
-import { embeddingLabel } from "../../src/lib/knowledge/core/provider.ts";
+import { embeddingLabel, isDocumentMaterial, retrievalMethodOf } from "../../src/lib/knowledge/core/provider.ts";
 
 import type {
   CaseObservation,
@@ -251,26 +251,44 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
 /**
  * H6 (docs/08b §4.4): the evidence must come from exactly the configuration under evaluation,
  * with production implementations. Every reason is reported once per set.
+ *
+ * product_documents (B-035, adapted explicitly and only for that method): the evidence must come
+ * from that method — no embedder, no reranker — and every document version of the selected basis
+ * (the case's product, document types and documents) must be included IN FULL: exactly the
+ * version's chunks in the corpus, each once. The corpus counts come from the adapter
+ * (`versionChunkCounts`); without them completeness cannot be verified and H6 fails.
  */
 export function developmentEvidence(caseId: string, run: RetrievalRun, configuration: ConfigurationInput): Violation[] {
   const reasons: string[] = [];
   const retrieval = run.set.retrieval;
-  // H6 judges the IMPLEMENTATIONS, not the set's P1–P9 grade (8B-I6): a configuration under
-  // evaluation is by definition not yet active, so its evidence can never meet P3 — the grade
-  // would make every evaluation fail. Development implementations, devOverride, another
-  // embedding model or reranker, the runtime fingerprint (runner.ts) and chunker versions are
-  // all checked here.
   if (retrieval.devOverride) reasons.push("Evidensen er fremtvunget af et udviklingsværktøj.");
-  if (retrieval.reranker.id === "none") reasons.push('Rerankeren er "none".');
-  if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);
-  if (!retrieval.embeddingModel) reasons.push("Forespørgslen er ikke embedded med en aktiv model.");
-  else if (retrieval.embeddingModel.grade !== "production") reasons.push(`Embedding-modellen har graden "${retrieval.embeddingModel.grade}".`);
-  const expectedModel = configuration.embedding ? embeddingLabel(configuration.embedding) : null;
-  if ((retrieval.embeddingModel?.id ?? null) !== expectedModel) {
-    reasons.push(`Embedding-modellen (${retrieval.embeddingModel?.id ?? "ingen"}) er ikke den evaluerede (${expectedModel ?? "ingen"}).`);
-  }
-  if (retrieval.reranker.id !== configuration.reranker.id || retrieval.reranker.version !== configuration.reranker.version) {
-    reasons.push(`Rerankeren (${retrieval.reranker.id}@${retrieval.reranker.version}) er ikke den evaluerede (${configuration.reranker.id}@${configuration.reranker.version}).`);
+  const declaredMethod = retrievalMethodOf(configuration);
+  if (retrieval.method !== declaredMethod) reasons.push(`Metoden (${retrieval.method}) er ikke den evaluerede (${declaredMethod}).`);
+  if (isDocumentMaterial(configuration)) {
+    if (retrieval.embeddingModel !== null) reasons.push(`Der blev brugt en embedding-model (${retrieval.embeddingModel.id}); metoden har ingen.`);
+    if (retrieval.reranker !== null) reasons.push(`Der blev brugt en reranker (${retrieval.reranker.id}); metoden har ingen.`);
+    reasons.push(...incompleteVersions(run));
+  } else {
+    // H6 judges the IMPLEMENTATIONS, not the set's P1–P9 grade (8B-I6): a configuration under
+    // evaluation is by definition not yet active, so its evidence can never meet P3 — the grade
+    // would make every evaluation fail. Development implementations, devOverride, another
+    // embedding model or reranker, the runtime fingerprint (runner.ts) and chunker versions are
+    // all checked here.
+    const declaredReranker = configuration.reranker;
+    if (!retrieval.reranker) reasons.push("Der kørte ingen reranker.");
+    else {
+      if (retrieval.reranker.id === "none") reasons.push('Rerankeren er "none".');
+      if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);
+    }
+    if (!retrieval.embeddingModel) reasons.push("Forespørgslen er ikke embedded med en aktiv model.");
+    else if (retrieval.embeddingModel.grade !== "production") reasons.push(`Embedding-modellen har graden "${retrieval.embeddingModel.grade}".`);
+    const expectedModel = configuration.embedding ? embeddingLabel(configuration.embedding) : null;
+    if ((retrieval.embeddingModel?.id ?? null) !== expectedModel) {
+      reasons.push(`Embedding-modellen (${retrieval.embeddingModel?.id ?? "ingen"}) er ikke den evaluerede (${expectedModel ?? "ingen"}).`);
+    }
+    if (retrieval.reranker && (retrieval.reranker.id !== declaredReranker.id || retrieval.reranker.version !== declaredReranker.version)) {
+      reasons.push(`Rerankeren (${retrieval.reranker.id}@${retrieval.reranker.version}) er ikke den evaluerede (${declaredReranker.id}@${declaredReranker.version}).`);
+    }
   }
   const allowed = new Set(configuration.chunkerVersions);
   const uncovered = new Set<string>();
@@ -282,4 +300,37 @@ export function developmentEvidence(caseId: string, run: RetrievalRun, configura
   }
   if (uncovered.size > 0) reasons.push(`Elementer fra chunker-versioner, konfigurationen ikke dækker: ${[...uncovered].sort().join(", ")}.`);
   return reasons.map((explanation) => ({ gate: "H6" as const, caseId, explanation }));
+}
+
+/**
+ * product_documents (B-035): every document version of the selected basis must be included in
+ * full. The basis is what the case asked for — its product, and its document types and documents
+ * when given. A conflict counterpart outside the basis is evidence because of the conflict (as in
+ * hybrid retrieval) and is not part of the basis.
+ */
+function incompleteVersions(run: RetrievalRun): string[] {
+  const counts = run.versionChunkCounts;
+  if (!counts) return ["Fuldstændigheden kan ikke efterprøves: adapteren oplyser ikke versionernes antal chunks."];
+  const filters = run.set.query.filters;
+  const product = filters.productIds?.length === 1 ? filters.productIds[0] : null;
+  if (!product) return ["Metoden kræver netop ét produkt, men forespørgslen havde ikke ét."];
+  const inBasis = (item: EvidenceItem) =>
+    item.product.id === product &&
+    (!filters.documentTypes || filters.documentTypes.includes(item.document.type)) &&
+    (!filters.documentIds || filters.documentIds.includes(item.documentId));
+  const seen = new Map<string, Set<string>>();
+  for (const item of run.set.items) {
+    if (!inBasis(item)) continue;
+    const chunks = seen.get(item.documentVersionId) ?? new Set<string>();
+    for (const chunkId of item.chunkIds) chunks.add(chunkId);
+    seen.set(item.documentVersionId, chunks);
+  }
+  const reasons: string[] = [];
+  for (const [versionId, chunks] of seen) {
+    const expected = counts[versionId];
+    if (expected === undefined || chunks.size !== expected) {
+      reasons.push(`Dokumentversionen ${versionId} er ikke medtaget i fuld længde (${chunks.size} af ${expected ?? "ukendt antal"} chunks).`);
+    }
+  }
+  return reasons;
 }

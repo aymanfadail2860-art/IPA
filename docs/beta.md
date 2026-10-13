@@ -1,8 +1,8 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
 **Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026.
-**Status:** L0 gennemført på branchen `beta/fast-beta-without-aws`. L1 er i gang. L2–L9 er ikke
-påbegyndt.
+**Status:** L0 og L1 gennemført på branchen `beta/fast-beta-without-aws` og afventer godkendelse
+(§12). L2–L9 er ikke påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -67,7 +67,7 @@ gælder:
 | Cohere Embed v4 og Rerank 3.5 på Bedrock (D-1, D-2, §2–§3) | Bruges ikke. Retrieval-metoden `product_documents` har hverken embedding eller reranker |
 | P1/P2: production-embedder og production-reranker | Gælder uændret for hybride konfigurationer. For `product_documents` er P1/P2 tilpasset eksplicit (§5.1) |
 | H6: evidensen skal komme fra production-implementeringer | Tilpasset eksplicit for `product_documents` (§5.1); uændret for hybride |
-| Embeddings som krav for publicering (docs/07) | Kræves kun, når en aktiv embedding-model findes, og konfigurationen i drift ikke er embedding-fri (L1) |
+| Embeddings som krav for publicering (docs/07) | Kræves kun, når en embedding-model er aktiv (L1, §12). Betaen har ingen |
 | Ingestion-worker på ECS/Fargate med ClamAV som ECS-service (I4, I5.5) | Samme worker og scanner som engangskørsel i Docker på en betroet maskine (L3) |
 | Credentials via Vercel OIDC / ECS-taskrolle / GitHub OIDC → AWS (C1) | Ingen AWS-credentials. Claude-nøglen i Vercels servermiljø; workerens databaserolle i operatørens miljø |
 | Evaluering i en AWS-evalueringskonto (I7) | Evalueringsmiljøet uden AWS (L9) |
@@ -162,7 +162,7 @@ rangerende søgning med topK = 8 og en reranker med absolut relevansscore (§5.1
 - **P3–P9.** En konfiguration kan kun give production-evidens, når den er aktiv og har en
   registreret, godkendt evaluering, hvis område dækker hvert element.
 
-**Eksplicit tilpasset (K1, implementeres i L1):**
+**Eksplicit tilpasset (K1, implementeret i L1, §12):**
 - **P1:** konfigurationen er `product_documents`, metoden, der faktisk kørte, er
   `product_documents`, ingen embedder er konstrueret, og konfigurationen har ingen embedding-model.
 - **P2:** ingen reranker kørte, og konfigurationen har ingen reranker. For hybride konfigurationer
@@ -177,7 +177,7 @@ Gennemføres evalueringen med `gates-v1`, gælder:
 | Gate | Hvorfor den ikke passer til `product_documents` |
 |---|---|
 | Q1–Q3 | Måler rangeringen inden for de første K = 8 elementer. B sender hele dokumentet i dokumentrækkefølge, så de første 8 elementer er dokumentets begyndelse |
-| Q4–Q5 | Måler, at retrieval selv afviser ubesvarbare spørgsmål. B sender altid produktets dokumenter; afvisningen er modellens (E2E) |
+| Q4–Q5 | Måler, at retrieval selv afviser ubesvarbare spørgsmål. B sender produktets dokumenter, også når de ikke besvarer spørgsmålet; kun manglende adgang giver et tomt sæt. Afvisningen er modellens (E2E) |
 | Q6 | Meningsfuld, når K = hele sættet |
 | Q7 | Måler rerankerens løft. B har ingen reranker |
 
@@ -323,7 +323,7 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 | # | Leverance | Status |
 |---|---|---|
 | L0 | B-035, dette dokument, rollback-punkt, beta-branch | Gennemført |
-| L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | I gang |
+| L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Gennemført, afventer godkendelse (§12) |
 | L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Ikke påbegyndt |
 | L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Ikke påbegyndt |
 | L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Ikke påbegyndt |
@@ -373,3 +373,107 @@ sker med en ny, fremadrettet migration.
 - **[AFKLARES]** Bekræftelse af de udledte permission-regler (§8).
 - **[AFKLARES]** Det faktiske tegn- og tokenomfang af de rigtige dokumenter. Det måles ved import
   (L3) og med tokentælling (L4) og afgør budgettet (`maxChars`).
+- **[AFKLARES]** Evalueringssættet for betaen skal angive produktet pr. spørgsmål (§12.4).
+
+---
+
+## 12. L1 — retrieval-metoden `product_documents` (gennemført, afventer godkendelse)
+
+### 12.1 Database (`supabase/migrations/20261012000100_beta_document_retrieval.sql`)
+
+Migrationen er fremadrettet. Ingen data ændres eller slettes, og hybride materialer og deres
+fingeraftryk er uændrede.
+
+- **Materialet:**
+
+  ```
+  {method: "product_documents", embedding: null, reranker: null,
+   algorithmVersion: "product-documents-<n>", params: {maxChars}, chunkerVersions}
+  ```
+
+  - Valideres af `knowledge.document_retrieval_material_problem`.
+  - `retrieval_material_is_development` er falsk for et gyldigt materiale og altid sand for et
+    ugyldigt.
+- **Registret:**
+  - `embedding_model_id` er tom, netop når metoden er `product_documents` (constraint).
+  - `record_evaluation_run`, `retrieval_configuration_problems`, `activate_retrieval_configuration`
+    og `retrieval_context` er nye versioner af de seneste funktioner. De ændrer kun det, metoden
+    kræver:
+    - ingen modelopslag;
+    - aktiveringen rører ingen embedding-model;
+    - konteksten oplyser `method`;
+    - modelkontrollen gælder kun hybride konfigurationer.
+  - En kørsel, der brugte en anden metode end den erklærede, afvises. Vejen til drift er uændret:
+    1. publisheren registrerer;
+    2. et godkendt gate-sæt kræves;
+    3. et menneske med `system.settings.manage` godkender og aktiverer.
+  - En fejlet hård gate suspenderer straks.
+- **`knowledge.product_document_chunks`:**
+  - Kører som den indloggede bruger (security invoker), kun for `authenticated`.
+  - Returnerer for ét produkt alle chunks i de publicerede versioner, der gælder på datoen og som
+    brugeren må læse, inden for de valgte dokumenttyper og dokumenter, i dokumentrækkefølge.
+  - `version_chunk_count` gør fuldstændigheden efterprøvelig.
+  - Et grundlag over `maxChars` afvises (`54000`) og afkortes aldrig.
+- **Publicering (K2):** `review_state` kræver embeddings, netop når en embedding-model er aktiv
+  (`knowledge.publication_requires_embeddings`). Alle andre blokeringer og
+  frigivelseskravet fra upload-sikkerheden er uændrede.
+
+### 12.2 Applikation og evidens
+
+- `runProductDocumentRetrieval` (`src/lib/knowledge/retrieval-core.ts`):
+  - kræver netop ét produkt;
+  - konstruerer hverken embedder eller reranker, og spørgsmålets tekst sendes ingen steder;
+  - kontrollerer, at hver version er komplet (fail-closed);
+  - markerer konflikter som i den hybride søgning og slår dem op i portioner på højst 200.
+- `retrieveEvidence` vælger metoden ud fra konfigurationen i drift, aldrig ud fra forespørgslen.
+  Uden konfiguration kører den hybride kode som i dag (udviklingsgrad).
+- **Evidensmodellen (version 3):** bærer `retrieval.method`, og `retrieval.reranker` er `null`, når
+  der ikke rangeres.
+- **P1 og P2 er tilpasset kun for `product_documents`** (§5.1). P3–P9 er uændrede.
+  `requireProductionEvidence` efterprøver metoden igen.
+- **Admin** viser metoden i retrieval-status og i "Afprøv retrieval".
+
+### 12.3 Evaluering
+
+- **H6 for `product_documents`** (`evals/engine/observe.ts`):
+  - metoden er den evaluerede;
+  - der er hverken embedder eller reranker;
+  - hver version i grundlaget er medtaget i fuld længde efter korpussets antal chunks;
+  - uden antallet fejler H6.
+- **H1–H5 og H7 er uændrede.**
+- Fixture- og evalueringsmiljø-adapteren, CLI'en og operationen understøtter metoden.
+- Publisherens regel for udviklingskonfigurationer spejler databasen.
+- **Konfigurationsfiler:**
+  - `product-documents-fixture.json`: kun til udvikling og CI.
+  - `product-documents-structure-1.json`: betaens kandidat, budget 360.000 tegn, foreløbigt.
+
+### 12.4 Fund
+
+1. **Kvalitetsgates (bekræftet ved kørsel).** På det fiktive korpus med produkt pr. spørgsmål:
+   - H1–H6 holder (H7 fejler i fixture-miljøet, som den skal).
+   - Q4 fejler: ubesvarbare spørgsmål får produktets dokumenter.
+   - Q7 kan ikke beregnes (ingen reranker).
+
+   Beslutningen i §5.1 er nødvendig, før betaens konfiguration kan godkendes.
+2. **Evalueringssættet skal angive produktet pr. spørgsmål.** Eksempelsættet `example-v1` gør det
+   ikke. Med metoden fejler hvert spørgsmål uden produkt lukket ("Vælg ét produkt."). Betaens
+   sæt (L9) skal derfor have produkt pr. spørgsmål.
+3. **Fejl rettet: en kontekst uden aktiv embedding-model blev læst som "kunne ikke læses".** Det
+   gjorde retrieval utilgængelig. Den mangel fandtes allerede i 8B (`retrieval.ts`). Nu betyder
+   ingen aktiv model "ingen" (`activeModelFromContext`), som Admin og enhedstestene altid har
+   forudsat. Det er nødvendigt for betaen, der ingen embedding-model har.
+4. **Mutationstest.**
+   - TypeScript: 21 af 22 fanget. Den ene er ækvivalent: genkontrollen i
+     `requireProductionEvidence` kan ikke nås, fordi et udstedt sæt er frosset og allerede
+     vurderet af P1–P9.
+   - SQL: 11 af 13 fanget. Adgangsfiltret og statusfiltret i `product_document_chunks` er hver for
+     sig redundante med RLS, der kræver det samme. Fjernes begge, fanges det (S13).
+
+### 12.5 Verifikation (lokalt, frisk database)
+
+- lint, typecheck (app og workers) og build bestået;
+- 948 enhedstests: 944 bestået (51 nye), 4 sprunget over;
+- pgTAP: 915 bestået (45 nye);
+- integration: 161 bestået og 2 sprunget over (7 nye);
+- alle migrations er afspillet fra bunden.
+

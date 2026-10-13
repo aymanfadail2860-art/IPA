@@ -1,10 +1,26 @@
 import { userText } from "@/lib/egress/classification";
 import type { EmbeddingProvider } from "@/lib/knowledge/core/embedding";
-import { retrievalFingerprint, retrievalFingerprintMaterial, type RetrievalFingerprintMaterial } from "@/lib/knowledge/core/provider";
+import {
+  documentRetrievalMaterial,
+  retrievalFingerprint,
+  retrievalFingerprintMaterial,
+  retrievalMethodOf,
+  type DocumentRetrievalMaterial,
+  type HybridRetrievalMaterial,
+  type RetrievalFingerprintMaterial,
+} from "@/lib/knowledge/core/provider";
 import type { RerankingProvider } from "@/lib/knowledge/core/reranker";
 import { createCohereEmbedV4, EMBED_V4_EU_1024_DESCRIPTOR } from "@/lib/knowledge/providers/bedrock/cohere-embed-v4";
 import { createCohereRerank35, RERANK_35_DESCRIPTOR } from "@/lib/knowledge/providers/bedrock/cohere-rerank-3-5";
-import { DEFAULT_RETRIEVAL_CONFIG, RETRIEVAL_ALGORITHM_VERSION, type KnowledgeRpcClient, type SearchRow } from "@/lib/knowledge/retrieval-core";
+import {
+  DEFAULT_DOCUMENT_RETRIEVAL_PARAMS,
+  DEFAULT_RETRIEVAL_CONFIG,
+  PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+  RETRIEVAL_ALGORITHM_VERSION,
+  type DocumentRow,
+  type KnowledgeRpcClient,
+  type SearchRow,
+} from "@/lib/knowledge/retrieval-core";
 
 import { embedResponse, fakeBedrock, noSleep } from "./bedrock-fake";
 
@@ -42,13 +58,25 @@ export const FIXTURE_SCOPE: readonly FixtureScopeEntry[] = Object.freeze([
   { documentType: "terms", productId: FIXTURE_TEST_PRODUCT_ID, productName: "Testprodukt (fiktiv)" },
 ]);
 
-export function fixtureMaterial(overrides: Partial<RetrievalFingerprintMaterial> = {}): RetrievalFingerprintMaterial {
+export function fixtureMaterial(overrides: Partial<HybridRetrievalMaterial> = {}): HybridRetrievalMaterial {
   return {
     ...retrievalFingerprintMaterial({
       embedding: EMBED_V4_EU_1024_DESCRIPTOR,
       reranker: RERANK_35_DESCRIPTOR,
       algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
       params: { ...DEFAULT_RETRIEVAL_CONFIG },
+      chunkerVersions: [FIXTURE_CHUNKER_VERSION],
+    }),
+    ...overrides,
+  };
+}
+
+/** product_documents material (B-035): no embedding, no reranker, the budget. */
+export function fixtureDocumentMaterial(overrides: Partial<DocumentRetrievalMaterial> = {}): DocumentRetrievalMaterial {
+  return {
+    ...documentRetrievalMaterial({
+      algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+      params: { ...DEFAULT_DOCUMENT_RETRIEVAL_PARAMS },
       chunkerVersions: [FIXTURE_CHUNKER_VERSION],
     }),
     ...overrides,
@@ -98,9 +126,10 @@ export function fixtureContext(overrides: ContextOverrides = {}): Record<string,
           fingerprint: retrievalFingerprint(material),
           status: overrides.status ?? "active",
           material,
-          embeddingModelId: FIXTURE_MODEL.id,
-          rerankerId: material.reranker.id,
-          rerankerVersion: material.reranker.version,
+          method: retrievalMethodOf(material),
+          embeddingModelId: material.reranker === null ? null : FIXTURE_MODEL.id,
+          rerankerId: material.reranker === null ? null : material.reranker.id,
+          rerankerVersion: material.reranker === null ? null : material.reranker.version,
           algorithmVersion: material.algorithmVersion,
           params: material.params,
           chunkerVersions: material.chunkerVersions,
@@ -177,13 +206,53 @@ export function fixtureRow(n: number, overrides: Partial<SearchRow> = {}): Searc
   };
 }
 
+/**
+ * A row of knowledge.product_document_chunks (B-035): chunk `index` of a version with `count`
+ * chunks, in one fixture document of the fixture product. No ranking columns.
+ */
+export function fixtureDocumentRow(index: number, count: number, overrides: Partial<DocumentRow> = {}): DocumentRow {
+  return {
+    ...fixtureRow(1),
+    chunk_id: `f7100000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    chunk_index: index,
+    text: `Fiktive betingelser, afsnit ${index}: dækning, undtagelser og begrænsninger (fiktiv).`,
+    heading: `${index}. Afsnit`,
+    heading_path: [`${index}. Afsnit`],
+    section_number: `${index}`,
+    page_start: index + 1,
+    page_end: index + 1,
+    vector_rank: null,
+    vector_score: null,
+    lexical_rank: null,
+    lexical_score: null,
+    lexical_terms: [],
+    version_chunk_count: count,
+    ...overrides,
+  };
+}
+
 /** An emulated knowledge schema: the rows, no conflicts, and the given retrieval context. */
-export function fixtureDb(options: { rows?: SearchRow[]; context?: Record<string, unknown> | null; contextError?: boolean; calls?: string[] } = {}): KnowledgeRpcClient {
+export function fixtureDb(
+  options: {
+    rows?: SearchRow[];
+    documentRows?: DocumentRow[];
+    documentError?: { code: string; message: string };
+    context?: Record<string, unknown> | null;
+    contextError?: boolean;
+    calls?: string[];
+    args?: Record<string, unknown>[];
+  } = {},
+): KnowledgeRpcClient {
   const rows = options.rows ?? [fixtureRow(1), fixtureRow(2)];
   return {
-    async rpc(fn) {
+    async rpc(fn, args) {
       options.calls?.push(fn);
+      options.args?.push({ fn, ...args });
       if (fn === "search_chunks") return { data: rows, error: null };
+      if (fn === "product_document_chunks") {
+        if (options.documentError) return { data: null, error: options.documentError };
+        return { data: options.documentRows ?? [fixtureDocumentRow(0, 2), fixtureDocumentRow(1, 2)], error: null };
+      }
       if (fn === "evidence_conflicts" || fn === "evidence_chunks") return { data: [], error: null };
       if (fn === "retrieval_context") {
         if (options.contextError) return { data: null, error: { code: "42501", message: "permission denied" } };

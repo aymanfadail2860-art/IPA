@@ -294,7 +294,7 @@ Funktionen kontrollerer:
 | Status er `under_review` | Afvises |
 | Obligatorisk metadata er udfyldt: produkt, type, titel, versionsbetegnelse, `valid_from`, sprog (`docs/03` §8) | Afvises med forklaring. Knappen er deaktiveret i UI |
 | Alle sider er læst | Afvises (§17, B-11) |
-| Der findes embeddings for alle chunks med den aktive embedding-model | Afvises. Ellers ville versionen være "publiceret", men usynlig for vektorsøgning |
+| Der findes embeddings for alle chunks med den aktive embedding-model | Afvises. Ellers ville versionen være "publiceret", men usynlig for vektorsøgning. **B-035:** kravet gælder, når en embedding-model er aktiv. Uden aktiv model bruger ingen søgning vektorer (`docs/beta.md` §12) |
 | Gyldigheden kan indpasses uden overlap (§3.5) | Afvises med forklaring |
 | Kvalitetsadvarsler | **Blokerer ikke.** De vises igen i bekræftelsesdialogen (`docs/04` §14.2), og mennesket afgør |
 
@@ -575,6 +575,11 @@ kan ikke opfyldes i samme felt. Derfor:
 ---
 
 ## 8. Retrieval
+
+**B-035 (beta):** ud over den hybride søgning nedenfor findes metoden `product_documents`. Den bruger
+hverken embedding eller reranker og leverer det valgte produkts adgangsgodkendte, publicerede og
+gyldige dokumentversioner i fuld længde inden for et budget. Konfigurationen i drift afgør metoden
+(`docs/beta.md` §4 og §12). Afsnittet nedenfor er uændret historik for den hybride søgning.
 
 ### 8.1 Flow
 

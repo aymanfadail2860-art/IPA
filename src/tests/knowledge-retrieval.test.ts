@@ -284,10 +284,11 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
     ]);
     const set = await runRetrieval({ query: "gradvis forurening" }, deps(db));
 
-    expect(set.schemaVersion).toBe(2);
+    expect(set.schemaVersion).toBe(3);
     expect(set.query).toEqual({ text: "gradvis forurening", mode: "current", asOf: "2026-10-01", language: "da", filters: {} });
     expect(set.retrieval).toEqual({
       grade: "development",
+      method: "hybrid",
       embeddingModel: { id: "test:test-hash-embedder@1", grade: "development" },
       reranker: { id: "none", version: "1", grade: "development" },
       // No configuration in service (the fake database has none): P1–P9 cannot be established.
@@ -351,7 +352,7 @@ describe("retrieval pipeline and the evidence model (docs/07 §8, §10)", () => 
     const request = { query: "x", grade: "production", reranker: "provider:model", candidateK: 10_000 } as RetrievalRequest;
     const set = await runRetrieval(request, deps(db));
     expect(set.retrieval.grade).toBe("development");
-    expect(set.retrieval.reranker.id).toBe("none");
+    expect(set.retrieval.reranker?.id).toBe("none");
     expect(calls[0]!.args.p_candidate_k).toBe(DEFAULT_RETRIEVAL_CONFIG.candidateK);
   });
 });

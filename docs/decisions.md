@@ -137,10 +137,13 @@ Kun de valg, der binder løsningen til embeddings og AWS, tilpasses eksplicit.
 kan betaens konfiguration ikke godkendes (fail-closed).
 
 **Udledt (til bekræftelse):**
-1. Publicering kræver embeddings, når en aktiv embedding-model findes, og konfigurationen i drift
-   ikke er embedding-fri. Uden aktiv embedding-model kan ingen søgning bruge vektorer, så kravet
-   bortfalder. Ellers kunne betaens dokumenter ikke publiceres og evalueres, før en konfiguration
-   var godkendt. En hybrid konfiguration kan kun aktiveres, når dens model dækker alle chunks.
+1. Publicering kræver embeddings, netop når en embedding-model er aktiv (implementeret i L1).
+   - Uden aktiv model kan ingen søgning bruge vektorer, så kravet bortfalder.
+   - Ellers kunne betaens dokumenter ikke publiceres og evalueres, før en konfiguration var
+     godkendt.
+   - Med en aktiv model kræves embeddings som hidtil, også når konfigurationen i drift er
+     embedding-fri. Det er strengere end K2 tillader, men enklere og uden huller.
+   - En hybrid konfiguration kan kun aktiveres, når dens model dækker alle chunks.
 2. Administratorrollen får de fire nye permissions som standard. Firøjneprincippet i databasen
    adskiller redigering og godkendelse af prøvespørgsmål.
 3. At tage en prøve kræver en aktiv bruger og en tildelt prøve, ikke en ny permission.

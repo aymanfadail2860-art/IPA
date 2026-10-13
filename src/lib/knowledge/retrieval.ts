@@ -12,11 +12,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { EvidenceSet } from "./core/evidence";
 import { applicationProviderRuntime, providersForContext } from "./providers/configured";
 import { observedRuntime, type ProviderCallLog } from "./providers/provider-metrics";
-import { assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
+import { activeModelFromContext, assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
 import {
   DEFAULT_RETRIEVAL_CONFIG,
   readRetrievalContext,
   RetrievalError,
+  runProductDocumentRetrieval,
   runRetrieval,
   type ClassifiedRetrievalRequest,
   type RetrievalObserver,
@@ -53,7 +54,7 @@ export async function getRetrievalAvailability(): Promise<RetrievalAvailability>
   if (isDemoMode() || !getSupabaseConfig()) return assessRetrieval({ demo: isDemoMode(), databaseConfigured: false, activeModel: null });
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
   const context = await readRetrievalContext(knowledge);
-  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: context?.activeModel ?? undefined, context, runtime: applicationProviderRuntime });
+  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, runtime: applicationProviderRuntime });
 }
 
 let applicationSink: AlertSink | null = null;
@@ -105,14 +106,28 @@ async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: Retrie
 
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
   const context = await readRetrievalContext(knowledge);
-  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: context?.activeModel ?? undefined, context, runtime: applicationProviderRuntime });
+  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, runtime: applicationProviderRuntime });
   // Unavailable is a system failure, never an empty (= "insufficient") result.
   if (availability.state === "unavailable") throw new RetrievalError("unavailable", availability.reason);
   if (!context) throw new RetrievalError("unavailable", "Retrieval-konfigurationen kunne ikke læses fra databasen.");
   const labels = { runtime: "application" as const, request_id: requestId, configuration_id: context.configuration?.id ?? null, configuration_fingerprint: context.configuration?.fingerprint ?? null };
   const providers = providersForContext(context, () => observedRuntime(applicationProviderRuntime(), labels, writeProviderCall));
+  // product_documents (B-035): the configuration in service decides the method — never the request.
+  if (providers.method === "product_documents") {
+    const configuration = context.configuration;
+    if (!configuration || configuration.method !== "product_documents" || !("maxChars" in configuration.params)) {
+      throw new RetrievalError("unavailable", "Retrieval-konfigurationen kunne ikke læses fra databasen.");
+    }
+    return runProductDocumentRetrieval(request, {
+      db: knowledge,
+      params: configuration.params,
+      devForceInsufficient: dev.devForceInsufficient === true,
+      observe,
+    });
+  }
   // The configuration's own parameters; without one, the defaults (development).
-  const config = context.configuration?.params ?? DEFAULT_RETRIEVAL_CONFIG;
+  const params = context.configuration?.params;
+  const config = params && !("maxChars" in params) ? params : DEFAULT_RETRIEVAL_CONFIG;
   return runRetrieval(request, {
     db: knowledge,
     embedding: providers.embedding,

@@ -63,6 +63,7 @@ function issue(embedder: Embedder | null, reranker: Reranker): EvidenceSet {
     query: { text: "x", mode: "current", asOf: "2026-10-01", language: "da", filters: {} },
     embedding: embedder ? { embedder, modelId: FIXTURE_MODEL.id } : null,
     reranker,
+    method: "hybrid",
     context: parseRetrievalContext(fixtureContext()),
     algorithmVersion: RETRIEVAL_ALGORITHM_VERSION,
     params: { ...DEFAULT_RETRIEVAL_CONFIG },

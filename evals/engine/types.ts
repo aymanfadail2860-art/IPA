@@ -174,6 +174,11 @@ export interface RetrievalRun {
   raw?: unknown;
   /** chunk id → chunker version, for P7/H6. Missing entries count as uncovered (fail-closed). */
   chunkerVersions: Record<string, string>;
+  /**
+   * document version id → its number of chunks in the corpus. Required for product_documents
+   * (B-035): H6 verifies that every version of the basis is included in full.
+   */
+  versionChunkCounts?: Record<string, number>;
 }
 
 export interface RetrievalUnderTest {

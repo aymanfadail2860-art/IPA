@@ -19,6 +19,7 @@ const snapshot = (checksum: string): CorpusSnapshot => ({
   binding: { products: {}, documents: {}, conflicts: {} },
   texts: new Map(),
   chunkerVersions: { [fixtureRow(1).chunk_id]: "structure/1" },
+  versionChunkCounts: {},
   checksum,
   versions: new Map(),
 });
@@ -80,7 +81,7 @@ describe("the evaluation environment adapter", () => {
     const { env } = fakeEnvironment(FIXTURE_USER);
     const retrieval = adapter(env);
     expect(retrieval.environment).toBe("evaluation");
-    expect(retrieval.withoutReranker()?.configuration().reranker.id).toBe("none");
+    expect(retrieval.withoutReranker()?.configuration().reranker?.id).toBe("none");
   });
 });
 

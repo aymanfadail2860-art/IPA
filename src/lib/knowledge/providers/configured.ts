@@ -27,24 +27,31 @@ export type { ProviderRuntime };
  * lazily by the caller (retrieval.ts).
  */
 
-export interface ConfiguredProviders {
-  embedding: { embedder: EmbeddingProvider; modelId: string } | null;
-  reranker: RerankingProvider;
-}
+/**
+ * The implementations retrieval runs with. product_documents (B-035) has none: no embedder and no
+ * reranker are constructed, and no provider runtime is touched — nothing can leave the platform
+ * during retrieval.
+ */
+export type ConfiguredProviders =
+  | { method: "hybrid"; embedding: { embedder: EmbeddingProvider; modelId: string } | null; reranker: RerankingProvider }
+  | { method: "product_documents"; embedding: null; reranker: null };
 
 export function providersForContext(context: RetrievalContext, runtime: () => ProviderRuntime, environment: RuntimeEnv = runtimeEnv()): ConfiguredProviders {
   const configuration = context.configuration;
   const model = context.activeModel;
   if (!configuration) {
     return {
+      method: "hybrid",
       reranker: createReranker(undefined, environment),
       embedding: model ? { embedder: createEmbedder(model, environment), modelId: model.id } : null,
     };
   }
+  if (configuration.method === "product_documents") return { method: "product_documents", embedding: null, reranker: null };
+  if (configuration.rerankerId === null) throw new Error("Den hybride konfiguration mangler en reranker.");
   const reranker = createProductionReranker(configuration.rerankerId, runtime());
-  if (!model) return { reranker, embedding: null };
+  if (!model) return { method: "hybrid", reranker, embedding: null };
   const embedder = model.id === configuration.embeddingModelId ? createProductionEmbedder(model, runtime()) : createEmbedder(model, environment);
-  return { reranker, embedding: { embedder, modelId: model.id } };
+  return { method: "hybrid", reranker, embedding: { embedder, modelId: model.id } };
 }
 
 let applicationRuntime: ProviderRuntime | null = null;

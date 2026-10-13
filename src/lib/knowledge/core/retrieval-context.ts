@@ -1,5 +1,12 @@
 import type { EmbeddingModelSpec } from "./embedding.ts";
-import { retrievalFingerprint, type RetrievalFingerprintMaterial, type RetrievalParams } from "./provider.ts";
+import {
+  retrievalFingerprint,
+  retrievalMethodOf,
+  type DocumentRetrievalParams,
+  type RetrievalFingerprintMaterial,
+  type RetrievalMethod,
+  type RetrievalParams,
+} from "./provider.ts";
 
 /**
  * The retrieval context (docs/08b §9–§10, 8B-I6): what the database says, at the moment of a
@@ -40,11 +47,14 @@ export interface ConfigurationInService {
   status: ConfigurationStatus;
   /** The fingerprinted material, exactly as approved. */
   material: RetrievalFingerprintMaterial;
-  embeddingModelId: string;
-  rerankerId: string;
-  rerankerVersion: string;
+  /** The retrieval method (B-035). Always the material's own method. */
+  method: RetrievalMethod;
+  /** Null exactly for product_documents (no embedding, no reranker). */
+  embeddingModelId: string | null;
+  rerankerId: string | null;
+  rerankerVersion: string | null;
   algorithmVersion: string;
-  params: RetrievalParams;
+  params: RetrievalParams | DocumentRetrievalParams;
   chunkerVersions: string[];
   tier: "pilot" | "standard" | null;
   evaluation: {
@@ -110,18 +120,43 @@ function parseParams(value: unknown): RetrievalParams | undefined {
   return Object.fromEntries(keys.map((key) => [key, value[key]])) as unknown as RetrievalParams;
 }
 
+function parseDocumentParams(value: unknown): DocumentRetrievalParams | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !isInteger(value.maxChars) || value.maxChars <= 0) return undefined;
+  return { maxChars: value.maxChars };
+}
+
+/**
+ * The method-dependent part (B-035): a hybrid configuration names its embedding model and
+ * reranker; a product_documents configuration names neither. The stated method must be the
+ * material's own — anything else is rejected (fail-closed).
+ */
+type MethodFields = Pick<ConfigurationInService, "method" | "embeddingModelId" | "rerankerId" | "rerankerVersion" | "params">;
+
+function parseMethodFields(v: Record<string, unknown>, material: Record<string, unknown>): MethodFields | undefined {
+  const method = v.method;
+  if (method !== "hybrid" && method !== "product_documents") return undefined;
+  if (retrievalMethodOf(material as unknown as RetrievalFingerprintMaterial) !== method) return undefined;
+  if (method === "product_documents") {
+    const params = parseDocumentParams(v.params);
+    if (v.embeddingModelId !== null || v.rerankerId !== null || v.rerankerVersion !== null || !params) return undefined;
+    return { method, embeddingModelId: null, rerankerId: null, rerankerVersion: null, params };
+  }
+  const params = parseParams(v.params);
+  if (!isString(v.embeddingModelId) || !UUID.test(v.embeddingModelId) || !isString(v.rerankerId) || !isString(v.rerankerVersion) || !params) return undefined;
+  return { method, embeddingModelId: v.embeddingModelId, rerankerId: v.rerankerId, rerankerVersion: v.rerankerVersion, params };
+}
+
 function parseConfiguration(value: unknown): ConfigurationInService | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
   const v = value;
-  const params = parseParams(v.params);
   const material = v.material;
+  const fields = isRecord(material) ? parseMethodFields(v, material) : undefined;
   if (
     !isString(v.id) || !UUID.test(v.id) || !isString(v.label) || !isInteger(v.version) ||
     !isString(v.fingerprint) || !HEX64.test(v.fingerprint) ||
     (v.status !== "active" && v.status !== "suspended") ||
-    !isRecord(material) || !isString(v.embeddingModelId) || !UUID.test(v.embeddingModelId) ||
-    !isString(v.rerankerId) || !isString(v.rerankerVersion) || !isString(v.algorithmVersion) || !params ||
+    !isRecord(material) || !fields || !isString(v.algorithmVersion) ||
     !isStringArray(v.chunkerVersions) || (v.tier !== null && v.tier !== "pilot" && v.tier !== "standard") ||
     typeof v.productionReady !== "boolean" || !isStringArray(v.notReady) || !v.notReady.every((reason) => (NOT_READY as readonly string[]).includes(reason))
   ) {
@@ -164,11 +199,12 @@ function parseConfiguration(value: unknown): ConfigurationInService | null | und
     fingerprint: v.fingerprint,
     status: v.status,
     material: structuredClone(material) as unknown as RetrievalFingerprintMaterial,
-    embeddingModelId: v.embeddingModelId,
-    rerankerId: v.rerankerId,
-    rerankerVersion: v.rerankerVersion,
+    method: fields.method,
+    embeddingModelId: fields.embeddingModelId,
+    rerankerId: fields.rerankerId,
+    rerankerVersion: fields.rerankerVersion,
     algorithmVersion: v.algorithmVersion,
-    params,
+    params: fields.params,
     chunkerVersions: [...v.chunkerVersions],
     tier: v.tier as ConfigurationInService["tier"],
     evaluation: parsedEvaluation,

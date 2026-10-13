@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { captureControlReference, productionReferenceProblems } from "../../src/lib/knowledge/core/control-set.ts";
 
 import type { EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
+import { isDocumentMaterial, type DocumentRetrievalParams } from "../../src/lib/knowledge/core/provider.ts";
 import { createEmbedder, createEvaluationBaselineReranker, createReranker } from "../../src/lib/knowledge/core/registry.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
 import { TEST_EMBEDDER } from "../../src/lib/knowledge/core/test-embedder.ts";
@@ -22,7 +23,8 @@ import { connectEvaluationEnvironment, evaluationEnvironmentFromEnv, NotAnEvalua
 import { createFixtureRetrieval, fixtureUuid } from "./fixture-retrieval.ts";
 import { EVALS_ROOT, loadInputs } from "./loader.ts";
 import { runEvaluationOperation, writeVersionedReport, type EvaluationMode } from "./operations.ts";
-import { runEvaluation } from "./runner.ts";
+import type { PerformanceMeasurement } from "./performance.ts";
+import { runEvaluation, type EvaluationReport } from "./runner.ts";
 import { EvalSetError, GateSetError } from "./schema.ts";
 
 /**
@@ -91,6 +93,15 @@ async function main(): Promise<number> {
     values.configuration ??
     (values.providers === "bedrock" ? (values.adapter === "evaluation" ? "bedrock-embed-v4-eu-1024-rerank-3-5-structure-1" : "bedrock-embed-v4-eu-1024-rerank-3-5") : "fixture-development");
   const inputs = loadInputs({ set: values.set, gates: values.gates, configuration });
+  // product_documents (B-035): no embedder, no reranker — only the declared budget.
+  const declared = inputs.declared.configuration;
+  if (isDocumentMaterial(declared)) {
+    if (values.providers === "bedrock" || values["capture-control-reference"]) {
+      console.error("En konfiguration uden embedding (product_documents) bruger ingen udbydere.");
+      return 2;
+    }
+    return finish(values.out, mode, await runDocumentEvaluation(values, inputs, declared.params, mode));
+  }
   let embedder: EmbeddingProvider;
   let reranker: RerankingProvider;
   let baselineReranker: RerankingProvider;
@@ -162,8 +173,50 @@ async function main(): Promise<number> {
     });
   }
 
-  const written = writeVersionedReport(values.out, report, performance);
-  const base = path.join(values.out, report.runId);
+  return finish(values.out, mode, { report, performance });
+}
+
+/** product_documents (B-035): the fixture adapter, or the evaluation environment, without providers. */
+async function runDocumentEvaluation(
+  values: { adapter?: string; set: string; provision: boolean },
+  inputs: ReturnType<typeof loadInputs>,
+  documents: DocumentRetrievalParams,
+  mode: EvaluationMode,
+): Promise<{ report: EvaluationReport; performance: PerformanceMeasurement | null } | number> {
+  if (values.adapter === "evaluation") {
+    const config = evaluationEnvironmentFromEnv(process.env);
+    if ("missing" in config) {
+      console.error(`Evalueringsmiljøet kræver ${config.missing.join(", ")}.`);
+      return 2;
+    }
+    try {
+      return await runEvaluationOperation({
+        inputs, mode, documents, env: connectEvaluationEnvironment(config), provision: values.provision,
+        log: (event) => console.log(JSON.stringify(event)),
+      });
+    } catch (error) {
+      const reason = error instanceof NotAnEvaluationEnvironmentError ? "not_evaluation_environment" : error instanceof Error ? error.name : "unknown";
+      await createAlertSink(process.env, "evaluation").send(createAlert("evaluation_failed", { set: values.set, mode, reason }));
+      console.error(error instanceof Error ? error.message : error);
+      return 3;
+    }
+  }
+  const retrieval = createFixtureRetrieval({ manifest: inputs.set.manifest, fixtures: inputs.fixtures, documents, now: () => new Date() });
+  const report = await runEvaluation({
+    set: inputs.set,
+    gates: inputs.gates,
+    declared: { label: inputs.declared.label, configuration: inputs.declared.configuration },
+    retrieval,
+    verifyInputsUnchanged: inputs.verifyUnchanged,
+  });
+  return { report, performance: null };
+}
+
+function finish(out: string, mode: EvaluationMode, result: { report: EvaluationReport; performance: PerformanceMeasurement | null } | number): number {
+  if (typeof result === "number") return result;
+  const { report, performance } = result;
+  const written = writeVersionedReport(out, report, performance);
+  const base = path.join(out, report.runId);
   console.log(`Resultat: ${report.verdict} (gyldig: ${report.valid ? "ja" : "nej"}, tier: ${report.tier})`);
   for (const gate of report.hardGates) console.log(`  ${gate.id} ${gate.status} (${gate.violations} brud)`);
   for (const gate of report.qualityGates) console.log(`  ${gate.id} ${gate.status}${gate.uncertain ? " (usikker)" : ""} — ${gate.explanation}`);

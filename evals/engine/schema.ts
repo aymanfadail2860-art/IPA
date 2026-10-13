@@ -549,7 +549,21 @@ export function validateDeclaredConfiguration(value: unknown): DeclaredConfigura
     c.string(value.description, "configuration.description");
     const input = value.configuration;
     const path = "configuration.configuration";
-    if (c.object(input, path, ["embedding", "reranker", "algorithmVersion", "params", "chunkerVersions"], [])) {
+    // product_documents (B-035): no embedding, no reranker, the budget as the only parameter. The
+    // same rules as the database (knowledge.document_retrieval_material_problem).
+    if (isObject(input) && "method" in input) {
+      if (c.object(input, path, ["method", "embedding", "reranker", "algorithmVersion", "params", "chunkerVersions"], [])) {
+        if (input.method !== "product_documents") c.error(`${path}.method`, 'skal være "product_documents"');
+        if (input.embedding !== null) c.error(`${path}.embedding`, "skal være null (metoden har ingen embedding-model)");
+        if (input.reranker !== null) c.error(`${path}.reranker`, "skal være null (metoden har ingen reranker)");
+        c.string(input.algorithmVersion, `${path}.algorithmVersion`, { pattern: /^product-documents-[0-9]{1,6}$/ });
+        if (c.object(input.params, `${path}.params`, ["maxChars"], [])) {
+          const maxChars = input.params.maxChars;
+          if (!Number.isInteger(maxChars) || (maxChars as number) < 10_000 || (maxChars as number) > 2_000_000) c.error(`${path}.params.maxChars`, "skal være et heltal mellem 10.000 og 2.000.000");
+        }
+        if (c.array(input.chunkerVersions, `${path}.chunkerVersions`, { min: 1 })) input.chunkerVersions.forEach((version, i) => c.string(version, `${path}.chunkerVersions[${i}]`));
+      }
+    } else if (c.object(input, path, ["embedding", "reranker", "algorithmVersion", "params", "chunkerVersions"], [])) {
       if (input.embedding !== null && c.object(input.embedding, `${path}.embedding`, ["provider", "model", "modelVersion", "dimensions", "processing", "settings"], [])) {
         for (const key of ["provider", "model", "modelVersion"] as const) c.string(input.embedding[key], `${path}.embedding.${key}`);
         const dimensions = input.embedding.dimensions;
