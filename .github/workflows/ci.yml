@@ -68,6 +68,17 @@ jobs:
           # 0 pass, 1 fail/uncertain (the example set is small): the run completed. 2 or 3 is an error.
           test "$CODE" -le 1
 
+      - name: Evaluation engine, product_documents (fixture adapter, D1–D6, B-036)
+        env:
+          IPA_RUNTIME_ENV: test
+        run: |
+          set +e
+          npm run eval:retrieval -- --set example-documents-v1 --configuration product-documents-fixture --out "$RUNNER_TEMP/eval-documents"
+          CODE=$?
+          set -e
+          # The fixture environment fails H7 by design, so the run is "fail" (1). 2 or 3 is an error.
+          test "$CODE" -le 1
+
       - name: Build
         run: npm run build
 

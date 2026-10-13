@@ -179,6 +179,23 @@ metrik, der ikke kan beregnes, dumper sit gate.
 2. en ny versionsstyret baseline og
 3. en eksplicit godkendt beslutning i `docs/decisions.md`.
 
+**`product_documents` (B-036)** evalueres med sit eget gate-sæt, `gates/product-documents-gates-v1.json`
+(D1–D6, `docs/beta.md` §5.1), aldrig med Q1–Q7. Q1–Q7 evaluerer omvendt aldrig `product_documents`.
+- Hver dokumentgate er en invariant med tærsklen 1 og gør aldrig en kørsel "uncertain".
+- H4 kræver, at retrieval blev spurgt om netop spørgsmålets ene produkt.
+- H6 kræver hele grundlaget: hver version komplet, sammenhængende, i rækkefølge og uforkortet, ingen
+  manglende gyldig version, og inden for budgettet.
+- Et sæt for metoden skal angive netop ét produkt pr. spørgsmål. `example-documents-v1` er
+  eksemplet:
+
+  ```
+  npm run eval:retrieval -- --set example-documents-v1 --configuration product-documents-fixture
+  ```
+
+E2E-kontrollen af de færdige svar (`evals/acceptance/`, `evals/engine/acceptance.ts`) er adskilt fra
+retrieval-gates og kan ikke bestå uden den rigtige Claude-model og en menneskelig, faglig
+validering (`docs/beta.md` §5.2).
+
 ## Pilot-regler
 
 1. Hårde gates kræver ingen statistik.

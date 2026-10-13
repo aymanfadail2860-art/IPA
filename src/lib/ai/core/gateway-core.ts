@@ -316,6 +316,18 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     const parts: SentPart[] = [Object.freeze({ kind: "question" as const, category: "user_question" as const, text: question, content: questionContent })];
     if (label && labelContent) parts.push(Object.freeze({ kind: "context" as const, category: "user_question" as const, text: label, content: labelContent }));
     let total = parts.reduce((sum, part) => sum + part.text.length, 0);
+    // product_documents (B-036): the whole basis is the evidence. It is never cut to the profile's
+    // limits — a basis that does not fit is refused before the model is called (docs/beta.md §5.3).
+    if (evidence?.retrieval.method === "product_documents") {
+      const texts = evidence.items.map((item) => [item.excerpt.leadIn, item.excerpt.text].filter(Boolean).join("\n"));
+      if (
+        evidence.items.length > profile.limits.maxEvidence ||
+        texts.some((text) => text.length > profile.limits.maxCharsPerPart) ||
+        total + texts.reduce((sum, text) => sum + text.length, 0) > profile.limits.maxTotalChars
+      ) {
+        throw invalid("Dokumentgrundlaget for produktet kan ikke sendes samlet til AI-modellen. Intet er afkortet eller udeladt; afgræns spørgsmålet til færre dokumenter.", "document_basis_too_large");
+      }
+    }
     for (const item of evidence?.items.slice(0, profile.limits.maxEvidence) ?? []) {
       const part = evidencePart(item, profile.limits.maxCharsPerPart);
       if (total + part.text.length > profile.limits.maxTotalChars) break;

@@ -18,7 +18,7 @@ import {
   type SearchRow,
 } from "../../src/lib/knowledge/retrieval-core.ts";
 
-import { checksumOf } from "./checksum.ts";
+import { checksumOf, sha256 } from "./checksum.ts";
 import { danishDateOf, versionValidOn } from "./observe.ts";
 import type { ConfigurationInput, CorpusBinding, EvalCase, Manifest, ManifestDocument, RetrievalRun, RetrievalUnderTest } from "./types.ts";
 
@@ -153,6 +153,8 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
 
   const versionChunkCounts: Record<string, number> = {};
   for (const chunk of chunks) versionChunkCounts[chunk.versionId] = (versionChunkCounts[chunk.versionId] ?? 0) + 1;
+  // B-036: each chunk's text as the corpus holds it, so H6 and D3 can see an abridged chunk.
+  const chunkDigests = Object.fromEntries(chunks.map((chunk) => [chunk.id, sha256(chunk.text)]));
 
   async function embedCorpus(embedder: EmbeddingProvider): Promise<Map<string, number[]>> {
     if (!embeddings) {
@@ -393,7 +395,7 @@ export function createFixtureRetrieval(options: FixtureRetrievalOptions): Retrie
       async run(evalCase: EvalCase): Promise<RetrievalRun> {
         const log: unknown[] = [];
         const set = await runProductDocumentRetrieval(request(evalCase), { db: database(evalCase.actor, new Map(), log), params, now: options.now });
-        return { actor: evalCase.actor, set, raw: log, chunkerVersions, versionChunkCounts };
+        return { actor: evalCase.actor, set, raw: log, chunkerVersions, versionChunkCounts, chunkDigests };
       },
       // There is no reranker, so there is no run without one (Q7).
       withoutReranker: () => null,

@@ -20,6 +20,7 @@ const snapshot = (checksum: string): CorpusSnapshot => ({
   texts: new Map(),
   chunkerVersions: { [fixtureRow(1).chunk_id]: "structure/1" },
   versionChunkCounts: {},
+  chunkDigests: {},
   checksum,
   versions: new Map(),
 });

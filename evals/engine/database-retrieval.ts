@@ -154,7 +154,7 @@ export function createDatabaseRetrieval(options: DatabaseRetrievalOptions): Retr
           now: options.now,
           observe: options.observe,
         });
-        return { actor: confirmedActor(evalCase, actor), set, raw: log, chunkerVersions: snapshot.chunkerVersions, versionChunkCounts: snapshot.versionChunkCounts };
+        return { actor: confirmedActor(evalCase, actor), set, raw: log, chunkerVersions: snapshot.chunkerVersions, versionChunkCounts: snapshot.versionChunkCounts, chunkDigests: snapshot.chunkDigests };
       },
       // There is no reranker, so there is no run without one (Q7).
       withoutReranker: () => null,

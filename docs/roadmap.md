@@ -26,8 +26,9 @@ Assessment på Vercel, Supabase og Claude API. Advise er udskudt. Som eksplicit 
 betaen bygge de nødvendige dele af 8C, 9, 10 og 12 før den oprindelige rækkefølge. Masterfaserne
 nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9) står i
 `docs/beta.md`; åbne punkter for betaen står i `docs/beta.md` §11. **L0 og L1** (retrieval-metoden
-`product_documents` og publicering uden embeddings) er gennemført og afventer godkendelse.
-Kvalitetsgates for den nye metode afventer beslutning (`docs/beta.md` §5.1).
+`product_documents` og publicering uden embeddings) er godkendt (B-036). **L1.1** (gate-sættet D1–D6,
+E2E-acceptkontrollen og tre adskilte godkendelser, `docs/beta.md` §13) er gennemført og afventer
+godkendelse.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på

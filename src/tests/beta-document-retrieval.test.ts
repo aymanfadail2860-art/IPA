@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { userText } from "@/lib/egress/classification";
 import { EvidenceGradeError, issueEvidenceSet, requireProductionEvidence, type EvidenceSet } from "@/lib/knowledge/core/evidence";
 import { assessProduction } from "@/lib/knowledge/core/production-conditions";
-import { documentMaterialProblem, retrievalFingerprint, retrievalMethodOf } from "@/lib/knowledge/core/provider";
+import { documentMaterialProblem, retrievalFingerprint, retrievalMethodOf, sha256 } from "@/lib/knowledge/core/provider";
 import { parseRetrievalContext } from "@/lib/knowledge/core/retrieval-context";
 import { providersForContext } from "@/lib/knowledge/providers/configured";
 import { activeModelFromContext, assessRetrieval } from "@/lib/knowledge/retrieval-availability";
@@ -28,6 +28,7 @@ import { validateDeclaredConfiguration } from "../../evals/engine/schema.ts";
 import type { EvalCase, RetrievalRun } from "../../evals/engine/types.ts";
 
 import { loadExample } from "./fixtures/eval-retrieval";
+import { PRODUCT_DOCUMENTS_GATES_V1 } from "./fixtures/evaluation-report";
 import {
   FIXTURE_CHUNKER_VERSION,
   FIXTURE_MODEL,
@@ -218,6 +219,33 @@ describe("runProductDocumentRetrieval", () => {
   });
 });
 
+describe("mutation T22 (B-036): the method re-check in requireProductionEvidence guards an unreachable state", () => {
+  // The re-check (product_documents: the set's and the assessed configuration's method, no
+  // embedder, no reranker) can only be reached by an ISSUED set with grade production. Two
+  // independent guards make a wrong method there impossible today: P1/P2 already decided the grade
+  // at issuance, and an issued set is deep-frozen, so it cannot be changed afterwards — and a copy
+  // is not issued. The re-check is a deliberate, overlapping layer against a future refactor.
+  it("an issued production set is deep-frozen: neither the method, the reranker nor the embedder can be changed", async () => {
+    const set = await retrieveDocs();
+    expect(requireProductionEvidence(set)).toBe(set);
+    expect(Object.isFrozen(set) && Object.isFrozen(set.retrieval) && Object.isFrozen(set.items[0])).toBe(true);
+    expect(() => Object.assign(set.retrieval, { method: "hybrid" })).toThrow(TypeError);
+    expect(() => Object.assign(set.retrieval, { reranker: { id: "x", version: "1", grade: "production" } })).toThrow(TypeError);
+    expect(() => Object.assign(set.retrieval, { embeddingModel: { id: "x", grade: "production" } })).toThrow(TypeError);
+    expect(set.retrieval).toMatchObject({ method: "product_documents", reranker: null, embeddingModel: null });
+  });
+
+  it("a changed copy is not issued and is refused before the re-check; at issuance P1/P2 already refuse the wrong method", async () => {
+    const set = await retrieveDocs();
+    const copy = { ...set, retrieval: { ...set.retrieval, method: "hybrid" as const } };
+    expect(() => requireProductionEvidence(copy)).toThrow(/ikke udstedt/);
+    // A hybrid configuration in service and the document method run: development (P1, P2), refused by grade.
+    const mismatch = await retrieveDocs({ context: fixtureContext() });
+    expect(mismatch.retrieval.unmet).toEqual(expect.arrayContaining(["P1", "P2"]));
+    expect(() => requireProductionEvidence(mismatch)).toThrow(/evidensgraden er "development"/);
+  });
+});
+
 describe("P1–P9 for product_documents: nothing becomes production by itself", () => {
   it("no configuration in service: development", async () => {
     expectDevelopment(await retrieveDocs({ context: fixtureContext({ configuration: null }) }), "P1");
@@ -344,23 +372,66 @@ describe("providers and availability for product_documents", () => {
 });
 
 describe("H6 for product_documents (the evaluation verifies the method that ran)", () => {
-  async function run(change: (set: EvidenceSet) => EvidenceSet = (set) => set, counts: Record<string, number> | null = { "f8000000-0000-4000-8000-000000000001": 2 }): Promise<RetrievalRun> {
+  const CORPUS_TEXT: Record<string, string> = {
+    "f7100000-0000-4000-8000-000000000000": fixtureDocumentRow(0, 2).text,
+    "f7100000-0000-4000-8000-000000000001": fixtureDocumentRow(1, 2).text,
+  };
+  const DIGESTS = Object.fromEntries(Object.entries(CORPUS_TEXT).map(([id, text]) => [id, sha256(text)]));
+  async function run(
+    change: (set: EvidenceSet) => EvidenceSet = (set) => set,
+    counts: Record<string, number> | null = { "f8000000-0000-4000-8000-000000000001": 2 },
+    digests: Record<string, string> | null = DIGESTS,
+  ): Promise<RetrievalRun> {
     const set = change(await retrieveDocs());
     const chunkerVersions = Object.fromEntries(set.items.flatMap((item) => item.chunkIds.map((id) => [id, FIXTURE_CHUNKER_VERSION])));
-    return { actor: "a", set, chunkerVersions, ...(counts ? { versionChunkCounts: counts } : {}) };
+    return { actor: "a", set, chunkerVersions, ...(counts ? { versionChunkCounts: counts } : {}), ...(digests ? { chunkDigests: digests } : {}) };
   }
-  const h6 = async (...args: Parameters<typeof run>) => developmentEvidence("c", await run(...args), fixtureDocumentMaterial()).map((violation) => violation.explanation);
+  const h6 = async (change?: (set: EvidenceSet) => EvidenceSet, counts?: Record<string, number> | null, digests?: Record<string, string> | null, material = fixtureDocumentMaterial()) =>
+    developmentEvidence("c", await run(change, counts, digests), material).map((violation) => violation.explanation);
+  const withItems = (set: EvidenceSet, items: EvidenceSet["items"]) => ({ ...set, items });
 
   it("complete versions from the declared method: no breach", async () => {
     expect(await h6()).toEqual([]);
   });
 
   it("a version not included in full is a breach", async () => {
-    expect(await h6((set) => ({ ...set, items: set.items.slice(0, 1) }))).toEqual([expect.stringMatching(/ikke medtaget i fuld længde \(1 af 2 chunks\)/)]);
+    expect(await h6((set) => withItems(set, set.items.slice(0, 1)))).toEqual([expect.stringMatching(/ikke medtaget i fuld længde \(1 af 2 chunks\)/)]);
   });
 
-  it("without the corpus counts, completeness cannot be verified: a breach (fail-closed)", async () => {
-    expect(await h6(undefined, null)).toEqual([expect.stringMatching(/Fuldstændigheden kan ikke efterprøves/)]);
+  it("B-036: chunks out of document order are a breach", async () => {
+    expect(await h6((set) => withItems(set, [...set.items].reverse()))).toEqual([expect.stringMatching(/ikke i dokumentets rækkefølge/)]);
+  });
+
+  it("B-036: an abridged chunk is a breach — silent truncation is never a complete version", async () => {
+    const truncated = (set: EvidenceSet) => withItems(set, set.items.map((item, i) => (i === 1 ? { ...item, excerpt: { ...item.excerpt, text: item.excerpt.text.slice(0, 20) } } : item)));
+    expect(await h6(truncated)).toEqual([expect.stringMatching(/ikke leveret uforkortet/)]);
+  });
+
+  it("B-036: a version's chunks scattered through the result are a breach", async () => {
+    const scattered = (set: EvidenceSet) => {
+      const other = { ...set.items[0]!, evidenceId: "e9", documentId: "x", documentVersionId: "f8000000-0000-4000-8000-000000000009", chunkId: "x", chunkIds: ["x"], product: { id: "other", name: "Andet" } };
+      return withItems(set, [set.items[0]!, other, set.items[1]!]);
+    };
+    expect(await h6(scattered)).toEqual([expect.stringMatching(/spredt i resultatet/)]);
+  });
+
+  it("B-036: an item that joins several chunks is a breach (each chunk is delivered on its own)", async () => {
+    const joined = (set: EvidenceSet) => withItems(set, [{ ...set.items[0]!, chunkIds: [...set.items[0]!.chunkIds, ...set.items[1]!.chunkIds] }]);
+    expect(await h6(joined)).toEqual([expect.stringMatching(/samler flere chunks/)]);
+  });
+
+  it("without the corpus counts or chunk digests, completeness cannot be verified: a breach (fail-closed)", async () => {
+    expect(await h6(undefined, null)).toEqual([expect.stringMatching(/Fuldstændigheden kan ikke efterprøves: adapteren oplyser ikke versionernes antal chunks/)]);
+    expect(await h6(undefined, undefined, null)).toEqual([expect.stringMatching(/Fuldstændigheden kan ikke efterprøves: adapteren oplyser ikke chunkenes tekst/)]);
+  });
+
+  it("B-036: a basis over the budget is a breach — it should have been refused, not delivered", async () => {
+    const long = "Fiktiv betingelse. ".repeat(600);
+    const big = (set: EvidenceSet) => withItems(set, set.items.map((item) => ({ ...item, excerpt: { ...item.excerpt, text: long } })));
+    const digests = Object.fromEntries(Object.keys(CORPUS_TEXT).map((id) => [id, sha256(long)]));
+    const small = fixtureDocumentMaterial({ params: { maxChars: 10_000 } });
+    expect(await h6(big, undefined, digests, small)).toEqual([expect.stringMatching(/overskrider budgettet på 10000/)]);
+    expect(await h6(big, undefined, digests)).toEqual([]);
   });
 
   it("an embedder, a reranker or another method is a breach", async () => {
@@ -381,7 +452,7 @@ describe("H6 for product_documents (the evaluation verifies the method that ran)
   });
 });
 
-describe("evaluating product_documents on the fictional corpus (docs/beta.md §5.1)", () => {
+describe("evaluating product_documents on the fictional corpus (docs/beta.md §5.1, B-036)", () => {
   const inputs = loadExample();
   const productOf = (evalCase: EvalCase): string => {
     const document = evalCase.expected.passages[0]?.document ?? evalCase.filters?.documents?.[0];
@@ -389,25 +460,25 @@ describe("evaluating product_documents on the fictional corpus (docs/beta.md §5
   };
   const retrieval = createFixtureRetrieval({ manifest: inputs.set.manifest, fixtures: inputs.fixtures, documents: { ...DEFAULT_DOCUMENT_RETRIEVAL_PARAMS }, now: () => new Date() });
   const declared = { label: "product-documents-fixture", configuration: retrieval.configuration() };
+  const withProducts = { ...inputs.set, cases: inputs.set.cases.map((evalCase) => ({ ...evalCase, filters: { ...evalCase.filters, products: [productOf(evalCase)] } })) };
 
-  it("without a product per question, every question fails closed (the method requires the product)", async () => {
-    const report = await runEvaluation({ set: inputs.set, gates: inputs.gates, declared, retrieval });
-    expect(report.cases.filter((observation) => observation.error === "Vælg ét produkt.").length).toBeGreaterThan(0);
-    expect(report.valid).toBe(false);
+  it("Q1–Q7 (gates-v1) cannot evaluate the method: the run is refused before anything runs", async () => {
+    await expect(runEvaluation({ set: withProducts, gates: inputs.gates, declared, retrieval })).rejects.toThrow(/gælder retrieval-metoden "hybrid", men konfigurationen bruger "product_documents"/);
   });
 
-  it("with the product per question: H1–H6 hold; H7 fails in the fixture; Q4 and Q7 show the gate finding", async () => {
-    const set = { ...inputs.set, cases: inputs.set.cases.map((evalCase) => ({ ...evalCase, filters: { ...evalCase.filters, products: [productOf(evalCase)] } })) };
-    const report = await runEvaluation({ set, gates: inputs.gates, declared, retrieval });
+  it("without a product per question, the evaluation set is refused (the method's basis is one product)", async () => {
+    await expect(runEvaluation({ set: inputs.set, gates: PRODUCT_DOCUMENTS_GATES_V1, declared, retrieval })).rejects.toThrow(/netop ét produkt fra manifestet/);
+  });
+
+  it("with the product per question: H1–H6 and D1–D6 hold; H7 fails in the fixture, so the run is invalid", async () => {
+    const report = await runEvaluation({ set: withProducts, gates: PRODUCT_DOCUMENTS_GATES_V1, declared, retrieval });
     expect(report.configuration.matches).toBe(true);
-    expect(report.cases.every((observation) => observation.error === null)).toBe(true);
+    expect(report.gateSet).toMatchObject({ id: "product-documents-gates", method: "product_documents", k: null });
+    expect(report.rerankerComparison).toBeNull();
+    expect(report.cases.every((observation) => observation.error === null && observation.documents)).toBe(true);
     expect(Object.fromEntries(report.hardGates.map((gate) => [gate.id, gate.status]))).toEqual({ H1: "pass", H2: "pass", H3: "pass", H4: "pass", H5: "pass", H6: "pass", H7: "fail" });
-    // The finding (docs/beta.md §5.1): retrieval returns the product's documents also for a
-    // question they do not answer (only a missing grant gives an empty set), and there is no
-    // reranker to compare with.
-    expect(report.cases.filter((observation) => observation.type === "unanswerable").every((observation) => !observation.empty)).toBe(true);
-    expect(report.qualityGates.find((gate) => gate.id === "Q4")?.status).toBe("fail");
-    expect(report.qualityGates.find((gate) => gate.id === "Q7")).toMatchObject({ status: "fail", value: null });
+    expect(report.qualityGates.map((gate) => [gate.id, gate.status, gate.uncertain])).toEqual(["D1", "D2", "D3", "D4", "D5", "D6"].map((id) => [id, "pass", false]));
+    expect(report.valid).toBe(false);
     expect(report.verdict).toBe("fail");
   });
 });

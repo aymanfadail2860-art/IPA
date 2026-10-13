@@ -25,13 +25,15 @@ import { EVALS_ROOT, loadInputs } from "./loader.ts";
 import { runEvaluationOperation, writeVersionedReport, type EvaluationMode } from "./operations.ts";
 import type { PerformanceMeasurement } from "./performance.ts";
 import { runEvaluation, type EvaluationReport } from "./runner.ts";
-import { EvalSetError, GateSetError } from "./schema.ts";
+import { EvalSetError, GateSetError, validateDeclaredConfiguration } from "./schema.ts";
 
 /**
  * `npm run eval:retrieval` (docs/08b §4.5, 8B-I1).
  *
  *   --set            evaluation set (manifests/<set>.json + cases/<set>.jsonl), default "example-v1"
- *   --gates          gate set (gates/<gates>.json), default "gates-v1"
+ *   --gates          gate set (gates/<gates>.json), default "gates-v1" for the hybrid method and
+ *                    "product-documents-gates-v1" for product_documents (B-036). A gate set
+ *                    evaluates only its own method; any other combination is refused.
  *   --configuration  declared configuration (configurations/<name>.json), default by --providers
  *   --adapter        retrieval under test: "fixture" (in-memory, development only, default) or
  *                    "evaluation" — the evaluation environment (docs/08b §4.5, 8B-I7): a separate
@@ -59,11 +61,19 @@ import { EvalSetError, GateSetError } from "./schema.ts";
  * registration is a separate step as evaluation_publisher (workers/evaluation/publish.ts).
  */
 
+/** The gate set for the declared configuration's method (B-036): Q1–Q7 for hybrid, D1–D6 for product_documents. */
+function defaultGateSet(configuration: string): string {
+  // An invalid name is refused by loadInputs; it is never used as a path here.
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(configuration)) return "gates-v1";
+  const declared = validateDeclaredConfiguration(JSON.parse(fs.readFileSync(path.join(EVALS_ROOT, "configurations", `${configuration}.json`), "utf8")));
+  return isDocumentMaterial(declared.configuration) ? "product-documents-gates-v1" : "gates-v1";
+}
+
 async function main(): Promise<number> {
   const { values } = parseArgs({
     options: {
       set: { type: "string", default: "example-v1" },
-      gates: { type: "string", default: "gates-v1" },
+      gates: { type: "string" },
       configuration: { type: "string" },
       adapter: { type: "string", default: "fixture" },
       providers: { type: "string", default: "development" },
@@ -92,7 +102,7 @@ async function main(): Promise<number> {
   const configuration =
     values.configuration ??
     (values.providers === "bedrock" ? (values.adapter === "evaluation" ? "bedrock-embed-v4-eu-1024-rerank-3-5-structure-1" : "bedrock-embed-v4-eu-1024-rerank-3-5") : "fixture-development");
-  const inputs = loadInputs({ set: values.set, gates: values.gates, configuration });
+  const inputs = loadInputs({ set: values.set, gates: values.gates ?? defaultGateSet(configuration), configuration });
   // product_documents (B-035): no embedder, no reranker — only the declared budget.
   const declared = inputs.declared.configuration;
   if (isDocumentMaterial(declared)) {

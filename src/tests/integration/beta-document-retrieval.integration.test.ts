@@ -4,13 +4,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createEvaluationPublisher, sqlPublisherConnection } from "../../../evals/engine/publication.ts";
+import { createEvaluationPublisher, PublicationRefusedError, sqlPublisherConnection } from "../../../evals/engine/publication.ts";
 import type { EvaluationReport } from "../../../evals/engine/runner.ts";
 import { userText } from "@/lib/egress/classification";
 import { EvidenceGradeError, requireProductionEvidence } from "@/lib/knowledge/core/evidence";
 import { runProductDocumentRetrieval, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
 
-import { buildReport, GATES_V1 } from "../fixtures/evaluation-report";
+import { buildDocumentReport, buildReport, GATES_V1, PRODUCT_DOCUMENTS_GATES_V1 } from "../fixtures/evaluation-report";
 import { buildPdf } from "../fixtures/knowledge-pdfs";
 import { fixtureDocumentMaterial, type FixtureScopeEntry } from "../fixtures/production-config";
 
@@ -28,8 +28,10 @@ import { RUN, runProduct, runWorkerOnce, uploadVersion, workerConfigured, type U
  *   * production evidence only then, only inside the evaluated area, and never once the
  *     configuration is suspended; before registration and approval it is development.
  *
- * The report is the real engine's fixture report with product_documents material: it tests the
- * register's mechanics, not the method's quality (docs/beta.md §5.1). Local only.
+ * The report is the real engine's fixture report for the document gate set (D1–D6, B-036) with
+ * product_documents material: it tests the register's mechanics, not the method's quality
+ * (docs/beta.md §5.1). Q1–Q7 (gates-v1) can never approve the method. The three approvals —
+ * retrieval configuration, AI answer quality, beta for advisers — stay separate (B-036). Local only.
  */
 
 const adminUrl = process.env.IPA_TEST_DB_ADMIN_URL ?? "";
@@ -114,7 +116,7 @@ describe.skipIf(!configured)("product_documents against the local database (B-03
     await takeOutOfService();
     modelsBefore = await admin<{ id: string; status: string }[]>`select id, status from knowledge.embedding_models order by id`;
     scope = [{ documentType: "terms", productId, productName: `Testprodukt Dokumentmetode ${RUN} (fiktiv)` }];
-    const gateSetId = await sqlPublisherConnection(publisherSql).registerGateSet(GATES_V1);
+    const gateSetId = await sqlPublisherConnection(publisherSql).registerGateSet(PRODUCT_DOCUMENTS_GATES_V1);
     const [gate] = await admin<{ approved_at: Date | null }[]>`select approved_at from knowledge.evaluation_gate_sets where id = ${gateSetId}`;
     if (!gate!.approved_at) {
       const error = await rpc(adminClient, "approve_evaluation_gate_set", { p_gate_set_id: gateSetId });
@@ -148,9 +150,20 @@ describe.skipIf(!configured)("product_documents against the local database (B-03
     expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
   });
 
-  it("the publisher registers a product_documents configuration; the database stores no embedding model", async () => {
-    report = buildReport({ runId: randomUUID(), label: "it-product-documents", scope, configuration: material, runtime: material });
-    await createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(report, GATES_V1);
+  it("B-036: Q1–Q7 (gates-v1) can never approve product_documents — refused by the publisher and by the database", async () => {
+    const hybridGates = buildReport({ runId: randomUUID(), label: "it-product-documents-q", scope, configuration: material, runtime: material });
+    await expect(createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(hybridGates, GATES_V1)).rejects.toBeInstanceOf(PublicationRefusedError);
+    await expect(publisherSql`select knowledge.record_evaluation_run(${publisherSql.json(JSON.parse(JSON.stringify(hybridGates)))})`).rejects.toThrow(/gate_set|ikke registreret/);
+  });
+
+  it("the publisher registers a product_documents configuration under D1–D6; the database stores no embedding model", async () => {
+    report = buildDocumentReport({ runId: randomUUID(), label: "it-product-documents", scope, configuration: material, runtime: material });
+    expect(report.qualityGates.map((gate) => gate.id)).toEqual(["D1", "D2", "D3", "D4", "D5", "D6"]);
+    await createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(report, PRODUCT_DOCUMENTS_GATES_V1);
+    const [run] = await admin<{ verdict: string; outcome: string; gate_method: string }[]>`
+      select r.verdict, r.outcome, g.method as gate_method from knowledge.evaluation_runs r join knowledge.evaluation_gate_sets g on g.id = r.gate_set_id
+      where r.report_checksum = ${report.checksums.report}`;
+    expect(run).toEqual({ verdict: "pass", outcome: "pass", gate_method: "product_documents" });
     const [row] = await admin<{ id: string; status: string; embedding_model_id: string | null; reranker_id: string | null }[]>`
       select id, status, embedding_model_id, reranker_id from knowledge.retrieval_configurations where fingerprint = ${report.configuration.declaredFingerprint}`;
     expect(row).toMatchObject({ status: "candidate", embedding_model_id: null, reranker_id: null });
@@ -190,16 +203,58 @@ describe.skipIf(!configured)("product_documents against the local database (B-03
     expect(set.retrieval.unmet).toContain("P4");
   });
 
-  it("a hard-gate breach in regression suspends the configuration at once: no production evidence", async () => {
-    const breach = buildReport({
+  it("B-036: an approved, active retrieval configuration is neither validated answer quality nor an approved beta", async () => {
+    const ai = (client: SupabaseClient) => client.schema("ai");
+    const status = async () => (await ai(adminClient).rpc("beta_status", {})).data as Record<string, unknown>;
+    expect(await status()).toMatchObject({ retrievalConfigurationApproved: true, retrievalConfigurationId: configurationId, answerQualityValidated: false, betaApprovedForAdvisers: false });
+    // The advisor sees none of it.
+    expect((await ai(advisorClient).rpc("beta_status", {})).error).not.toBeNull();
+    // A graded E2E run with the stub never meets the criteria; with a Claude model it is recorded — not validated.
+    const graded = (model: string) => ({
+      criteria: { id: "beta-answer-acceptance", version: 1 },
+      evalSet: { id: "it-e2e", version: 1, checksum: "e".repeat(64) },
+      retrievalConfigurationId: configurationId,
+      model: { id: model, version: "1" },
+      profile: { id: "copilot", version: "1" },
+      results: Array.from({ length: 45 }, (_, i) => {
+        const category = ["direct", "exception", "multi_clause", "missing_coverage", "similar_product", "historical", "conflict", "unanswerable", "permission"][i % 9]!;
+        return {
+          caseId: `it-${RUN}-${i}`, category, correctness: "full", critical: false, inventedCitation: false,
+          exceptions: category === "exception" ? "correct" : "not_applicable",
+          refusal: category === "unanswerable" || category === "permission" ? "correct" : "not_applicable",
+        };
+      }),
+    });
+    const stub = await ai(adminClient).rpc("record_answer_quality", { p: graded("stub") });
+    const claude = await ai(adminClient).rpc("record_answer_quality", { p: graded("claude-sonnet-5-5") });
+    expect(stub.error).toBeNull();
+    expect(claude.error).toBeNull();
+    const [stubRow, claudeRow] = await Promise.all([stub.data, claude.data].map(async (id) => (await admin<{ criteria_met: boolean; validated_at: Date | null }[]>`select criteria_met, validated_at from ai.answer_quality_validations where id = ${id as string}`)[0]));
+    expect(stubRow).toEqual({ criteria_met: false, validated_at: null });
+    expect(claudeRow).toEqual({ criteria_met: true, validated_at: null });
+    expect(await status()).toMatchObject({ answerQualityValidated: false, betaApprovedForAdvisers: false });
+    // A person validates (knowledge.version.publish), accepting the uncertainty. Still no beta.
+    expect((await ai(advisorClient).rpc("validate_answer_quality", { p_validation_id: claude.data, p_note: "Fagligt gennemgået.", p_uncertainty_accepted: true })).error).not.toBeNull();
+    expect((await ai(adminClient).rpc("validate_answer_quality", { p_validation_id: stub.data, p_note: "Fagligt gennemgået.", p_uncertainty_accepted: true })).error).not.toBeNull();
+    expect((await ai(adminClient).rpc("validate_answer_quality", { p_validation_id: claude.data, p_note: "Fagligt gennemgået i integrationstest.", p_uncertainty_accepted: true })).error).toBeNull();
+    expect(await status()).toMatchObject({ retrievalConfigurationApproved: true, answerQualityValidated: true, betaApprovedForAdvisers: false });
+    // Only an explicit approval makes the beta approved.
+    expect((await ai(adminClient).rpc("approve_beta_release", { p_label: `it-${RUN.slice(0, 8)}`, p_validation_id: claude.data, p_note: "Godkendt i integrationstest." })).error).toBeNull();
+    expect(await status()).toMatchObject({ betaApprovedForAdvisers: true });
+  });
+
+  it("a hard-gate breach in regression suspends the configuration at once: no production evidence, no beta", async () => {
+    const breach = buildDocumentReport({
       runId: randomUUID(), label: "it-product-documents", scope, configuration: material, runtime: material,
       violations: [{ gate: "H1", caseId: null, explanation: "integrationstest: fiktivt brud" }],
     });
-    await createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(breach, GATES_V1);
+    await createEvaluationPublisher(sqlPublisherConnection(publisherSql)).publish(breach, PRODUCT_DOCUMENTS_GATES_V1);
     const [row] = await admin<{ status: string }[]>`select status from knowledge.retrieval_configurations where id = ${configurationId}`;
     expect(row!.status).toBe("suspended");
     const set = await retrieve(advisorClient);
     expect(set.retrieval.grade).toBe("development");
     expect(set.retrieval.unmet).toContain("P3");
+    // B-036: the beta approval goes with the configuration; the validated answer quality stays.
+    expect((await adminClient.schema("ai").rpc("beta_status", {})).data).toMatchObject({ retrievalConfigurationApproved: false, answerQualityValidated: true, betaApprovedForAdvisers: false });
   });
 });

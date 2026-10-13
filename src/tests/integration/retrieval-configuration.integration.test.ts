@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { writeVersionedReport } from "../../../evals/engine/operations.ts";
 import { buildPerformanceMeasurement, type PerformanceMeasurement } from "../../../evals/engine/performance.ts";
 import { createEvaluationPublisher, sqlPublisherConnection, type SqlClient } from "../../../evals/engine/publication.ts";
+import type { Metrics } from "../../../evals/engine/types.ts";
 import { publishEvaluation } from "../../../workers/evaluation/publish-run.ts";
 import type { Alert, AlertSink } from "@/lib/observability/alerts";
 import { evaluateHealth, INITIAL_HEALTH_STATE, parseSystemHealth } from "@/lib/observability/health";
@@ -218,7 +219,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
 
   it("refuses a report the publisher would refuse, even over the publisher's own connection", async () => {
     const tampered = report("it-tampered", { configuration: material() });
-    tampered.metrics.mrr_at_k.value = 0.4;
+    (tampered.metrics as Metrics).mrr_at_k.value = 0.4;
     await expect(publisherSql`select knowledge.record_evaluation_run(${publisherSql.json(JSON.parse(JSON.stringify(tampered)))})`).rejects.toThrow(/report_checksum/);
   });
 

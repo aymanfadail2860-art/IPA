@@ -1,0 +1,15 @@
+{
+  "id": "product-documents-gates",
+  "version": 1,
+  "decision": "B-036",
+  "method": "product_documents",
+  "description": "Kvalitetsgates D1–D6 for retrieval-metoden product_documents (docs/beta.md §5.1, B-036). Metoden leverer hele produktets dokumentgrundlag og rangerer ikke, så Q1–Q7 gælder ikke for den. Hver gate er en invariant med tærsklen 1: intet spørgsmål må mangle. Metrik, retning og tærskel er låst i koden. De hårde gates H1–H7 er invarianter med nul tolerance og står aldrig her. Gate-sættet kan kun evaluere og dermed godkende en product_documents-konfiguration.",
+  "quality": {
+    "D1": { "metric": "required_document_coverage", "comparator": ">=", "threshold": 1 },
+    "D2": { "metric": "required_passage_coverage", "comparator": ">=", "threshold": 1 },
+    "D3": { "metric": "full_document_integrity", "comparator": ">=", "threshold": 1 },
+    "D4": { "metric": "valid_version_coverage", "comparator": ">=", "threshold": 1 },
+    "D5": { "metric": "correct_product_scope", "comparator": ">=", "threshold": 1 },
+    "D6": { "metric": "authorized_document_coverage", "comparator": ">=", "threshold": 1 }
+  }
+}

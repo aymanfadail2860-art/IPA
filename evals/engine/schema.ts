@@ -1,11 +1,13 @@
 import { DOCUMENT_TYPES } from "../../src/lib/knowledge/document-types.ts";
 
+import { LOCKED_DOCUMENT_GATES } from "./gates.ts";
 import {
   CASE_MODES,
   CASE_OUTCOMES,
   CASE_SCHEMA_VERSION,
   CASE_SPLITS,
   CASE_TYPES,
+  DOCUMENT_GATE_IDS,
   HARD_GATE_IDS,
   MANIFEST_SCHEMA_VERSION,
   QUALITY_GATE_IDS,
@@ -464,9 +466,40 @@ export const LOCKED_K = 8;
 
 export const GATE_SET_FIELDS = { required: ["id", "version", "decision", "k", "quality"], optional: ["description"] } as const;
 
+/** A product_documents gate set (B-036): names its method, has no K, and D1–D6 instead of Q1–Q7. */
+export const DOCUMENT_GATE_SET_FIELDS = { required: ["id", "version", "decision", "method", "quality"], optional: ["description"] } as const;
+
+function validateDocumentGateSet(value: Record<string, unknown>, c: Checker): void {
+  if (!c.object(value, "gates", DOCUMENT_GATE_SET_FIELDS.required, DOCUMENT_GATE_SET_FIELDS.optional)) return;
+  c.string(value.id, "gates.id", { pattern: KEY });
+  if (!Number.isInteger(value.version) || (value.version as number) < 1) c.error("gates.version", "skal være et positivt heltal");
+  c.string(value.decision, "gates.decision", { pattern: /^B-\d{3}$/ });
+  if (value.description !== undefined) c.string(value.description, "gates.description");
+  if (value.method !== "product_documents") c.error("gates.method", 'skal være "product_documents"');
+  if (!isObject(value.quality)) {
+    c.error("gates.quality", "skal være et objekt");
+    return;
+  }
+  for (const key of Object.keys(value.quality)) {
+    if ((HARD_GATE_IDS as readonly string[]).includes(key)) c.error(`gates.quality.${key}`, "hårde gates er invarianter i koden og kan ikke stå i et gate-sæt");
+  }
+  if (!c.object(value.quality, "gates.quality", DOCUMENT_GATE_IDS, [])) return;
+  for (const id of DOCUMENT_GATE_IDS) {
+    const gate = value.quality[id];
+    const path = `gates.quality.${id}`;
+    const locked = LOCKED_DOCUMENT_GATES[id];
+    if (!c.object(gate, path, ["metric", "comparator", "threshold"], [])) continue;
+    if (gate.metric !== locked.metric) c.error(`${path}.metric`, `skal være "${locked.metric}"`);
+    if (gate.comparator !== locked.comparator) c.error(`${path}.comparator`, `skal være "${locked.comparator}"`);
+    if (gate.threshold !== locked.threshold) c.error(`${path}.threshold`, "skal være 1 — kravet er en invariant: intet spørgsmål må mangle");
+  }
+}
+
 export function validateGateSet(value: unknown): GateSet {
   const c = new Checker();
-  if (c.object(value, "gates", GATE_SET_FIELDS.required, GATE_SET_FIELDS.optional)) {
+  if (isObject(value) && "method" in value) {
+    validateDocumentGateSet(value, c);
+  } else if (c.object(value, "gates", GATE_SET_FIELDS.required, GATE_SET_FIELDS.optional)) {
     c.string(value.id, "gates.id", { pattern: KEY });
     if (!Number.isInteger(value.version) || (value.version as number) < 1) c.error("gates.version", "skal være et positivt heltal");
     c.string(value.decision, "gates.decision", { pattern: /^B-\d{3}$/ });

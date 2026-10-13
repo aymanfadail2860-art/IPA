@@ -8,6 +8,7 @@ import { createRedactor } from "@/lib/ai/core/redaction";
 import { EMBEDDING_CONTROL_SET } from "@/lib/knowledge/core/control-set";
 
 import { isDevelopmentConfiguration } from "../../evals/engine/publication.ts";
+import { loadInputs } from "../../evals/engine/loader.ts";
 import { validateDeclaredConfiguration, validateGateSet } from "../../evals/engine/schema.ts";
 import { loadExample } from "./fixtures/eval-retrieval";
 
@@ -41,6 +42,26 @@ describe("the versioned evaluation files", () => {
       Q6: 0.1,
       Q7: "not_lower",
     });
+  });
+
+  it("product-documents-gates v1 holds exactly the invariants D1–D6 for product_documents (B-036)", () => {
+    const gates = validateGateSet(JSON.parse(fs.readFileSync(path.join(EVALS, "retrieval/gates/product-documents-gates-v1.json"), "utf8")));
+    expect(gates).toMatchObject({ id: "product-documents-gates", version: 1, decision: "B-036", method: "product_documents" });
+    expect(Object.fromEntries(Object.entries(gates.quality).map(([id, gate]) => [id, `${gate.metric} ${gate.comparator} ${gate.threshold}`]))).toEqual({
+      D1: "required_document_coverage >= 1",
+      D2: "required_passage_coverage >= 1",
+      D3: "full_document_integrity >= 1",
+      D4: "valid_version_coverage >= 1",
+      D5: "correct_product_scope >= 1",
+      D6: "authorized_document_coverage >= 1",
+    });
+  });
+
+  it("the product_documents example set names exactly one product per question (B-036)", () => {
+    const inputs = loadInputs({ set: "example-documents-v1", gates: "product-documents-gates-v1", configuration: "product-documents-fixture" });
+    const products = new Set(inputs.set.manifest.products.map((product) => product.key));
+    expect(inputs.set.cases.every((evalCase) => evalCase.filters?.products?.length === 1 && products.has(evalCase.filters.products[0]!))).toBe(true);
+    expect(inputs.verifyUnchanged()).toBeNull();
   });
 
   it("no gate file contains a hard gate", () => {

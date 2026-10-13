@@ -4,7 +4,7 @@ import { RESTRICTED_CONFLICT_MESSAGE, type EvidenceItem, type EvidenceSet } from
 
 import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, HARD_GATE_TOLERANCE, PILOT_TIER_BELOW, tierFor, TYPE_MINIMUMS } from "../../evals/engine/gates.ts";
 import { computeMetrics, wilson } from "../../evals/engine/metrics.ts";
-import type { CaseObservation, HardGateId, Metrics, MetricValue, RerankerComparison, RetrievalUnderTest } from "../../evals/engine/types.ts";
+import type { CaseObservation, HardGateId, HybridGateSet, Metrics, MetricValue, RerankerComparison, RetrievalUnderTest } from "../../evals/engine/types.ts";
 import { HARD_GATE_IDS } from "../../evals/engine/types.ts";
 import { enlarged, fixtureRetrieval, loadExample, PRODUCTION_DOUBLE_CONFIGURATION, productionDouble, run } from "./fixtures/eval-retrieval";
 
@@ -124,7 +124,7 @@ function metricsWith(overrides: Partial<Record<keyof Omit<Metrics, "informationa
 const comparison: RerankerComparison = { available: true, withReranker: { passage_recall_at_k: 0.9, mrr_at_k: 0.8 }, withoutReranker: { passage_recall_at_k: 0.9, mrr_at_k: 0.8 } };
 
 describe("quality gates Q1–Q7 read their thresholds from the gate set", () => {
-  const gates = inputs.gates;
+  const gates = inputs.gates as HybridGateSet;
   const status = (metrics: Metrics, id: string, cmp: RerankerComparison = comparison) => evaluateQualityGates(metrics, cmp, gates).find((gate) => gate.id === id)!;
 
   it.each([
@@ -195,7 +195,7 @@ describe("hard gates have zero tolerance and take precedence", () => {
   });
 
   it("perfect quality cannot compensate for a hard gate", () => {
-    const quality = evaluateQualityGates(metricsWith({}), comparison, inputs.gates).map((gate) => ({ ...gate, status: "pass" as const, uncertain: false }));
+    const quality = evaluateQualityGates(metricsWith({}), comparison, inputs.gates as HybridGateSet).map((gate) => ({ ...gate, status: "pass" as const, uncertain: false }));
     const minimums = checkTypeMinimums(TYPE_MINIMUMS.flatMap((rule) => Array.from({ length: rule.minimum }, () => ({ type: rule.types[0]! }))));
     expect(decide(evaluateHardGates([]), quality, minimums).verdict).toBe("pass");
     for (const id of HARD_GATE_IDS) {
@@ -204,7 +204,7 @@ describe("hard gates have zero tolerance and take precedence", () => {
   });
 
   it("a missing hard gate result is a failure, never a pass", () => {
-    const quality = evaluateQualityGates(metricsWith({}), comparison, inputs.gates).map((gate) => ({ ...gate, status: "pass" as const, uncertain: false }));
+    const quality = evaluateQualityGates(metricsWith({}), comparison, inputs.gates as HybridGateSet).map((gate) => ({ ...gate, status: "pass" as const, uncertain: false }));
     const minimums = checkTypeMinimums(TYPE_MINIMUMS.flatMap((rule) => Array.from({ length: rule.minimum }, () => ({ type: rule.types[0]! }))));
     const withoutH5 = evaluateHardGates([]).filter((result) => result.id !== "H5");
     expect(decide(withoutH5, quality, minimums).verdict).toBe("fail");

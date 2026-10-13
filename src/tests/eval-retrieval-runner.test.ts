@@ -5,7 +5,7 @@ import { PublisherUnavailableError, unavailablePublisher, verifyReport } from ".
 import { renderMarkdown } from "../../evals/engine/report.ts";
 import { NOT_PRODUCTION_REASON, reportChecksum, runEvaluation, validateAnchors, type EvaluationReport } from "../../evals/engine/runner.ts";
 import { EvalSetError } from "../../evals/engine/schema.ts";
-import type { RetrievalUnderTest } from "../../evals/engine/types.ts";
+import type { HybridGateSet, Metrics, RetrievalUnderTest } from "../../evals/engine/types.ts";
 import { doubleFingerprint, enlarged, fixtureRetrieval, loadExample, now, PRODUCTION_DOUBLE_CONFIGURATION, productionDouble, run } from "./fixtures/eval-retrieval";
 
 /** 8B-I1 — kørsel, reproducerbarhed, checksums, rapport og adskillelsen kørsel/publiceret resultat (docs/08b §4.5). */
@@ -30,7 +30,7 @@ describe("checksums", () => {
   });
 
   it("a changed gate set has another checksum", () => {
-    const changed = { ...inputs.gates, quality: { ...inputs.gates.quality, Q1: { ...inputs.gates.quality.Q1, threshold: 0.9 } } };
+    const changed = { ...(inputs.gates as HybridGateSet), quality: { ...(inputs.gates as HybridGateSet).quality, Q1: { ...(inputs.gates as HybridGateSet).quality.Q1, threshold: 0.9 } } };
     expect(gateSetChecksum(changed)).not.toBe(gateSetChecksum(inputs.gates));
   });
 
@@ -78,7 +78,7 @@ describe("the evaluation run", () => {
     const partial = productionDouble(fixture, { transform: (set) => ({ ...set, items: set.items.filter((item) => item.documentId !== tillaeg) }) });
     const report = await run({ set: { ...inputs.set, cases: [multi] }, retrieval: partial });
     expect(report.cases[0]).toMatchObject({ requiredCovered: 1, requiredTotal: 2 });
-    expect(report.metrics.passage_recall_at_k).toMatchObject({ numerator: 0, denominator: 1 });
+    expect((report.metrics as Metrics).passage_recall_at_k).toMatchObject({ numerator: 0, denominator: 1 });
     expect(report.failures.find((failure) => failure.gate === "Q2")?.explanation).toBe("1 af 2 påkrævede passager (grad 3) er dækket blandt de første K elementer.");
   });
 
@@ -127,8 +127,8 @@ describe("the evaluation run", () => {
     expect(report.verdict).toBe("fail");
     expect(report.invalidReasons.join()).toMatch(/Retrieval fejlede for 112 spørgsmål/);
     // An unanswerable question whose retrieval failed has NOT abstained correctly.
-    expect(report.metrics.correct_abstention.value).toBe(0);
-    expect(report.metrics.false_abstention.value).toBe(1);
+    expect((report.metrics as Metrics).correct_abstention.value).toBe(0);
+    expect((report.metrics as Metrics).false_abstention.value).toBe(1);
   });
 
   it("never makes a report production-eligible — not even a passing one", async () => {
@@ -147,7 +147,7 @@ describe("the evaluation run", () => {
     }
     expect(report.hardGates.map((gate) => gate.id)).toEqual(["H1", "H2", "H3", "H4", "H5", "H6", "H7"]);
     expect(report.qualityGates.map((gate) => gate.id)).toEqual(["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7"]);
-    expect(report.metrics.source_recall_at_k.interval).not.toBeNull();
+    expect((report.metrics as Metrics).source_recall_at_k.interval).not.toBeNull();
     expect(report.failures.every((failure) => failure.rootCauseNote === null && failure.explanation.length > 0)).toBe(true);
     expect(report.checksums.report).toBe(reportChecksum(report));
   });
@@ -197,7 +197,7 @@ describe("a run is not a published result (D-7, D-18)", () => {
       return result.ok ? "" : result.problems.join("\n");
     };
     expect(mutate((report) => report.cases[0]!.violations.push({ gate: "H1", caseId: report.cases[0]!.caseId, explanation: "x" }))).toMatch(/hårde gates/);
-    expect(mutate((report) => (report.metrics.mrr_at_k.value = 0.99))).toMatch(/Metrikkerne kan ikke genberegnes/);
+    expect(mutate((report) => ((report.metrics as Metrics).mrr_at_k.value = 0.99))).toMatch(/Metrikkerne kan ikke genberegnes/);
     expect(mutate((report) => (report.cases[3]!.empty = true))).toMatch(/Metrikkerne kan ikke genberegnes/);
     expect(mutate((report) => ((report.production as { eligible: boolean }).eligible = true))).toMatch(/aldrig selv erklære sig production-egnet/);
     expect(mutate((report) => (report.tier = "pilot"))).toMatch(/Tier stemmer ikke/);
@@ -206,7 +206,7 @@ describe("a run is not a published result (D-7, D-18)", () => {
     const result = verifyReport(copy, inputs.gates);
     expect(result).toMatchObject({ ok: false });
     expect(!result.ok && result.problems).toEqual(["Rapportens checksum stemmer ikke med indholdet."]);
-    const laxer = { ...inputs.gates, version: 2, quality: { ...inputs.gates.quality, Q1: { ...inputs.gates.quality.Q1, threshold: 0.5 } } };
+    const laxer = { ...(inputs.gates as HybridGateSet), version: 2, quality: { ...(inputs.gates as HybridGateSet).quality, Q1: { ...(inputs.gates as HybridGateSet).quality.Q1, threshold: 0.5 } } };
     expect(verifyReport(base, laxer)).toMatchObject({ ok: false });
   });
 
@@ -220,7 +220,7 @@ describe("Q7 needs the run without the reranker", () => {
   it("fails when the comparison cannot be made", async () => {
     const noBaseline = productionDouble(fixture, { ideal: true, baseline: null });
     const report = await run({ set: enlarged(inputs.set, 8), retrieval: noBaseline });
-    expect(report.rerankerComparison.available).toBe(false);
+    expect(report.rerankerComparison!.available).toBe(false);
     expect(report.qualityGates.find((gate) => gate.id === "Q7")!.status).toBe("fail");
     expect(report.verdict).toBe("fail");
   });
@@ -228,6 +228,6 @@ describe("Q7 needs the run without the reranker", () => {
   it("runs the baseline through the same evaluation (fixture: the reranker is already none, so equal)", async () => {
     const report = await runEvaluation({ set: inputs.set, gates: inputs.gates, declared: { label: "fixture", configuration: fixture.configuration() }, retrieval: fixture, now });
     expect(report.rerankerComparison).toMatchObject({ available: true });
-    expect(report.rerankerComparison.withReranker).toEqual(report.rerankerComparison.withoutReranker);
+    expect(report.rerankerComparison!.withReranker).toEqual(report.rerankerComparison!.withoutReranker);
   });
 });

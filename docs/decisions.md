@@ -10,6 +10,93 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-036 — Gate-sæt for product_documents, tre adskilte godkendelser og L2 (beta L1.1)
+
+**Dato:** 13. oktober 2026
+**Område:** `docs/beta.md` §5, §8, §13; `evals/retrieval/gates/product-documents-gates-v1.json`;
+`evals/acceptance/`; migrations `20261013000100` og `20261013000200`
+
+**Beslutning:**
+- **L0 og L1 er godkendt.** `product_documents` er betaens primære retrieval-strategi.
+- **Publiceringsreglen er bekræftet** (B-035, udledt 1):
+  - uden aktiv embedding-model kan en version publiceres uden embeddings, når alle øvrige
+    sikkerheds-, review-, versions- og adgangskrav er opfyldt;
+  - med en aktiv model gælder embedding-kontrollen;
+  - intet godkendes eller publiceres automatisk.
+- **Permission-modellen er godkendt principielt.** `docs/beta.md` §8 er efterprøvet mod principperne,
+  og afvigelserne er rapporteret dér (§8.1).
+- **Gate-sættet `product-documents-gates` v1 (D1–D6)** måler metodens faktiske opgave: at levere
+  korrekte, fuldstændige, autoriserede og relevante produktdokumenter.
+  - Hver gate er en invariant med tærsklen 1. Metrik, retning og tærskel er låst i koden og i
+    databasen.
+  - De hårde gates H1–H7 gælder. H4 og H6 er tilpasset eksplicit for metoden:
+    - netop spørgsmålets ene produkt;
+    - hele grundlaget, hver version komplet, i rækkefølge og uforkortet;
+    - inden for budgettet.
+  - Et gate-sæt gælder netop én metode. D1–D6 kan aldrig godkende en hybrid konfiguration, og
+    Q1–Q7 kan aldrig godkende `product_documents`.
+  - Q1–Q7 (`gates-v1`) er uændrede for den hybride metode.
+- **E2E-svarkvalitet er en separat kontrol** (`beta-answer-acceptance` v1), med disse krav:
+  - mindst 40 spørgsmål i alle ni kategorier;
+  - mindst 95 % fuldt korrekte;
+  - 0 kritiske fejl og 0 opdigtede kilder;
+  - korrekt håndtering af undtagelser og afvisninger;
+  - en rigtig Claude-model;
+  - eksplicit faglig, menneskelig validering.
+- **Tre adskilte godkendelser i databasen:**
+  - godkendt retrieval-konfiguration;
+  - valideret AI-svarkvalitet;
+  - betaversion godkendt til rådgivere.
+
+  Ingen af dem medfører automatisk en anden.
+- **Dokumentbudgettet på 360.000 tegn er et midlertidigt udviklingsloft.** Det er ikke dokumenteret
+  API-kapacitet. Før rigtige Claude-kald kontrolleres disse punkter (`docs/beta.md` §5.3):
+  - tokenantal;
+  - kontekstgrænse;
+  - reserverede outputtokens;
+  - systemprompt;
+  - antal dokumenter;
+  - pris og svartid.
+
+  Kan hele grundlaget ikke være med, afvises kaldet. Der afkortes eller udelades aldrig noget.
+- **Dokumentindhold er kildedata**, aldrig systeminstruktioner.
+- **Rollback:** commit `5461546` er den dokumenterede reference. Et manglende remote-tag blokerer ikke.
+- **L2 må gennemføres**, når L1.1 består. Derefter stoppes der før L3.
+
+**Overvejede alternativer:**
+- *Q1–Q7 med K = hele sættet* (forslaget i L1, `docs/beta.md` §5.1). Fravalgt:
+  - MRR og rerankerens løft har ingen mening uden rangering;
+  - afvisning af ubesvarbare spørgsmål er en egenskab ved det færdige svar, ikke ved
+    dokumentudvælgelsen.
+- *Tærskler under 1 med statistisk usikkerhed.* Fravalgt. Fuldstændighed og autorisation er ikke
+  estimater, og én udeladt eller fremmed version er en fejl.
+- *Én samlet godkendelse af retrieval, svar og beta.* Fravalgt. Den ville lade en godkendt
+  dokumentudvælgelse fremstå som valideret svarkvalitet.
+
+**Begrundelse:** metoden leverer et deterministisk grundlag pr. produkt og dato. Det, der kan gå
+galt, er udeladelse, afkortning, forkert version, forkert produkt og manglende adgangskontrol. Det
+måles direkte og uden tolerance. Svarkvaliteten afhænger af modellen og afgøres først med den
+rigtige model og et menneskes faglige validering.
+
+**Udledt (til bekræftelse):**
+1. **En dokumentgate gør aldrig en kørsel "uncertain".** Wilson-intervallet rapporteres, men
+   pilot-reglen om accept af usikkerhed (B-030) gælder ikke en invariant. Tier pilot afgrænser
+   stadig godkendelsen til det evaluerede område.
+2. **En gyldig version, brugeren må læse, som mangler helt, er også et H6-brud.** Den er altså ikke
+   kun en D4/D6-mangel. I regression suspenderer den straks.
+3. **Undtagelser og afvisninger har nul tolerance.** Fejl i håndteringen af undtagelser og
+   begrænsninger og manglende eller uberettigede afvisninger tolereres ikke. Det kommer oven i kravet
+   om 95 % fuldt korrekte svar.
+4. **Hvem må hvad i E2E-kontrollen:**
+   - en person med `knowledge.version.publish` validerer svarkvaliteten (faglig godkendelse);
+   - registrering af bedømmelser og godkendelse af betaen kræver `system.settings.manage`.
+5. **En betagodkendelse gælder kun, mens dens retrieval-konfiguration er den aktive og klar til
+   drift.** Svarvalideringen skal gælde netop den konfiguration.
+6. **Minimum pr. type i retrieval-sættet er det samme som i 8B** (mindst 36 spørgsmål), og hvert
+   spørgsmål skal angive netop ét produkt.
+
+---
+
 ## B-035 — Fast beta uden AWS med fire kernemoduler
 
 **Dato:** 12. oktober 2026

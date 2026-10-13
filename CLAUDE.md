@@ -29,7 +29,8 @@ deployment, validering, compliance og indhold udestår. 8C er ikke påbegyndt.
 **Fast beta uden AWS (B-035, 2026-10-12):** en professionel beta med Copilot, Learn, Practice og
 Assessment på Vercel, Supabase og Claude API — uden AWS i den aktive runtime. Advise er udskudt.
 Scope, arkitektur og leverancerne L0–L9 står i `docs/beta.md`. Arbejdet sker på branchen
-`beta/fast-beta-without-aws`; hver leverance godkendes særskilt.
+`beta/fast-beta-without-aws`; hver leverance godkendes særskilt. L0 og L1 er godkendt (B-036); L1.1
+afventer godkendelse.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`

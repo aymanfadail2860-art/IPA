@@ -1,8 +1,9 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
-**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026.
-**Status:** L0 og L1 gennemført på branchen `beta/fast-beta-without-aws` og afventer godkendelse
-(§12). L2–L9 er ikke påbegyndt.
+**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026.
+**Status:** L0 og L1 er godkendt (B-036). L1.1 (gate-sæt for `product_documents`, §13) er
+gennemført på branchen `beta/fast-beta-without-aws` og afventer godkendelse. L2–L9 er ikke
+påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -143,8 +144,9 @@ dokumentet. B er samtidig den enkleste runtime.
 - Strategi A bliver ikke en production-metode. Den eksisterende hybride kode kører som i dag
   uden embedder (development) og kan evalueres senere, hvis målinger viser et behov.
 
-**Konsekvens for evalueringen (fund, kræver beslutning):** retrieval-gates Q1–Q7 er bygget til en
-rangerende søgning med topK = 8 og en reranker med absolut relevansscore (§5.1).
+**Konsekvens for evalueringen:** retrieval-gates Q1–Q7 er bygget til en rangerende søgning med
+topK = 8 og en reranker med absolut relevansscore. Metoden har derfor sit eget gate-sæt, D1–D6
+(B-036, §5.1).
 
 ---
 
@@ -171,28 +173,70 @@ rangerende søgning med topK = 8 og en reranker med absolut relevansscore (§5.1
   medtaget dokumentversion er komplet. Chunker-versionerne er dækket. Der er ingen
   udviklingsoverstyring.
 
-**Fund — kvalitetsgates Q1–Q7 passer ikke til en ikke-rangerende metode.** Q1–Q7 er ikke ændret.
-Gennemføres evalueringen med `gates-v1`, gælder:
+**Gate-sættet `product-documents-gates` v1 (B-036).** Q1–Q7 måler en rangerende søgning: topK, MRR,
+rerankerens løft og afvisning i retrieval-laget. De har ingen faglig fortolkning for en metode, der
+leverer hele produktets grundlag, og bruges ikke på den. De er uændrede for den hybride metode
+(`gates-v1`).
 
-| Gate | Hvorfor den ikke passer til `product_documents` |
+D1–D6 måler metodens faktiske opgave. Hver gate er en **invariant**: andelen af spørgsmål, der
+opfylder kravet, skal være 1. Metrik, retning og tærskel er låst i `evals/engine/gates.ts` og i
+databasen.
+
+| Gate | Metrik | Krav pr. spørgsmål | Spørgsmål |
+|---|---|---|---|
+| D1 | Required Document Coverage | Hver kildeversion i facit er leveret | Besvarbare |
+| D2 | Required Passage Coverage | Hver påkrævet passage (grad 3) er leveret et sted i grundlaget | Besvarbare |
+| D3 | Full Document Integrity | Hver leveret version er hel, sammenhængende, i chunk-rækkefølge og uforkortet | Alle |
+| D4 | Valid Version Coverage | Præcis de gyldige versioner (current/as_of): ingen mangler, ingen uventede | Alle |
+| D5 | Correct Product Scope | Retrieval blev spurgt om netop spørgsmålets produkt, og intet element er fra et andet | Alle |
+| D6 | Authorized Document Coverage | Præcis de dokumenter, brugeren må læse: ingen mangler, ingen andre | Alle |
+
+- **Det forventede grundlag** udledes af manifestet, aldrig af retrieval:
+  - spørgsmålets produkt, sprog, dokumenttyper og dokumenter;
+  - de dokumenter, brugeren har tildelinger til;
+  - den version, der gælder på datoen.
+
+  En historisk version kræver historisk læseret.
+- **En fejlet retrieval opfylder intet krav**, og kørslen er ugyldig. Et tomt eller ufuldstændigt
+  grundlag kan ikke bestå.
+- **Ingen dokumentgate gør kørslen "uncertain".** Én mangel fejler gaten, og Wilson-intervallet
+  rapporteres kun (udledt i B-036). Tier pilot afgrænser fortsat godkendelsen til det evaluerede
+  område.
+- **Minimum pr. type er som i 8B** (mindst 36 spørgsmål). Hvert aktivt spørgsmål skal angive netop
+  ét produkt fra manifestet; ellers afvises sættet, før noget køres.
+
+**Hårde gates (nul tolerance).** H1–H7 gælder. H4 og H6 er tilpasset eksplicit for metoden (B-036).
+
+| Krav (B-036, del A) | Håndhæves af |
 |---|---|
-| Q1–Q3 | Måler rangeringen inden for de første K = 8 elementer. B sender hele dokumentet i dokumentrækkefølge, så de første 8 elementer er dokumentets begyndelse |
-| Q4–Q5 | Måler, at retrieval selv afviser ubesvarbare spørgsmål. B sender produktets dokumenter, også når de ikke besvarer spørgsmålet; kun manglende adgang giver et tomt sæt. Afvisningen er modellens (E2E) |
-| Q6 | Meningsfuld, når K = hele sættet |
-| Q7 | Måler rerankerens løft. B har ingen reranker |
+| 1. Ingen dokumenter eller metadata uden for brugerens rettigheder | H1, H2; D6 |
+| 2. Kun det valgte stabile produkt-id | H4 (også forespørgslens produkt); D5 |
+| 3. Publicerede og gyldige versioner, `current`/`as_of` | H3; D4 |
+| 4. Ingen ufuldstændige versioner | H6 (antal chunks fra korpusset); D3 |
+| 5. Alle krævede chunks, i korrekt rækkefølge | H6 (hver chunk præcis én gang, sammenhængende, stigende indeks, tekstens sha256 lig korpussets; en manglende gyldig version er også et brud); D3, D4 |
+| 6. Ingen skjulte konflikter | H5 |
+| 7. Konfiguration, fingeraftryk og metode matcher | H6 (fingeraftryk, metode, ingen embedder/reranker); gate-sættets metode ved registrering, godkendelse og i retrieval-konteksten |
+| 8. Evalueringsmiljø, brugeridentiteter og rapportintegritet | H7, checksums, databasens genberegning |
+| 9. Budgettet overskrides aldrig ved stiltiende afkortning | H6 (grundlaget ≤ `maxChars`, uforkortede chunks); retrieval afviser over budget (54000) |
+| 10. Uden manifest, versionsidentitet eller proveniens ingen godkendelse | Validering af sæt og manifest, H1 (ukendt dokument), H6, D-gates |
 
-Strategi A har samme problem med Q4 (ingen kalibreret score uden reranker) og Q7.
+**Konfigurationen bestemmes server-side.** `retrieveEvidence` vælger metoden ud fra den aktive
+konfiguration i registret, aldrig ud fra forespørgslen. Det er uændret fra L1.
 
-**Forslag til beslutning:** et separat, versioneret gate-sæt for `product_documents`:
-- K er hele sættet;
-- Q1 og Q2 med de låste tærskler;
-- Q6 bevares;
-- Q3 og Q7 markeres "ikke relevant for metoden";
-- Q4 og Q5 måles i E2E-evalueringen.
+**Bindingen mellem gate-sæt og metode** håndhæves i fire lag:
+1. motoren afviser kombinationen, før noget køres;
+2. publisheren efterprøver den;
+3. `record_evaluation_run` afviser den (`gate_set`);
+4. `retrieval_configuration_problems` og `retrieval_context` efterprøver den igen.
 
-Det kræver en udvidelse af gate-motoren og databasens genberegning og implementeres først efter din
-godkendelse. **Indtil da kan en `product_documents`-konfiguration ikke godkendes.** Det er fail-closed
-og ønsket.
+**Kan en korrekt, evalueret `product_documents`-konfiguration godkendes?** Ja. Følgende er vist i
+pgTAP og integration:
+- en bestået D1–D6-kørsel registreres;
+- et menneske med `system.settings.manage` godkender og aktiverer;
+- konfigurationen giver production-evidens inden for det evaluerede område.
+
+En uevalueret, fejlet eller ugyldig konfiguration blokeres stadig: kandidat uden kørsel, D4-fejl,
+H-brud, fixture-miljø, forkert gate-sæt eller forfalsket rapport.
 
 ### 5.2 E2E-svarevaluering (exit-krav for den første begrænsede beta)
 
@@ -217,6 +261,68 @@ Spørgsmålene dækker:
 - permissions.
 
 Nås kriterierne ikke, forbedres kvaliteten, før betabrugere får adgang.
+
+**Kontrollen (B-036): `beta-answer-acceptance` v1** (`evals/acceptance/`, `evals/engine/acceptance.ts`,
+`ai.record_answer_quality`).
+- **Bedømmelsen.** Svarene bedømmes af mennesker, spørgsmål for spørgsmål:
+  - korrekthed: fuld, delvis eller forkert;
+  - kritisk fejl;
+  - opdigtet kilde;
+  - undtagelser: korrekt, forkert eller ikke relevant;
+  - afvisning: korrekt, manglende, uberettiget eller ikke relevant.
+
+  Et spørgsmål om undtagelser skal bedømmes på undtagelserne, og et ubesvarbart spørgsmål eller et
+  permission-spørgsmål på afvisningen.
+- **Fuldt korrekt** betyder rigtigt svar uden kritisk fejl, opdigtet kilde, fejl i undtagelser eller
+  fejl i afvisning.
+- **Låste kriterier:**
+  - mindst 40 spørgsmål og alle ni kategorier;
+  - mindst 95 % fuldt korrekte (punktestimat; den nedre Wilson-grænse gemmes);
+  - 0 kritiske fejl og 0 opdigtede kilder;
+  - 0 fejl i undtagelser og 0 manglende eller uberettigede afvisninger (udledt i B-036);
+  - en rigtig Claude-model (`claude-…`). Stub- og testmodellen kan aldrig bestå.
+- **Opfyldte kriterier er ikke en validering.** En person med `knowledge.version.publish` validerer
+  fagligt (`ai.validate_answer_quality`) med en begrundelse og en eksplicit accept af den
+  statistiske usikkerhed.
+
+**Tre adskilte godkendelser (B-036).** `ai.beta_status()` viser dem hver for sig, og ingen medfører
+en anden:
+
+| Godkendelse | Hvor | Hvem |
+|---|---|---|
+| Godkendt retrieval-konfiguration | `knowledge.retrieval_configurations` (aktiv og klar til drift) | `system.settings.manage`, efter bestået evaluering |
+| Valideret AI-svarkvalitet | `ai.answer_quality_validations` | registreres af `system.settings.manage`, valideres af `knowledge.version.publish` |
+| Betaversion godkendt til rådgivere | `ai.beta_release_approvals` | `system.settings.manage`. Kræver en aktiv konfiguration og en valideret svarkvalitet for netop den. Kan trækkes tilbage |
+
+En suspenderet eller skiftet retrieval-konfiguration tager betagodkendelsen med sig, men ikke
+valideringen. Tabellerne kan kun skrives gennem funktionerne, og alle handlinger auditeres.
+
+### 5.3 Dokumentbudget og manipulation
+
+- **Budgettet er midlertidigt.** 360.000 tegn (`product-documents-structure-1`) er et
+  udviklingsloft, ikke dokumenteret API-kapacitet. Før rigtige Claude-kald (L4) skal disse ting
+  kontrolleres:
+  - det faktiske tokenantal for de rigtige dokumenter;
+  - den valgte models kontekstgrænse;
+  - de reserverede outputtokens;
+  - metadata og systemprompt;
+  - antal dokumenter pr. produkt;
+  - pris og svartid.
+- **Hele grundlaget eller intet.** Kan hele grundlaget ikke være med, afvises kaldet sikkert.
+  - Databasen afviser over `maxChars` (54000).
+  - Gatewayen afviser et `product_documents`-grundlag, der ikke kan sendes samlet inden for
+    profilens grænser (`document_basis_too_large`), før modellen kaldes.
+  - Der sker ingen afkortning af chunks og ingen udeladelse af dokumenter.
+
+  Copilot-profilens nuværende grænser (8 uddrag à 2.000 tegn) er lavet til den hybride top-8 og
+  afviser derfor rigtige produktgrundlag, indtil L4 erstatter dem med et tokenbaseret budget for
+  metoden. Det er fail-closed og ønsket.
+- **Dokumenter med instruktioner.** Dokumentindhold er kildedata, aldrig systeminstruktioner.
+  - Systemprompten er profilens og fastlagt i koden.
+  - Dokumenttekst sendes kun som en `evidence`-del med kategori `knowledge` og evidens-id.
+  - Et svar, der følger en indlejret instruktion uden kilde eller med en opdigtet kilde, afvises af
+    outputkontrakten (`src/tests/beta-document-injection.test.ts`).
+  - Den rigtige models modstandskraft måles i E2E-evalueringen (§5.2), før rådgivere får adgang.
 
 **Statistisk usikkerhed:** 40 spørgsmål er et lille sæt. 95 % svarer til mindst 38 af 40. Det
 nedre 95 %-Wilson-interval er da ca. 0,83 (40 af 40 giver ca. 0,91). Usikkerheden rapporteres og
@@ -314,6 +420,54 @@ Eksisterende permissions genbruges:
    beslutning.
 2. At tage en prøve kræver en aktiv bruger og en tildelt prøve. Ingen ny permission.
 
+### 8.1 Efterprøvning mod principperne (B-036)
+
+De godkendte principper er sammenholdt med reglerne ovenfor. Afvigelserne er ikke rettet stiltiende.
+De skal afklares, før L6–L8 implementerer permissions.
+
+| Princip | Regel ovenfor | Vurdering |
+|---|---|---|
+| Separat ret til at redigere Learn-indhold | `learning.content.manage` | Opfyldt |
+| Separat ret til at styre Practice-scenarier | `practice.scenarios.manage` | Opfyldt |
+| Separate rettigheder til at redigere og godkende Assessment-indhold | `assessment.content.manage` og `.approve` | Opfyldt |
+| Ingen automatisk ret til at godkende egne spørgsmål | Firøjne: godkenderen må ikke være den, der *senest* har ændret | **Afvigelse 1** |
+| Ingen eskalering fra indholdsredaktør til systemadministrator | De fire permissions gives kun til administratorrollen | **Afvigelse 2** |
+| Server-side kontrol, RLS og audit | RLS på nye tabeller, bedømmelse i databasen, audit | Opfyldt som regel; implementeres i L6–L8 |
+| Facit og beskyttede prøveoplysninger kan ikke læses gennem elevens normale API-adgang | Facit kan ikke læses af den, der tager prøven, *før aflevering* | **Afvigelse 3** |
+
+**Afvigelse 1 — "senest ændret" er for svagt.** Laver A et spørgsmål og retter B en detalje, må A
+godkende sit eget spørgsmål.
+
+Forslag:
+- godkenderen må hverken have oprettet eller ændret den version, der godkendes;
+- den, der har bestilt eller overtaget et AI-udkast, regnes som forfatter.
+
+Konsekvens: med kun én administrator kan intet godkendes.
+
+**Afvigelse 2 — administratorrollen er både indholdsredaktør og systemadministrator.** Med de tre
+låste roller (docs/01) findes der ingen indholdsredaktør uden `system.settings.manage` og
+`identity.user.manage`. Den, der skal redigere Learn-indhold, bliver i dag systemadministrator.
+Identity understøtter kun permissions gennem roller, ikke individuelle tildelinger.
+
+Principperne kan derfor ikke opfyldes uden én af to beslutninger:
+- en ny rolle "Indholdsansvarlig";
+- individuelle permission-tildelinger.
+
+Begge ændrer de låste roller og kræver en beslutning. Indtil da gælder:
+- indholdsfunktionerne kontrollerer kun indholds-permissions;
+- ingen indholdsfunktion kan ændre roller eller permissions.
+
+**Afvigelse 3 — "før aflevering" er for snævert.** Facit må aldrig kunne læses gennem elevens
+normale API-adgang, heller ikke efter aflevering. Ellers kan facit deles med dem, der endnu ikke
+har taget prøven.
+
+Forslag:
+- ingen læsepolitik på facit for prøvetagere;
+- resultatet udleveres af en funktion med score og rigtigt/forkert pr. spørgsmål;
+- spørgsmålspuljen og ufrigivne eller andres forsøg er lige så beskyttede som facit.
+
+Om det rigtige svar må vises efter aflevering, er **[AFKLARES]**.
+
 ---
 
 ## 9. Leverancer
@@ -323,7 +477,8 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 | # | Leverance | Status |
 |---|---|---|
 | L0 | B-035, dette dokument, rollback-punkt, beta-branch | Gennemført |
-| L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Gennemført, afventer godkendelse (§12) |
+| L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Godkendt (B-036) |
+| L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Gennemført, afventer godkendelse (§13) |
 | L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Ikke påbegyndt |
 | L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Ikke påbegyndt |
 | L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Ikke påbegyndt |
@@ -357,27 +512,29 @@ git push origin rollback/pre-beta-8b-i8
 **Rollback:** `git checkout -b restore/pre-beta 5461546580691e04db03343f739d7df0777216da`.
 
 Commit-id'et er uforanderligt og forbliver i historikken, fordi der hverken force-pushes eller
-slettes historik. Databasen rulles aldrig tilbage ved at slette migrations. En rollback af skema
+slettes historik. Commit `5461546` er accepteret som den dokumenterede reference (B-036). Det
+manglende remote-tag blokerer ikke udviklingen, og GitHubs adgangskontrol omgås ikke. Databasen rulles aldrig tilbage ved at slette migrations. En rollback af skema
 sker med en ny, fremadrettet migration.
 
 ---
 
 ## 11. Åbne punkter
 
-- **[AFKLARES]** Beslutning om et separat gate-sæt for `product_documents` (§5.1). Uden den kan
-  betaens konfiguration ikke godkendes.
 - **[AFKLARES]** DPA, dokumentlicenser, behandlingsgrundlag, sikkerhed og overførsler for Claude API
   (K7). Skal være vurderet og godkendt, før rigtige fortrolige dokumenter eller personoplysninger
   sendes til modellen.
 - **[AFKLARES]** Betroet operatør og maskine for dokumentimport (§6).
-- **[AFKLARES]** Bekræftelse af de udledte permission-regler (§8).
+- **[AFKLARES]** Afvigelserne i permission-reglerne (§8.1), før L6–L8 implementerer dem.
 - **[AFKLARES]** Det faktiske tegn- og tokenomfang af de rigtige dokumenter. Det måles ved import
-  (L3) og med tokentælling (L4) og afgør budgettet (`maxChars`).
-- **[AFKLARES]** Evalueringssættet for betaen skal angive produktet pr. spørgsmål (§12.4).
+  (L3) og med tokentælling (L4) og afgør budgettet (§5.3).
+- **[AFKLARES]** Evalueringssættet for betaen (L9): netop ét produkt pr. spørgsmål og mindst minimum
+  pr. type (§5.1).
+- **[AFKLARES]** Bekræftelse af de udledte punkter i B-036 (invarianter uden usikkerhed, nul
+  tolerance for undtagelser og afvisninger, hvem der validerer).
 
 ---
 
-## 12. L1 — retrieval-metoden `product_documents` (gennemført, afventer godkendelse)
+## 12. L1 — retrieval-metoden `product_documents` (godkendt, B-036)
 
 ### 12.1 Database (`supabase/migrations/20261012000100_beta_document_retrieval.sql`)
 
@@ -454,10 +611,10 @@ fingeraftryk er uændrede.
    - Q4 fejler: ubesvarbare spørgsmål får produktets dokumenter.
    - Q7 kan ikke beregnes (ingen reranker).
 
-   Beslutningen i §5.1 er nødvendig, før betaens konfiguration kan godkendes.
+   Afgjort i B-036: metoden har sit eget gate-sæt (§5.1).
 2. **Evalueringssættet skal angive produktet pr. spørgsmål.** Eksempelsættet `example-v1` gør det
-   ikke. Med metoden fejler hvert spørgsmål uden produkt lukket ("Vælg ét produkt."). Betaens
-   sæt (L9) skal derfor have produkt pr. spørgsmål.
+   ikke. Med D1–D6 afvises et sæt uden netop ét produkt pr. spørgsmål, før noget køres (L1.1).
+   Betaens sæt (L9) skal derfor have produkt pr. spørgsmål.
 3. **Fejl rettet: en kontekst uden aktiv embedding-model blev læst som "kunne ikke læses".** Det
    gjorde retrieval utilgængelig. Den mangel fandtes allerede i 8B (`retrieval.ts`). Nu betyder
    ingen aktiv model "ingen" (`activeModelFromContext`), som Admin og enhedstestene altid har
@@ -466,8 +623,10 @@ fingeraftryk er uændrede.
    - TypeScript: 21 af 22 fanget. Den ene er ækvivalent: genkontrollen i
      `requireProductionEvidence` kan ikke nås, fordi et udstedt sæt er frosset og allerede
      vurderet af P1–P9.
-   - SQL: 11 af 13 fanget. Adgangsfiltret og statusfiltret i `product_document_chunks` er hver for
-     sig redundante med RLS, der kræver det samme. Fjernes begge, fanges det (S13).
+   - SQL: 11 af 13 fanget. Adgangsfiltret og statusfiltret i `product_document_chunks` blev vurderet
+     som redundante med RLS. Fjernes begge, fanges det (S13).
+   - L1.1 har efterprøvet de tre overlevende igen (§13.4). Vurderingen af S02 var forkert: for en
+     forvalter er adgangsfiltret det eneste lag, og testen er tilføjet.
 
 ### 12.5 Verifikation (lokalt, frisk database)
 
@@ -475,5 +634,82 @@ fingeraftryk er uændrede.
 - 948 enhedstests: 944 bestået (51 nye), 4 sprunget over;
 - pgTAP: 915 bestået (45 nye);
 - integration: 161 bestået og 2 sprunget over (7 nye);
+- alle migrations er afspillet fra bunden.
+
+---
+
+## 13. L1.1 — gate-sæt for `product_documents` og tre adskilte godkendelser (gennemført, afventer godkendelse)
+
+### 13.1 Database
+
+- **`20261013000100_beta_document_gates.sql`** (fremadrettet; ingen data ændres):
+  - `evaluation_gate_sets.method` er afledt af definitionen, og K er tom, netop for
+    `product_documents` (constraint);
+  - `gate_set_problem` validerer et dokumentgate-sæt for sig, med låst metrik, retning og
+    tærskel 1. Den hybride validering er uændret;
+  - `eval_document_report_problems` genberegner D1–D6, de hårde gates, minimum, tier og afgørelsen
+    fra rapportens egne observationer;
+  - `record_evaluation_run` (rapportformat 6) afviser et gate-sæt for en anden metode;
+    `retrieval_configuration_problems` og `retrieval_context` efterprøver det igen;
+  - `check_gate_set_write` ser bort fra den afledte kolonne, der endnu ikke er beregnet i en
+    BEFORE-trigger. Definitionen sammenlignes stadig.
+- **`20261013000200_beta_acceptance.sql`:**
+  - `ai.answer_quality_validations` og `ai.beta_release_approvals`;
+  - funktionerne `record_answer_quality`, `validate_answer_quality`, `approve_beta_release`,
+    `revoke_beta_release` og `beta_status`;
+  - RLS: kun læsning for de relevante permissions. Skrivning kun gennem funktionerne, med en
+    trigger som ekstra lag. Audit på alle handlinger.
+
+### 13.2 Evaluering og gateway
+
+- **Motoren** (`evals/engine`):
+  - `GateSet` er hybrid eller dokument;
+  - den forventede basis udledes af manifestet (`expectedBasis`);
+  - dokumentobservation pr. spørgsmål, D-metrikker og D-gates;
+  - H4 og H6 er tilpasset for metoden;
+  - binding mellem gate-sæt og metode (`assertGateSetFits`);
+  - rapportformat 6 og verifikation før publicering;
+  - adapterne leverer chunkenes sha256 (`chunkDigests`), så afkortning kan ses;
+  - CLI'en vælger gate-sæt efter konfigurationens metode.
+- **Data:**
+  - `gates/product-documents-gates-v1.json` og `schema/document-gates.schema.json`;
+  - eksempelsættet `example-documents-v1` med ét produkt pr. spørgsmål. CI kører det, og det
+    fejler H7 i fixture-miljøet, som det skal;
+  - acceptkriterierne i `evals/acceptance/beta-answer-acceptance-v1.json` og
+    `evals/engine/acceptance.ts`.
+- **Gatewayen** afviser et `product_documents`-grundlag, der ikke kan sendes samlet
+  (`document_basis_too_large`). Den hybride top-K er uændret.
+
+### 13.3 Hvad er bevaret
+
+H1–H7, P1–P9, `gates-v1` (Q1–Q7) og hybride rapporters genberegning er uændrede for den hybride
+metode. Registret, publisherens isolation, godkendelse og aktivering af et menneske,
+suspendering ved fejlet hård gate, pilot-scope (B-030/B-031), RLS og egress-grænsen er uændrede.
+
+### 13.4 Mutationer
+
+**De tre overlevende fra L1:**
+
+| | Mutation | Hvorfor den overlevede | Håndtering |
+|---|---|---|---|
+| T22 | Genkontrollen af metoden i `requireProductionEvidence` fjernet | Kan ikke nås med en forkert metode: P1/P2 afgjorde graden ved udstedelsen, et udstedt sæt er dybfrosset, og en kopi er ikke udstedt | **Ækvivalent.** Bevist med tests af frysningen, kopien og P1/P2 ved udstedelsen. Bevidst overlappende lag |
+| S02 | Adgangsfiltret i `product_document_chunks` fjernet | L1 vurderede det redundant med RLS. **Forkert for en forvalter:** RLS lukker alle versioner igennem, og filtret er det eneste lag, der håndhæver læseretten | **Reelt hul i testene, lukket.** En redaktør uden læseret får intet. Mutationen fanges nu |
+| S04 | Statusfiltret i `product_document_chunks` fjernet | `can_read_version` i adgangsfiltret kræver selv `published` for alle roller | **Ækvivalent, så længe adgangsfiltret findes.** pgTAP viser, at `can_read_version` afviser upublicerede versioner også for en forvalter, og at funktionen aldrig udleverer dem. Fjernes begge, fanges det (S13). Bevidst overlappende lag |
+
+**L1.1:**
+- TypeScript: 27 af 27 fanget. Tre overlevede først (D3 uden digests, D4's "uventede" halvdel og
+  historisk læseret i den forventede basis). Testene er tilføjet.
+- SQL: 22 af 22 fanget. To overlevede først (D4's "uventede" halvdel i SQL og afvisning i "fuldt
+  korrekt"). Testene er tilføjet.
+
+### 13.5 Verifikation (lokalt, frisk database)
+
+- lint, typecheck (app og workers) og build bestået;
+- enhedstests: 1000 bestået (56 nye), 4 sprunget over;
+- pgTAP: 1005 bestået (90 nye);
+- integration: 163 bestået, 2 sprunget over;
+- evalueringsdata: datavagten består. Fixture-kørslerne af `example-v1` (hybrid) og
+  `example-documents-v1` (D1–D6 bestået, H7 fejler i fixture-miljøet) slutter begge med kode 1, som
+  CI tillader;
 - alle migrations er afspillet fra bunden.
 
