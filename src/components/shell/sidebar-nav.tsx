@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { groupedNavItems, navItemForPath } from "@/config/navigation";
+import { groupedNavItems, navItemForPath, surfaceOf } from "@/config/navigation";
 import { useSession } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
 
@@ -14,10 +14,11 @@ import { cn } from "@/lib/utils";
  * The active item: accent.subtle background + a clear left marker, not coloured text alone.
  */
 export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const { grants } = useSession();
+  const session = useSession();
   const pathname = usePathname();
   const activeId = navItemForPath(pathname)?.id;
-  const groups = groupedNavItems(grants);
+  // The beta hides the areas outside its scope (B-035); the server refuses them too.
+  const groups = groupedNavItems(session.grants, surfaceOf(session));
 
   return (
     <nav aria-label="Hovednavigation" className="flex flex-col gap-6">

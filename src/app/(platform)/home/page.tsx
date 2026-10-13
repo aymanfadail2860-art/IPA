@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { isAreaAvailable, surfaceOf } from "@/config/navigation";
 import { hasPermission } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/server-session";
 import { listMyCases } from "@/lib/data/cases";
@@ -31,8 +32,9 @@ function greetingForNow(): string {
 
 export default async function HomePage() {
   const session = await requireSession();
-  // RLS: only cases the user owns or is assigned to.
-  const cases = hasPermission(session.grants, "advise.case.read") ? await listMyCases() : [];
+  const surface = surfaceOf(session);
+  // RLS: only cases the user owns or is assigned to. Not in the beta: Advise is hidden (B-035).
+  const cases = isAreaAvailable("advise", surface) && hasPermission(session.grants, "advise.case.read") ? await listMyCases() : [];
   const current = mockProducts.find((product) => product.slug === "erhvervsansvar")!;
   return (
     <HomeView

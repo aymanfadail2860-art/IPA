@@ -40,7 +40,7 @@ import {
   fixtureDocumentRow,
   fixtureMaterial,
   fixtureQuery,
-  productionProviders,
+  declaredProductionDoubles,
   type ContextOverrides,
 } from "./fixtures/production-config";
 
@@ -258,7 +258,7 @@ describe("P1–P9 for product_documents: nothing becomes production by itself", 
   });
 
   it("a product_documents configuration in service and the HYBRID path run: P1 and P2 fail", async () => {
-    const providers = productionProviders();
+    const providers = declaredProductionDoubles();
     const set = await runRetrieval(REQUEST(), {
       db: fixtureDb({ context: DOC_CONTEXT() }),
       embedding: { embedder: providers.embedder, modelId: FIXTURE_MODEL.id },
@@ -270,7 +270,7 @@ describe("P1–P9 for product_documents: nothing becomes production by itself", 
   });
 
   it("an embedder or a reranker present: P1 or P2 fails", () => {
-    const providers = productionProviders();
+    const providers = declaredProductionDoubles();
     const base = {
       context: parseRetrievalContext(DOC_CONTEXT()),
       method: "product_documents" as const,
@@ -342,25 +342,21 @@ describe("P1–P9 for product_documents: nothing becomes production by itself", 
 });
 
 describe("providers and availability for product_documents", () => {
-  const touched = () => {
-    throw new Error("udbyderens runtime må ikke røres");
-  };
-
-  it("constructs no embedder and no reranker and never touches a provider runtime", () => {
+  it("constructs no embedder and no reranker", () => {
     const context = parseRetrievalContext(DOC_CONTEXT())!;
-    expect(providersForContext(context, touched, "production")).toEqual({ method: "product_documents", embedding: null, reranker: null });
+    expect(providersForContext(context, "production")).toEqual({ method: "product_documents", embedding: null, reranker: null });
   });
 
   it("a context that was read without an active model means none active — never 'could not be read'", () => {
     const context = parseRetrievalContext(DOC_CONTEXT({ activeModel: null }))!;
     expect(activeModelFromContext(context)).toBeNull();
     expect(activeModelFromContext(null)).toBeUndefined();
-    expect(assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, runtime: touched, environment: "production" }).state).toBe("available");
+    expect(assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, environment: "production" }).state).toBe("available");
   });
 
   it("is available — also without any active embedding model — and production when the configuration is ready", () => {
     const context = parseRetrievalContext(DOC_CONTEXT({ activeModel: null }))!;
-    expect(assessRetrieval({ demo: false, databaseConfigured: true, activeModel: null, context, runtime: touched, environment: "production" })).toMatchObject({
+    expect(assessRetrieval({ demo: false, databaseConfigured: true, activeModel: null, context, environment: "production" })).toMatchObject({
       state: "available",
       method: "product_documents",
       reranker: null,

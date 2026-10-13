@@ -17,16 +17,13 @@ import {
 import type { EmbeddingModelSpec, EmbeddingProvider } from "@/lib/knowledge/core/embedding";
 import { ProviderError } from "@/lib/knowledge/core/provider";
 import { hashEmbedding } from "@/lib/knowledge/core/test-embedder";
-import { createCohereEmbedV4, EMBED_V4_EU_1024_DESCRIPTOR } from "@/lib/knowledge/providers/bedrock/cohere-embed-v4";
-import { embeddingModelRow } from "@/lib/knowledge/providers/catalog";
 import type { Alert } from "@/lib/observability/alerts";
 
 import { verifyForPublication } from "../../evals/engine/publication.ts";
 import { checkEmbeddingControl, createControlGate, guardedEmbedderFor } from "../../workers/ingestion/control-check.ts";
 
-import { fakeBedrock, noSleep } from "./fixtures/bedrock-fake";
 import { buildReport, GATES_V1 } from "./fixtures/evaluation-report";
-import { fixtureMaterial } from "./fixtures/production-config";
+import { declaredProductionDoubles, fixtureMaterial } from "./fixtures/production-config";
 
 /**
  * 8B-I8 C6 — the embedding control set (docs/08b §2.5, §15). A small, fixed, versioned set of
@@ -35,12 +32,32 @@ import { fixtureMaterial } from "./fixtures/production-config";
  * cosine to the reference and relations. Only an approved, calibrated reference captured through
  * a real provider path counts; a fake never does. A failure is never accepted automatically.
  *
- * The "provider" here is the real Embed v4 adapter on a fake transport that answers like a model
- * would: different vectors for queries and documents, related texts closer than unrelated ones.
+ * Beta L2 (docs/beta.md §14): the code stays (B-035 §2.1) although the beta has no embedding model.
+ * The "provider" here is a double with the removed Embed v4 adapter's declared descriptor that
+ * answers like a model would: different vectors for queries and documents, related texts closer
+ * than unrelated ones.
  */
 
 const DIMENSIONS = 1024;
-const MODEL: EmbeddingModelSpec = { id: "c6000000-0000-4000-8000-000000000001", ...embeddingModelRow(EMBED_V4_EU_1024_DESCRIPTOR) };
+const DESCRIPTOR = declaredProductionDoubles().embedder.descriptor;
+const MODEL: EmbeddingModelSpec = { id: "c6000000-0000-4000-8000-000000000001", provider: DESCRIPTOR.provider, model_name: DESCRIPTOR.model, model_version: DESCRIPTOR.modelVersion, dimensions: DESCRIPTOR.dimensions };
+
+/** An embedding provider double with the declared descriptor: `answer` gives the vector per text and input type. */
+function embedderAnswering(answer: (text: string, inputType: string) => number[]): EmbeddingProvider & { calls: { texts: string[]; inputType: string }[] } {
+  const calls: { texts: string[]; inputType: string }[] = [];
+  return {
+    id: `${DESCRIPTOR.provider}:${DESCRIPTOR.model}@${DESCRIPTOR.modelVersion}`,
+    grade: "development",
+    dimensions: DESCRIPTOR.dimensions,
+    descriptor: DESCRIPTOR,
+    calls,
+    async embed(texts, options) {
+      const plain = texts.map((text) => plainText(text));
+      calls.push({ texts: plain, inputType: options.inputType });
+      return plain.map((text) => answer(text, options.inputType));
+    },
+  };
+}
 
 /** A model-like answer: input-type dependent, NOT the development fake's hash of the raw text. */
 function modelVector(text: string, inputType: string, drift = 0): number[] {
@@ -51,12 +68,8 @@ function modelVector(text: string, inputType: string, drift = 0): number[] {
 }
 
 function provider(options: { drift?: number; ignoreInputType?: boolean; dimensions?: number } = {}) {
-  const fake = fakeBedrock((call) => {
-    const inputType = options.ignoreInputType ? "search_document" : String(call.body.input_type);
-    const texts = call.body.texts as string[];
-    return { id: "fake", response_type: "embeddings_by_type", embeddings: { float: texts.map((text) => modelVector(text, inputType, options.drift).slice(0, options.dimensions ?? DIMENSIONS)) } };
-  });
-  return { embedder: createCohereEmbedV4({ transport: fake.transport, retryDeps: noSleep, egressLog: () => {} }), calls: fake.calls };
+  const embedder = embedderAnswering((text, inputType) => modelVector(text, options.ignoreInputType ? "document" : inputType, options.drift).slice(0, options.dimensions ?? DIMENSIONS));
+  return { embedder, calls: embedder.calls };
 }
 
 const TOLERANCES = { version: 1, minCosineToReference: 0.995, minRelationalMargin: 0, calibration: "Kun til test: fastsat i testen, ikke kalibreret mod en rigtig udbyder." };
@@ -88,7 +101,7 @@ describe("the control set", () => {
     const { embedder, calls } = provider();
     const vectors = await embedControlSet(embedder);
     expect(Object.keys(vectors).sort()).toEqual(EMBEDDING_CONTROL_SET.texts.map((entry) => entry.id).sort());
-    expect(calls.map((call) => call.body.input_type)).toEqual(["search_query", "search_document"]);
+    expect(calls.map((call) => call.inputType)).toEqual(["query", "document"]);
     // Only the set's own texts: nothing else can be classified this way.
     await expect(embedControlSet(embedder, { ...EMBEDDING_CONTROL_SET })).rejects.toThrow(/versionerede kontrolsæt/);
   });
@@ -114,11 +127,13 @@ describe("comparison with an approved reference", () => {
     const reference = await approvedReference();
     const vectors = await embedControlSet(provider().embedder);
     const short = Object.fromEntries(Object.entries(vectors).map(([id, vector]) => [id, vector.slice(0, 512)]));
-    expect(compareWithReference(short, reference, EMBED_V4_EU_1024_DESCRIPTOR).problems).toEqual(expect.arrayContaining(["dimensions:q-brand"]));
-    // The adapter itself refuses a response of the wrong dimension before any comparison.
-    await expect(runControlCheck(provider({ dimensions: 512 }).embedder, reference)).rejects.toBeInstanceOf(ProviderError);
+    expect(compareWithReference(short, reference, DESCRIPTOR).problems).toEqual(expect.arrayContaining(["dimensions:q-brand"]));
+    // A provider that answers with the wrong dimension fails the check itself.
+    const wrong = await runControlCheck(provider({ dimensions: 512 }).embedder, reference);
+    expect(wrong.status).toBe("fail");
+    expect(wrong.problems).toEqual(expect.arrayContaining(["dimensions:q-brand"]));
     const otherDimensions = { ...reference, model: { ...reference.model, dimensions: 1536 } };
-    expect(compareWithReference(vectors, otherDimensions, EMBED_V4_EU_1024_DESCRIPTOR).status).toBe("fail");
+    expect(compareWithReference(vectors, otherDimensions, DESCRIPTOR).status).toBe("fail");
   });
 
   it("wrong input type → fail (queries embedded as documents, or other input-type settings)", async () => {
@@ -127,13 +142,13 @@ describe("comparison with an approved reference", () => {
     expect(result.status).toBe("fail");
     expect(result.problems).toEqual(expect.arrayContaining(["cosine:q-opbevaring", "cosine:q-brand", "cosine:q-cyber"]));
     expect(result.problems.some((problem) => problem.startsWith("cosine:d-"))).toBe(false);
-    const otherSettings = { ...EMBED_V4_EU_1024_DESCRIPTOR, settings: { ...EMBED_V4_EU_1024_DESCRIPTOR.settings, inputTypeQuery: "search_document" } };
+    const otherSettings = { ...DESCRIPTOR, settings: { ...DESCRIPTOR.settings, inputTypeQuery: "search_document" } };
     expect(compareWithReference(await embedControlSet(provider().embedder), reference, otherSettings).problems).toEqual(expect.arrayContaining(["settings", "embedding_fingerprint"]));
   });
 
   it("wrong version → fail", async () => {
     const reference = await approvedReference();
-    const otherVersion = { ...EMBED_V4_EU_1024_DESCRIPTOR, modelVersion: "eu-1024-v2" };
+    const otherVersion = { ...DESCRIPTOR, modelVersion: "eu-1024-v2" };
     expect(compareWithReference(await embedControlSet(provider().embedder), reference, otherVersion).problems).toEqual(expect.arrayContaining(["model_version", "embedding_fingerprint"]));
   });
 
@@ -141,7 +156,7 @@ describe("comparison with an approved reference", () => {
     const reference = await approvedReference();
     const vectors = await embedControlSet(provider().embedder);
     const flipped = { ...vectors, "d-opbevaring": vectors["d-motor"]!, "d-motor": vectors["d-opbevaring"]! };
-    expect(compareWithReference(flipped, { ...reference, vectors: flipped, tolerances: TOLERANCES }, EMBED_V4_EU_1024_DESCRIPTOR).problems).toContain("relation:q-opbevaring");
+    expect(compareWithReference(flipped, { ...reference, vectors: flipped, tolerances: TOLERANCES }, DESCRIPTOR).problems).toContain("relation:q-opbevaring");
   });
 });
 
@@ -153,9 +168,8 @@ describe("only an approved, calibrated real-provider capture can be the producti
   });
 
   it("a fake baseline can never be registered — not even approved and calibrated", async () => {
-    // The development fake transport hashes the raw text (workers/ingestion/dev-fake-bedrock.ts).
-    const fake = fakeBedrock((call) => ({ embeddings: { float: (call.body.texts as string[]).map((text) => hashEmbedding(text, DIMENSIONS)) } }));
-    const fakeEmbedder = createCohereEmbedV4({ transport: fake.transport, retryDeps: noSleep, egressLog: () => {} });
+    // A development fake hashes the raw text (the test embedder, or 8B's fake transport).
+    const fakeEmbedder = embedderAnswering((text) => hashEmbedding(text, DIMENSIONS));
     const captured = await captureControlReference(fakeEmbedder, { runtime: "evaluation", credentialSource: "github-oidc", capturedAt: "2026-10-12T00:00:00.000Z", runId: "x" });
     const forged = { ...captured, tolerances: TOLERANCES, approval: APPROVAL };
     expect(productionReferenceProblems(forged).filter((problem) => problem.startsWith("fake_vector:"))).toHaveLength(EMBEDDING_CONTROL_SET.texts.length);
@@ -205,10 +219,10 @@ describe("the worker: startup and daily check", () => {
     const none = await run(provider().embedder, []);
     expect(none.logged).toEqual([{ event: "embedding_control_unverified", model: "aws-bedrock:cohere.embed-v4:0@eu-1024-v1", reason: "no_approved_reference" }]);
     expect(none.gate.blocked(MODEL.id)).toBe(false);
-    const failing = fakeBedrock(() => {
+    const failing = embedderAnswering(() => {
       throw new ProviderError("unavailable", "aws-bedrock", "nede", { httpStatus: 503 });
     });
-    const down = await run(createCohereEmbedV4({ transport: failing.transport, retryDeps: noSleep, egressLog: () => {}, retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, attemptTimeoutMs: 1000 } }), [await approvedReference()]);
+    const down = await run(failing, [await approvedReference()]);
     expect(down.gate.blocked(MODEL.id)).toBe(false);
     expect(down.alerts).toEqual([]);
     expect(down.logged[0]).toMatchObject({ event: "embedding_control_error", provider_error_kind: "unavailable" });

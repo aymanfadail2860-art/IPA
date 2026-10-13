@@ -10,6 +10,66 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-037 — AWS fjernet fra den aktive beta; skjulte områder (beta L2)
+
+**Dato:** 13. oktober 2026
+**Område:** `docs/beta.md` §2, §9, §14; `deploy/import/compose.yaml`;
+`deploy/monitoring/aggregate-alarms.*` (version 2); `src/config/beta-surface.ts`, `src/proxy.ts`
+
+**Beslutning:**
+- **AWS er fjernet fra den aktive kode og konfiguration** (B-035, `docs/beta.md` §14.1). Det
+  omfatter Bedrock-adaptere og -transport, credential-vejene, kataloget, provider-runtime og
+  provider-metrikker. Fjernet er også ECS-, ECR-, IAM-, security group-, Cloud Map- og
+  CloudWatch-filer, de AWS-baserede workflows og AWS-dependencies. Intet er slettet fra historikken.
+  Rollback-punktet er uændret (§10).
+- **Den hybride metode kan ikke længere give production-evidens.** Der findes ingen
+  production-embedder eller -reranker. En hybrid konfiguration med en production-udbyder afvises af
+  registret (fail-closed), og en hybrid evidensmængde opfylder aldrig P1/P2. Betaens
+  production-vej er `product_documents` (B-035).
+- **Leverandøruafhængige sikkerhedskrav er flyttet før sletning.** Hvert fjernet AWS-afhængigt
+  testkrav er ført over i en ny eller ændret test (`docs/beta.md` §14.3). Scannerens og workerens
+  isolation gælder nu containerspecifikationen `deploy/import/compose.yaml`.
+- **Kontrolsættet af embedding-vektorer (C6) bliver**, som B-035 fastslår (§2.1). Koden er
+  leverandøruafhængig. Betaen har ingen embedding-model, så kontrollen har intet at måle.
+- **Undtagelsen `createEvaluationBaselineReranker` er fjernet.** Den lod "none" konstruere i enhver
+  runtime, og kun Bedrock-evalueringen i CI brugte den. "None" kan nu kun konstrueres gennem
+  registrets kontrol af grade.
+- **De aggregerede alarmer er version 2.** Kilden `provider_call` og alarmerne A2 og A6 havde kun
+  Bedrock som kilde og er fjernet. CloudWatch-alarmerne er også fjernet. Numrene genbruges ikke.
+  A1 og A3–A5, minimum 20 forsøg og enkelthændelserne er uændrede.
+- **Betaen skjuler Advise, Analytics og Min profil server-side.**
+  - Det gælder for alle roller, uanset permissions.
+  - Proxyen og siderne svarer 404, og server-actions afviser. Områderne optræder ikke i navigation,
+    søgning, brugermenu eller på Home.
+  - Kundecases indlæses ikke.
+  - Copilot, Learn, Practice, Assessment, Home og Admin er uændrede.
+  - Demoen uden login (B-003) er ikke betaen og beholder alle områder.
+
+**Overvejede alternativer:**
+- *Bevare Bedrock-koden inaktiv.* Fravalgt. B-035 kræver, at AWS ikke indgår i den aktive runtime
+  og ikke i afhængighederne. Koden kan gendannes fra historikken.
+- *En testdobbelt, der registreres som production-implementering, så de hybride positive tests
+  kunne blive.* Fravalgt. Det ville åbne for præcis det, mekanismen skal forhindre: at noget, der
+  ikke er en rigtig production-adapter, bliver det. I stedet er P3–P9 vist med doubler, der kun
+  erklærer production og derfor fejler netop P1 og P2. Den positive vej er vist med
+  `product_documents`.
+- *Skjule områderne kun i menuen.* Fravalgt. En URL eller en server-action ville stadig nå dem.
+- *Skjule også Learn, Practice og Assessment, fordi de endnu viser udviklingsdata.* Fravalgt. De er
+  betaens kernemoduler og bygges i L6–L8.
+
+**Begrundelse:** betaen skal være så lille og så kontrolleret som muligt. Det, der ikke indgår i den,
+må hverken kunne kaldes eller ses. De sikkerhedskrav, AWS-koden testede, er ikke knyttet til AWS.
+De er ført over, så de stadig håndhæves af det, der findes.
+
+**Udledt (til bekræftelse):**
+1. **Betaen er enhver session med database.** Kun demoen uden login er ikke betaen.
+2. **Min profil skjules sammen med Advise og Analytics.** Siden viser kun udviklingsdata (fase 13)
+   og indgår ikke i betaens scope (`docs/beta.md` §1).
+3. **De rutetests, der viste sagsadgang og lederscope gennem siderne, viser nu 404.** Selve reglerne
+   testes uændret i databasen (`rls.integration.test.ts`).
+
+---
+
 ## B-036 — Gate-sæt for product_documents, tre adskilte godkendelser og L2 (beta L1.1)
 
 **Dato:** 13. oktober 2026

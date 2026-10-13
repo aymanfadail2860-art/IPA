@@ -16,10 +16,17 @@ import { parseRetrievalContext } from "@/lib/knowledge/core/retrieval-context";
 import { createEmbedder, createReranker, RerankerNotConfiguredError } from "@/lib/knowledge/core/registry";
 import type { Reranker } from "@/lib/knowledge/core/reranker";
 import { TEST_EMBEDDER } from "@/lib/knowledge/core/test-embedder";
-import { DEFAULT_RETRIEVAL_CONFIG, RETRIEVAL_ALGORITHM_VERSION, runRetrieval, type RetrievalRequest } from "@/lib/knowledge/retrieval-core";
+import {
+  DEFAULT_DOCUMENT_RETRIEVAL_PARAMS,
+  DEFAULT_RETRIEVAL_CONFIG,
+  PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+  RETRIEVAL_ALGORITHM_VERSION,
+  runRetrieval,
+  type RetrievalRequest,
+} from "@/lib/knowledge/retrieval-core";
 import { checkRetrievalConfiguration } from "@/lib/knowledge/retrieval-startup";
 
-import { FIXTURE_MODEL, fixtureContext, productionProviders } from "./fixtures/production-config";
+import { declaredProductionDoubles, FIXTURE_MODEL, fixtureContext, fixtureDocumentMaterial } from "./fixtures/production-config";
 import { withRuntimeEnv } from "./fixtures/runtime-env";
 
 /**
@@ -72,6 +79,26 @@ function issue(embedder: Embedder | null, reranker: Reranker): EvidenceSet {
     items: [],
   };
   return issueEvidenceSet(input);
+}
+
+/**
+ * Issued by the beta's method, product_documents (B-035), under an active, approved configuration:
+ * no embedder and no reranker. Since L2 (docs/beta.md §14) it is the only way to production
+ * evidence — no production embedder or reranker exists.
+ */
+function issueDocuments(): EvidenceSet {
+  return issueEvidenceSet({
+    query: { text: "x", mode: "current", asOf: "2026-10-01", language: "da", filters: {} },
+    embedding: null,
+    reranker: null,
+    method: "product_documents",
+    context: parseRetrievalContext(fixtureContext({ material: fixtureDocumentMaterial() })),
+    algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
+    params: { ...DEFAULT_DOCUMENT_RETRIEVAL_PARAMS },
+    candidateCount: 0,
+    generatedAt: "2026-10-01T08:00:00.000Z",
+    items: [],
+  });
 }
 
 const emptyDb = { rpc: async () => ({ data: [], error: null }) };
@@ -157,12 +184,16 @@ describe("3. the EvidenceSet carries a grade computed from the implementations a
     expect(set.retrieval.grade).toBe("development");
   });
 
-  it("is production only when BOTH the embedder and the reranker are production implementations (P1, P2)", () => {
-    const real = productionProviders();
-    expect(issue(real.embedder, real.reranker).retrieval.grade).toBe("production");
-    expect(issue(fakeEmbedder("development"), real.reranker).retrieval.grade).toBe("development");
-    expect(issue(real.embedder, fakeReranker("provider-x", "development")).retrieval.grade).toBe("development");
-    expect(issue(null, real.reranker).retrieval.grade).toBe("development");
+  it("hybrid is production only with production implementations of BOTH — none exists in the beta (P1, P2; L2)", () => {
+    const declared = declaredProductionDoubles();
+    expect(issue(declared.embedder, declared.reranker).retrieval.unmet).toEqual(["P1", "P2"]);
+    expect(issue(fakeEmbedder("development"), declared.reranker).retrieval.grade).toBe("development");
+    expect(issue(declared.embedder, fakeReranker("provider-x", "development")).retrieval.grade).toBe("development");
+    expect(issue(null, declared.reranker).retrieval.grade).toBe("development");
+  });
+
+  it("product_documents needs neither, and is production under an active, approved configuration (B-035)", () => {
+    expect(issueDocuments().retrieval).toMatchObject({ grade: "production", unmet: [], method: "product_documents", reranker: null, embeddingModel: null });
   });
 
   it("a test double that only DECLARES production grade is development (8B-I6)", () => {
@@ -194,8 +225,8 @@ describe("4. requireProductionEvidence is the only way to a ProductionEvidenceSe
   });
 
   it('throws for the "none" reranker, even if it claims to be production', () => {
-    const real = productionProviders();
-    const set = issue(real.embedder, fakeReranker("none", "production"));
+    const declared = declaredProductionDoubles();
+    const set = issue(declared.embedder, fakeReranker("none", "production"));
     expect(set.retrieval.unmet).toContain("P2");
     expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
   });
@@ -206,17 +237,15 @@ describe("4. requireProductionEvidence is the only way to a ProductionEvidenceSe
   });
 
   it("throws for evidence the retrieval layer did not issue — a hand-built object or a copy", () => {
-    const real = productionProviders();
-    const issued = issue(real.embedder, real.reranker);
+    const issued = issueDocuments();
     const forged = JSON.parse(JSON.stringify(issued)) as EvidenceSet;
     expect(forged.retrieval.grade).toBe("production");
     expect(() => requireProductionEvidence(forged)).toThrow(/ikke udstedt/);
     expect(() => requireProductionEvidence({ ...issued })).toThrow(/ikke udstedt/);
   });
 
-  it("accepts evidence issued with production implementations under an active configuration (the path a later AI phase takes)", () => {
-    const real = productionProviders();
-    const set = issue(real.embedder, real.reranker);
+  it("accepts evidence issued under an active, approved configuration (the path the AI gateway takes; beta: product_documents)", () => {
+    const set = issueDocuments();
     const production: ProductionEvidenceSet = requireProductionEvidence(set);
     expect(production).toBe(set);
   });
@@ -252,9 +281,10 @@ describe("static guardrails — the mechanisms cannot be bypassed elsewhere in t
     expect(offenders).toEqual([]);
   });
 
-  it("only the evaluation CLI asks for the Q7 baseline reranker (8B-I8 C7)", () => {
-    // createEvaluationBaselineReranker builds "none" in any runtime, for the Q7 measurement only.
-    // Nothing in the application, the worker or the publication path may reach it.
+  it("nothing builds \"none\" past the registry's grade check (8B-I8 C7; beta L2)", () => {
+    // 8B-I8 had createEvaluationBaselineReranker: "none" in any runtime, for the Q7 measurement of
+    // the Bedrock evaluation job in CI. L2 removed that job (docs/beta.md §14), so the exception is
+    // gone too: "none" is built only through createReranker, which refuses it outside local/test.
     const ROOT = path.resolve(SRC, "..");
     const scan = (dir: string): string[] =>
       fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
@@ -262,13 +292,13 @@ describe("static guardrails — the mechanisms cannot be bypassed elsewhere in t
         if (entry.isDirectory()) return rel === "src/tests" || entry.name === "node_modules" ? [] : scan(rel);
         return /\.(ts|tsx|mts|mjs|js)$/.test(entry.name) ? [rel] : [];
       });
-    const callers = ["src", "workers", "evals"]
-      .flatMap(scan)
-      .filter((file) => /\bcreateEvaluationBaselineReranker\(/.test(fs.readFileSync(path.join(ROOT, file), "utf8")))
-      .sort();
-    expect(callers).toEqual(["evals/engine/cli.ts", "src/lib/knowledge/core/registry.ts"]);
+    const files = ["src", "workers", "evals"].flatMap(scan);
+    expect(files.filter((file) => /\bcreateEvaluationBaselineReranker\b/.test(fs.readFileSync(path.join(ROOT, file), "utf8")))).toEqual([]);
+    const builders = files.filter((file) => /\bcreateNoneReranker\(/.test(fs.readFileSync(path.join(ROOT, file), "utf8"))).sort();
+    expect(builders).toEqual(["src/lib/knowledge/core/registry.ts", "src/lib/knowledge/core/reranker.ts"]);
     const registry = fs.readFileSync(path.join(ROOT, "src/lib/knowledge/core/registry.ts"), "utf8");
-    expect(registry).toMatch(/export function createEvaluationBaselineReranker\(\): RerankingProvider \{\n\s*return createNoneReranker\(\);\n\}/);
+    expect(registry.match(/createNoneReranker\(\)/g)).toHaveLength(1);
+    expect(registry).toMatch(/const reranker = createNoneReranker\(\);\n\s*assertGradeAllowed\(/);
   });
 
   it("application code runs the pipeline only through retrieveEvidence, which takes no implementations", () => {

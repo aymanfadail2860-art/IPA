@@ -12,10 +12,9 @@ import { createTestEmbedder, TEST_EMBEDDER } from "./test-embedder.ts";
  * No real embedding or reranking provider is chosen in phase 7 (docs/07 §17.4). A configured
  * provider without an implementation here cannot be used — it fails, never silently.
  *
- * 8B-I2: the production providers (AWS Bedrock, src/lib/knowledge/providers/) exist but are
- * deliberately NOT wired in here. The application can therefore not construct them, and no
- * retrieval in the application can produce production evidence before the configuration
- * register and P1–P9 exist (docs/08b §9–§10). Wiring them in belongs to that later step.
+ * 8B-I2 added production providers (AWS Bedrock) that were deliberately NOT wired in here. Beta L2
+ * removed them (docs/beta.md §14): a hybrid configuration with a production provider is refused
+ * here, fail-closed. The beta's product_documents method needs no embedder or reranker (B-035).
  */
 
 export class ProviderNotConfiguredError extends Error {
@@ -45,18 +44,6 @@ export function createEmbedder(model: EmbeddingModelSpec, environment: RuntimeEn
     return embedder;
   }
   throw new ProviderNotConfiguredError(label);
-}
-
-/**
- * The Q7 comparison of an evaluation run (docs/08b §4.4, 8B-I8 C7): the SAME retrieval without
- * reranking, so the reranker's contribution can be measured. It is a measurement, never
- * evidence: its results go only into the report's comparison, and the evaluated configuration
- * itself can never be "none" (H6, D-4). That is why it is allowed in a production runtime (the
- * evaluation job in CI) where createReranker refuses "none". Only the evaluation engine calls it
- * (guardrail test).
- */
-export function createEvaluationBaselineReranker(): RerankingProvider {
-  return createNoneReranker();
 }
 
 /** The configured reranker: IPA_RERANKER, default "none". */

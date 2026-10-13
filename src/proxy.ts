@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isHiddenInBeta } from "@/config/beta-surface";
 import { isDemoMode } from "@/dev/demo/demo-mode";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 
@@ -52,6 +53,11 @@ export async function proxy(request: NextRequest) {
   }
   if (signedIn && isPublic) {
     return NextResponse.redirect(new URL("/home", request.url));
+  }
+  // The beta (B-035, L2): an area outside its scope does not exist — 404 before anything is
+  // rendered or any server action runs. The pages refuse again (requireArea).
+  if (signedIn && isHiddenInBeta(request.nextUrl.pathname)) {
+    return NextResponse.rewrite(new URL("/_ipa/not-found", request.url), { status: 404 });
   }
   return response;
 }

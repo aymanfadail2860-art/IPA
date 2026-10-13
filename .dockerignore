@@ -12,4 +12,3 @@ coverage
 supabase/.temp
 supabase/.branches
 workers/ingestion/dev-service-role.ts
-workers/ingestion/dev-fake-bedrock.ts

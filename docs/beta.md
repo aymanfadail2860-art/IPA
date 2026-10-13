@@ -1,9 +1,9 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
 **Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026.
-**Status:** L0 og L1 er godkendt (B-036). L1.1 (gate-sæt for `product_documents`, §13) er
-gennemført på branchen `beta/fast-beta-without-aws` og afventer godkendelse. L2–L9 er ikke
-påbegyndt.
+**Status:** L0 og L1 er godkendt (B-036). L1.1 (gate-sæt for `product_documents`, §13) og L2
+(AWS fjernet, skjulte områder, §14, B-037) er gennemført på branchen `beta/fast-beta-without-aws`
+og afventer godkendelse. L3–L9 er ikke påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -47,8 +47,8 @@ Browser ─► Vercel (Next.js, alt AI og al retrieval server-side)
 ```
 
 - **Ingen AWS i den aktive runtime.** Bedrock, Cohere, ECS/Fargate, ECR, NAT/VPC, AWS IAM/OIDC,
-  Secrets Manager og CloudWatch fjernes i L2, når den nye vej er bygget og testet. Koden kan
-  gendannes fra Git-historikken og rollback-punktet (§10).
+  Secrets Manager og CloudWatch er fjernet i L2 (§14). Koden kan gendannes fra Git-historikken og
+  rollback-punktet (§10).
 - **Claude API direkte** (Anthropic), kaldt server-side gennem den eksisterende AI Gateway.
   - Platformen bruger en separat API-organisation. Den private Claude Code-konto må aldrig blive
     platformens produktionskonto.
@@ -69,11 +69,11 @@ gælder:
 | P1/P2: production-embedder og production-reranker | Gælder uændret for hybride konfigurationer. For `product_documents` er P1/P2 tilpasset eksplicit (§5.1) |
 | H6: evidensen skal komme fra production-implementeringer | Tilpasset eksplicit for `product_documents` (§5.1); uændret for hybride |
 | Embeddings som krav for publicering (docs/07) | Kræves kun, når en embedding-model er aktiv (L1, §12). Betaen har ingen |
-| Ingestion-worker på ECS/Fargate med ClamAV som ECS-service (I4, I5.5) | Samme worker og scanner som engangskørsel i Docker på en betroet maskine (L3) |
+| Ingestion-worker på ECS/Fargate med ClamAV som ECS-service (I4, I5.5) | Samme worker og scanner som engangskørsel i Docker på en betroet maskine. Containerspecifikationen er `deploy/import/compose.yaml` (L2); runbooken er L3 |
 | Credentials via Vercel OIDC / ECS-taskrolle / GitHub OIDC → AWS (C1) | Ingen AWS-credentials. Claude-nøglen i Vercels servermiljø; workerens databaserolle i operatørens miljø |
-| Evaluering i en AWS-evalueringskonto (I7) | Evalueringsmiljøet uden AWS (L9) |
-| Alarmer som CloudWatch-specs (B-033) | Log- og webhook-alarmerne (`AlertSink`) bevares; CloudWatch-specs udgår i L2 |
-| Kontrolsæt af embedding-vektorer (C6) | Uden betydning uden embeddings; koden bliver |
+| Evaluering i en AWS-evalueringskonto (I7) | Evalueringsmiljøet uden AWS (L9). Workflowet og IAM er fjernet i L2 |
+| Alarmer som CloudWatch-specs (B-033) | Log- og webhook-alarmerne (`AlertSink`) bevares. De aggregerede alarmer er version 2 uden Bedrock- og CloudWatch-delene (L2, B-037) |
+| Kontrolsæt af embedding-vektorer (C6) | Uden betydning uden embeddings. Koden og testene bliver (L2) |
 
 P3–P9, H1–H5, H7, egress-grænsen, RLS, workerens least-privilege-identitet, upload-sikkerheden og
 publisherens isolation gælder uændret.
@@ -479,7 +479,7 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 | L0 | B-035, dette dokument, rollback-punkt, beta-branch | Gennemført |
 | L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Godkendt (B-036) |
 | L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Gennemført, afventer godkendelse (§13) |
-| L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Ikke påbegyndt |
+| L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Gennemført, afventer godkendelse (§14) |
 | L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Ikke påbegyndt |
 | L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Ikke påbegyndt |
 | L4b | Første rigtige Claude-kald (kun efter særskilt godkendelse) | Ikke påbegyndt |
@@ -531,6 +531,10 @@ sker med en ny, fremadrettet migration.
   pr. type (§5.1).
 - **[AFKLARES]** Bekræftelse af de udledte punkter i B-036 (invarianter uden usikkerhed, nul
   tolerance for undtagelser og afvisninger, hvem der validerer).
+- **[AFKLARES]** Bekræftelse af de udledte punkter i B-037 (hvad der tæller som betaen, at Min
+  profil skjules, rutetestene for de skjulte områder).
+- **[AFKLARES]** Home og kernemodulerne viser stadig udviklingsdata med notits, indtil L5–L8
+  erstatter dem (§14.5). Betaen kan ikke åbnes for rådgivere før da (K5).
 
 ---
 
@@ -712,4 +716,149 @@ suspendering ved fejlet hård gate, pilot-scope (B-030/B-031), RLS og egress-gr�
   `example-documents-v1` (D1–D6 bestået, H7 fejler i fixture-miljøet) slutter begge med kode 1, som
   CI tillader;
 - alle migrations er afspillet fra bunden.
+
+---
+
+## 14. L2 — AWS fjernet fra den aktive beta og skjulte områder (gennemført, afventer godkendelse)
+
+Beslutning: B-037. Ingen migration, ingen ændring i hosted Supabase og ingen betalbare ressourcer.
+
+### 14.1 Fjernet
+
+- **Kode:**
+  - `src/lib/knowledge/providers/bedrock/*` (Embed v4, Rerank 3.5, transport og SDK-transport);
+  - credential-vejene (`aws-credentials.ts` og `credentials-{vercel,container,environment}.ts`);
+  - `catalog.ts`, `runtime.ts` og `provider-metrics.ts`;
+  - workerens falske Bedrock-transport;
+  - evaluerings-CLI'ens `--providers bedrock` og `--capture-control-reference`;
+  - registrets undtagelse `createEvaluationBaselineReranker` ("none" i enhver runtime, kun til
+    Bedrock-evalueringen).
+- **Afhængigheder:**
+  - `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/credential-provider-env`,
+    `@smithy/credential-provider-imds` og `@vercel/oidc-aws-credentials-provider`. 46 pakker er ude
+    af lockfilen;
+  - workerens image har kun `postgres` og `pdfjs-dist`.
+- **Udrulning:**
+  - `deploy/application`, `deploy/evaluation`, ECS-taskdefinitioner, services, security groups,
+    Cloud Map, IAM-politikker og CloudWatch-alarmer for ClamAV og workeren;
+  - workflows `clamav-signatures.yml` og `retrieval-evaluation.yml`;
+  - ECR-push og OIDC i `clamav-engine-candidate.yml`.
+- **Konfiguration:**
+  - `IPA_DEV_FAKE_BEDROCK`;
+  - AWS-afsnittene i `.env.example`;
+  - Bedrock-konfigurationerne i `evals/retrieval/configurations`;
+  - de Cohere-specifikke protokolkonstanter i egress-politikken.
+
+Den hybride metode findes stadig i koden, men kan ikke give production-evidens. En hybrid
+konfiguration med en production-udbyder afvises af registret (fail-closed).
+
+### 14.2 Bevaret
+
+- **Upload-sikkerhed:**
+  - karantæne;
+  - strukturvalidering og PDF-inspektion;
+  - ClamAV 1.4.6 med friske officielle signaturer, verdict i databasen og frigivelse.
+
+  Scanneren kører nu som egen container i `deploy/import/compose.yaml`. Den har intet miljø, ingen
+  credential og intet internet: den er kun på det interne net `scan`. Den bygges på den godkendte
+  motor efter digest. Workeren når den kun på `clamav:3310`.
+- **Workeren:**
+  - least-privilege-rollen og blue/green-login;
+  - service-role-nøglen afvises i produktion;
+  - kontrollen af embedding-modeller ved start;
+  - kontrolsættet (C6);
+  - sundhedskontrollen.
+- **Uændret i øvrigt:**
+  - RLS og permissions;
+  - faglig dokumentgodkendelse;
+  - AI Gateway og egress-grænsen. Allowlisterne er tomme, indtil Claude-adapteren (L4) tilføjes;
+  - registret, godkendelse og suspendering af evalueringer;
+  - historiske versioner og alle migrations.
+- **De aggregerede alarmer (B-033)** er version 2: retrieval-alarmerne A1 og A3–A5 og
+  enkelthændelserne.
+
+### 14.3 Leverandøruafhængige krav flyttet før sletning
+
+| Fjernet eller ændret test | Leverandøruafhængigt krav | Nu testet i |
+|---|---|---|
+| `knowledge-providers.test.ts` | Implementeringer erklærer sig selv; fejltyper, timeouts og genforsøg; ingen fallback ved udbyderfejl; fingeraftrykkets materiale | `provider-contract.test.ts` |
+| `knowledge-providers-boundary.test.ts` | Kun forespørgslens tekst og passagernes overskriftskæde og tekst gives til en udbyder; ingen id'er, titler, produkter eller kilder; workerens dokumentembedding | `provider-contract.test.ts` |
+| `provider-metrics.test.ts` | Fejltypen når log-linjerne uden udbyderens besked; retrieval- og worker-linjen; alarmspecifikationen bruger felter, koden skriver | `provider-contract.test.ts` |
+| `worker-production-embedder.test.ts` | Workeren starter ikke med en model uden implementering, en udviklingsmodel i produktion eller en forkert dimension; aldrig testembedderen i stedet | `provider-contract.test.ts` |
+| `application-aws-credentials.test.ts` | Ingen klientkomponent når udbyder-, registry-, retrieval- eller egress-koden; ingen nøgle i `NEXT_PUBLIC_`-variabler | `provider-contract.test.ts` |
+| `embedding-control-set.test.ts` | Kontrolsættet (C6) | Samme fil, med en udbyderdobbelt i stedet for Bedrock-adapteren |
+| `egress-boundary.test.ts` | Nul eksterne kald ved afvisning; proveniens fra retrieval til embedding og reranking; ingen vej uden om grænsen | Samme fil, med en ekstern udbyder, der følger adapterkontrakten |
+| `egress-architecture.test.ts` | Kun tilladte transporter; autorisation før kald; ingen AI- eller cloud-SDK | Samme fil. Allowlisterne er tomme |
+| `scanner-isolation.test.ts` | Egen container; intet miljø eller credential; internt net uden udgang; fast endpoint; godkendt motor efter digest; friske officielle signaturer | Samme fil, mod `deploy/import/compose.yaml` |
+| `worker-runtime-architecture.test.ts` | Non-root, read-only, ingen capabilities, kun `/tmp`; ingen indgående trafik; credential kun fra operatørens miljø; stop-frist længere end workerens | Samme fil, mod `deploy/import/compose.yaml` |
+| `production-evidence.test.ts`, `knowledge-evidence-guardrail.test.ts` | P1–P9 hver for sig, kopier og forfalskninger | Samme filer. Den positive vej bruger `product_documents`. Hybride sæt med erklærede doubler fejler netop P1 og P2 |
+| `evaluation-operations.test.ts` | Evalueringen og publiceringen deler aldrig credential | Samme fil, i koden (miljøvariabler) frem for workflow og IAM |
+| `evaluation-operations.integration.test.ts` (C7) | Indlæsning, retrieval og evaluering er enige om konfigurationen, og alle hårde gates består | Samme fil, med `product_documents` ende til ende: metoden bruger ingen embeddings, og H1–H7 og D1–D6 består |
+| `retrieval-configuration.integration.test.ts` | Registret og P3–P9 mod den rigtige database | Samme fil. Hybrid fejler netop P1 og P2 |
+
+Krav, der kun gjaldt AWS, er fjernet med AWS. Det gælder IAM-rollernes indhold, OIDC-tillid,
+statiske AWS-nøgler, ECS-deployment og CloudWatch-alarmernes navne.
+
+### 14.4 Skjulte områder i betaen
+
+`src/config/beta-surface.ts` (`BETA_HIDDEN_AREAS`) skjuler Advise, Analytics og Min profil for
+alle roller, uanset permissions:
+
+- proxyen svarer 404 på områdernes stier, før noget gengives, eller en server-action kører;
+- siderne svarer 404 igen på serveren (`requireArea`), før der indlæses data;
+- server-actions afviser (`sessionInArea`);
+- de optræder ikke i navigationen, søgningen, brugermenuen eller på Home;
+- layoutet og Home indlæser ingen kundecases.
+
+Copilot, Learn, Practice, Assessment, Home og Admin er uændrede. Demoen uden login (B-003) er ikke
+betaen og beholder alle områder. Gatewayens spærre mod kundesagsdata er uændret.
+
+### 14.5 Fund
+
+1. **Kontrolsættet var fjernet ved en fejl og er genskabt.** B-035 §2.1 siger, at koden bliver, og
+   koden er leverandøruafhængig.
+2. **Overvågningsspecifikationen var fjernet ved en fejl og er genskabt som version 2.** Retrieval-
+   alarmerne er leverandøruafhængige og kræves før piloten (B-033).
+3. **Hybride positive P1–P9-tests kan ikke længere skrives** uden at registrere en testdobbelt som
+   production-implementering. Det er bevidst fravalgt (B-037). P3–P9 vises med `unmet = [P1, P2]`.
+4. **Udviklingsdata i betaen:** Home, Learn, Practice, Assessment og Admins afsnit om
+   undervisningsindhold viser stadig udviklingsdata med notits, til L5–L8 erstatter dem. Betaen kan
+   ikke åbnes for rådgivere før da (K5, §11).
+5. **Scanneren verificeres før import** med `scripts/verify-clamav-scanner.ts` (EICAR, motor og
+   signaturalder) som et trin i runbooken (L3). Uafhængigt heraf afviser hver scanning signaturer
+   over 24 timer, og databasen registrerer kun verdicts fra en godkendt motor.
+6. **Workerens base-image** skal låses efter digest før den første rigtige import **[AFKLARES, L3]**.
+
+### 14.6 Mutationer
+
+TypeScript og specifikation: **35 af 35 fanget.** De dækker:
+- de skjulte områder (19): overflade og stier, proxy, sider, server-action, søgning, layout, Home,
+  navigation og brugermenu;
+- registrets fail-closed for production-udbydere og "none" (4), herunder at `product_documents`
+  ikke får udbydere, og at kun registrerede implementeringer er production;
+- workerens scanner-endpoint og kontrollen af embedding-modellen (2);
+- compose-specifikationens isolation (8): internt net, ingen udgang og ingen offentliggjort port
+  for scanneren, intet miljø, motoren efter digest, ingen bogstavelig credential, ingen
+  privilegier og en stop-frist længere end workerens;
+- kontrolsættets krav til reference og egress-politikkens protokolkonstanter (2).
+
+To huller blev fundet ved planlægningen og lukket før kørslen: et skjult link med forespørgsel
+eller fragment (`/profile?…`), og Homes egne indgange til de skjulte områder.
+
+L2 ændrer ingen SQL. pgTAP er kørt uændret.
+
+### 14.7 Verifikation (lokalt, frisk database)
+
+- lint, typecheck (app og workers) og build bestået;
+- enhedstests: 931 bestået, 4 sprunget over. Der var 1000 i L1.1. Forskellen er de fjernede
+  AWS-tests, hvis leverandøruafhængige krav nu står i nye eller ændrede tests (§14.3);
+- pgTAP: 1005 bestået (uændret);
+- integration: 161 bestået, 2 sprunget over. Rutetestene viser 404 for de skjulte områder, og
+  `product_documents` er kørt ende til ende i evalueringsmiljøet;
+- evalueringsdata: datavagten og kontrolsættet består. Fixture-kørslerne af `example-v1` og
+  `example-documents-v1` slutter med kode 1, som CI tillader;
+- `docker compose -f deploy/import/compose.yaml config` validerer specifikationen. Den afviser at
+  starte uden workerens credentials i operatørens miljø;
+- ingen migration, ingen ændring i hosted Supabase, ingen betalbare ressourcer og ingen
+  Claude-kald.
 

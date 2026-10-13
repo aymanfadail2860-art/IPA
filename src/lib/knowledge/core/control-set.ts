@@ -113,7 +113,12 @@ export interface ControlReference {
   readonly approval: { readonly decision: string; readonly approvedBy: string; readonly approvedAt: string } | null;
 }
 
-/** Credential paths through which a real provider was called (providers/aws-credentials.ts). */
+/**
+ * Credential paths through which a real provider was called: those of 8B's evaluation job and
+ * worker. Beta L2 (docs/beta.md §14) removed that runtime and its provider, so nothing captures
+ * through them today and CONTROL_REFERENCES stays empty. A future provider adds its own path
+ * here — a reviewed change.
+ */
 const REAL_PROVIDER_CAPTURE = new Set(["github-oidc", "ecs-task-role"]);
 
 function cosine(a: readonly number[], b: readonly number[]): number {
@@ -182,7 +187,7 @@ export function productionReferenceProblems(reference: ControlReference): string
       problems.push(`vector:${entry.id}`);
       continue;
     }
-    // The development fake (workers/ingestion/dev-fake-bedrock.ts) hashes the words of the text.
+    // A development fake (the test embedder, or 8B's fake transport) hashes the words of the text.
     if (cosine(vector!, hashEmbedding(entry.text, dimensions)) > 0.999) problems.push(`fake_vector:${entry.id}`);
   }
   const tolerances = reference.tolerances;

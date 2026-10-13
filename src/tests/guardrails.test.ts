@@ -72,7 +72,8 @@ describe("server-side authorization in every platform page (docs/06 §7)", () =>
   it("checks the session in each page — layouts cannot block their page's output", () => {
     const pages = sources.filter(({ file }) => file.startsWith(path.join("app", "(platform)")) && file.endsWith("page.tsx"));
     expect(pages.length).toBeGreaterThan(10);
-    const unguarded = pages.filter(({ text }) => !/await (requireSession|authorize)\(/.test(text)).map(({ file }) => file);
+    // requireArea (beta L2) is requireSession plus the beta's 404 for a hidden area.
+    const unguarded = pages.filter(({ text }) => !/await (requireSession|authorize|requireArea)\(/.test(text)).map(({ file }) => file);
     expect(unguarded).toEqual([]);
   });
 });

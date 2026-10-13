@@ -97,13 +97,13 @@ describe("runtime configuration", () => {
     expect(dev.scanner).toEqual({ kind: "development-fixture" });
   });
 
-  it("scans only through the deployment-controlled ClamAV service in production — never any other host (8B-I5.5)", () => {
-    expect(loadConfig(production(), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav.ipa-worker.internal", port: 3310 });
-    expect(loadConfig(production({ IPA_CLAMD_HOST: "clamav.ipa-worker.internal", IPA_CLAMD_PORT: "3310" }), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav.ipa-worker.internal", port: 3310 });
+  it("scans only through the deployment-controlled ClamAV service in production — never any other host (8B-I5.5; beta L2: the compose service name)", () => {
+    expect(loadConfig(production(), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav", port: 3310 });
+    expect(loadConfig(production({ IPA_CLAMD_HOST: "clamav", IPA_CLAMD_PORT: "3310" }), [], exists).scanner).toEqual({ kind: "clamd", host: "clamav", port: 3310 });
     for (const overrides of [{ IPA_CLAMD_HOST: "127.0.0.1" }, { IPA_CLAMD_HOST: "evil.example.com" }, { IPA_CLAMD_HOST: "10.0.0.5" }, { IPA_CLAMD_PORT: "3311" }]) {
-      expect(problems(production(overrides)).join(" "), JSON.stringify(overrides)).toContain("clamav.ipa-worker.internal:3310");
+      expect(problems(production(overrides)).join(" "), JSON.stringify(overrides)).toContain("clamav:3310");
     }
-    expect(PRODUCTION_SCANNER).toEqual({ host: "clamav.ipa-worker.internal", port: 3310 });
+    expect(PRODUCTION_SCANNER).toEqual({ host: "clamav", port: 3310 });
     expect(Object.isFrozen(PRODUCTION_SCANNER)).toBe(true);
     expect(JSON.stringify(describeConfig(loadConfig(production(), [], exists)))).toContain("\"scanner\":{\"kind\":\"clamd\"");
     // Local/test may point at a local clamd.

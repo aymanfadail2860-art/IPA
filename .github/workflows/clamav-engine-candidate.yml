@@ -9,11 +9,12 @@
 #      (scripts/verify-clamav-scanner.ts)
 #   4. our PDF/security fixture suite against the running candidate
 #      (src/tests/clamav-candidate.test.ts) and the scanner unit suites
-#   5. push as ipa-clamav:candidate-<version>-<signature version> and print both digests
+#   5. print the base image digest and the verification for the approval (no image is pushed:
+#      the beta builds the scanner right before each import, B-035 L2)
 #
 # Approval is then a reviewed change of deploy/clamav/engine.json (version + base digest), the
 # Dockerfile default and a migration row in knowledge.security_approved_scanner_engines. Only
-# after that does the 6-hourly signature refresh build — and deploy — the new engine.
+# after that does an import build the new engine (deploy/import/compose.yaml).
 
 name: ClamAV engine candidate
 
@@ -26,7 +27,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   candidate:
@@ -71,21 +71,6 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           IPA_CANDIDATE_CLAMD_HOST=127.0.0.1 IPA_CANDIDATE_CLAMD_PORT=3310 IPA_CANDIDATE_ENGINE="$CANDIDATE" \
             npx vitest run src/tests/clamav-candidate.test.ts src/tests/worker-security-pdf.test.ts src/tests/worker-security-scan.test.ts src/tests/scanner-isolation.test.ts
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        if: ${{ vars.IPA_AWS_ACCOUNT_ID != '' }}
-        with:
-          role-to-assume: arn:aws:iam::${{ vars.IPA_AWS_ACCOUNT_ID }}:role/ipa-clamav-publisher
-          aws-region: eu-central-1
-
-      - name: Push the candidate image (never deployed by this workflow)
-        if: ${{ vars.IPA_AWS_ACCOUNT_ID != '' }}
-        run: |
-          REPO="${{ vars.IPA_AWS_ACCOUNT_ID }}.dkr.ecr.eu-central-1.amazonaws.com/ipa-clamav"
-          TAG="candidate-$(jq -r '.revision | sub("^ipa-clamav:"; "")' verify.json)"
-          aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin "${REPO%/*}"
-          docker tag ipa-clamav:engine-candidate "$REPO:$TAG"
-          docker push "$REPO:$TAG"
 
       - name: Summary for the approval
         run: |

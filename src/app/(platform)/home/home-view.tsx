@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, InteractiveCard } from "@/components/ui/card";
 import { ASSESSMENT_STATUS, CASE_STATUS } from "@/config/domain-status";
+import { isAreaAvailable, surfaceOf } from "@/config/navigation";
 import { hasPermission } from "@/lib/auth/permissions";
 import { useSession } from "@/lib/auth/session";
 import { formatDate, formatShortDate } from "@/lib/format";
@@ -47,11 +48,14 @@ interface HomeViewProps {
  * what should I do now → how is it going → what is new.
  */
 export function HomeView(props: HomeViewProps) {
-  const { user, grants } = useSession();
+  const session = useSession();
+  const { user, grants } = session;
+  const surface = surfaceOf(session);
   const router = useRouter();
-  const isLeader = hasPermission(grants, "analytics.team.read", "team");
+  // Analytics and Advise are hidden in the beta (B-035, L2): no entry points to them.
+  const isLeader = isAreaAvailable("analytics", surface) && hasPermission(grants, "analytics.team.read", "team");
   const isAdmin = hasPermission(grants, "knowledge.document.write");
-  const canSeeCases = hasPermission(grants, "advise.case.read");
+  const canSeeCases = isAreaAvailable("advise", surface) && hasPermission(grants, "advise.case.read");
   const cases = props.cases;
   const availableAssessments = props.assessments.filter((item) => item.status === "available");
   const sortedChanges = [...props.changes].sort((a, b) => b.affectsActiveCases - a.affectsActiveCases);
@@ -239,9 +243,11 @@ export function HomeView(props: HomeViewProps) {
               value={props.progression.overallPercent}
               valueText={`${props.progression.overallPercent} %`}
             />
-            <Link href="/profile" className="mt-4 inline-flex items-center gap-1 text-label font-medium text-fg-link hover:underline">
-              Se Min profil <ArrowRight className="size-3.5" aria-hidden />
-            </Link>
+            {isAreaAvailable("profile", surface) ? (
+              <Link href="/profile" className="mt-4 inline-flex items-center gap-1 text-label font-medium text-fg-link hover:underline">
+                Se Min profil <ArrowRight className="size-3.5" aria-hidden />
+              </Link>
+            ) : null}
           </Card>
         </Section>
 

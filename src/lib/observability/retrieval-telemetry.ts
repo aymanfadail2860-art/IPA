@@ -12,7 +12,8 @@ import { createAlert, type AlertCode, type AlertSink, type LineWriter } from "./
  *     query embedding, database search, reranking). Never the query, a title or any content.
  *   * A step that failed at the provider carries the provider error fields (8B-I8 C3):
  *     provider_errors = [{ step, provider, provider_error_kind, throttled, timeout, …, attempts }].
- *     The per-attempt lines ("provider_call", providers/provider-metrics.ts) share request_id.
+ *     request_id correlates the line with the request (beta L2: the per-attempt "provider_call"
+ *     lines went with the Bedrock adapters; the Claude adapter, L4, adds its own).
  *   * Alarms: retrieval unavailable (a system failure, B-007) and a runtime fingerprint that
  *     does not match the active configuration (P4 unmet while a configuration is in service).
  *     At most one per alarm code per 10 minutes and process — a burst of failing requests is
@@ -25,7 +26,7 @@ export interface RetrievalTelemetryDeps {
   sink: AlertSink;
   write?: LineWriter;
   now?: () => number;
-  /** Correlates the retrieval line with its provider_call lines. */
+  /** Correlates the retrieval line with the request. */
   requestId?: string;
 }
 

@@ -1,4 +1,3 @@
-import type { ProviderRuntime } from "../../src/lib/knowledge/providers/catalog.ts";
 import { createAlertSink } from "../../src/lib/observability/alerts.ts";
 
 import { ConfigError, describeConfig, loadConfig, type WorkerConfig } from "./config.ts";
@@ -9,7 +8,7 @@ import { createLiveness } from "./liveness.ts";
 import { createLogger, errorClass } from "./log.ts";
 import { ticketOriginals } from "./originals.ts";
 import { isIdentityError, type OriginalStore, type WorkerDb } from "./pipeline.ts";
-import { checkEmbeddingModels, observedRuntime, workerEmbedderFactory, workerProviderRuntime } from "./providers.ts";
+import { checkEmbeddingModels, workerEmbedderFactory } from "./providers.ts";
 import { checkEmbeddingControl, createControlGate, createControlMonitor, guardedEmbedderFor } from "./control-check.ts";
 import { CONTROL_REFERENCES } from "../../src/lib/knowledge/core/control-references.ts";
 import { backoffMs, createWorkerRuntime, interruptibleSleep } from "./runtime.ts";
@@ -19,7 +18,8 @@ import { clamdScanner, developmentFixtureScanner, type MalwareScanner } from "./
 
 /**
  * Ingestion worker — standalone Node process outside the Next.js app (docs/03 §8, §14;
- * docs/08b §6.1, §21.5). Runs as a long-lived ECS Fargate task in production.
+ * docs/08b §6.1, §21.5). In the beta it runs as the administrator's one-off import on a trusted
+ * machine (docs/beta.md §6, L3): `--once` in a container next to the ClamAV container.
  *
  *   npm run worker:ingestion            # polls the queue
  *   npm run worker:ingestion -- --once  # processes available jobs and exits
@@ -93,26 +93,17 @@ for (let attempt = 1; ; attempt += 1) {
   }
 }
 
-// The embedders (8B-I8 C7): every active/candidate model resolves through the shared path —
-// the production catalogue on this runtime's provider transport (the ECS task role in
-// production), or the fail-closed development registry. ⚠ The fake Bedrock transport is
-// development-only (local/test, refused by loadConfig in production; not in the image).
-let providerRuntime: () => ProviderRuntime;
-if (config.providers === "development-fake") {
-  const fake = await import("./dev-fake-bedrock.ts");
-  providerRuntime = () => fake.devFakeBedrockRuntime(config.runtimeEnv);
-} else {
-  providerRuntime = () => workerProviderRuntime(process.env);
-}
-// Every Bedrock call is logged as a provider_call line (kind, throttled, timeout — 8B-I8 C3).
-const resolveEmbedder = workerEmbedderFactory({ environment: config.runtimeEnv, runtime: () => observedRuntime(providerRuntime(), { runtime: "worker" }, log) });
+// The embedders: every active/candidate model resolves through the fail-closed registry — only
+// the development test embedder, and only in local/test. The beta has no embedding model, and a
+// production model (8B) cannot be constructed since L2 (docs/beta.md §14): the worker refuses to
+// start rather than process without it.
+const resolveEmbedder = workerEmbedderFactory({ environment: config.runtimeEnv });
 // A model the control check has stopped is refused (8B-I8 C6).
 const controlGate = createControlGate();
 const embedderFor = guardedEmbedderFor(resolveEmbedder, controlGate);
 const alertSink = createAlertSink(process.env, "ingestion-worker");
 
-// Fail fast (docs/07 §9.1): every active/candidate model must resolve, with its credential path
-// constructible, before the job loop starts. No provider call is made here.
+// Fail fast (docs/07 §9.1): every active/candidate model must resolve before the job loop starts.
 const embedderProblems = checkEmbeddingModels(models, embedderFor);
 if (embedderProblems.length > 0) {
   log({ event: "worker_startup_failed", reason: "embedder_unavailable", models: embedderProblems });

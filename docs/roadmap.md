@@ -27,8 +27,9 @@ betaen bygge de nødvendige dele af 8C, 9, 10 og 12 før den oprindelige rækkef
 nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9) står i
 `docs/beta.md`; åbne punkter for betaen står i `docs/beta.md` §11. **L0 og L1** (retrieval-metoden
 `product_documents` og publicering uden embeddings) er godkendt (B-036). **L1.1** (gate-sættet D1–D6,
-E2E-acceptkontrollen og tre adskilte godkendelser, `docs/beta.md` §13) er gennemført og afventer
-godkendelse.
+E2E-acceptkontrollen og tre adskilte godkendelser, `docs/beta.md` §13) og **L2** (AWS fjernet fra
+den aktive beta; Advise, Analytics og Min profil skjult server-side; `docs/beta.md` §14, B-037) er
+gennemført og afventer godkendelse. L3 påbegyndes først efter eksplicit godkendelse.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på

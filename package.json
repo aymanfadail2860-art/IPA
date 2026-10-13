@@ -20,12 +20,8 @@
     "eval:publish": "node --import ./evals/engine/node-hooks.mjs workers/evaluation/publish.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1146.0",
-    "@aws-sdk/credential-provider-env": "3.972.72",
-    "@smithy/credential-provider-imds": "4.5.2",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
-    "@vercel/oidc-aws-credentials-provider": "3.3.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

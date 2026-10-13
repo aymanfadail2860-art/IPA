@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { AccessDenied } from "@/components/common/access-denied";
 import { composeCase, emptyWorkspaceContent } from "@/lib/advise/workspace";
-import { requireSession } from "@/lib/auth/server-session";
+import { requireArea } from "@/lib/auth/server-session";
 import { getCase } from "@/lib/data/cases";
 // Work-area content is a later phase; only the dev seed fixture case has mock content.
 import { mockCaseWorkspaceContent } from "@/mocks/advise";
@@ -12,7 +12,8 @@ import { CaseWorkspace } from "./case-workspace";
 export const metadata: Metadata = { title: "Kundecase" };
 
 export default async function CasePage(props: PageProps<"/advise/[caseId]">) {
-  await requireSession();
+  // Advise is postponed in the beta (B-035): not served there — not even a known case id.
+  await requireArea("advise");
   const { caseId } = await props.params;
   const { area } = await props.searchParams;
 

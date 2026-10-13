@@ -7,11 +7,11 @@
 #             every migration from scratch and the development seed → pgTAP → the app built and
 #             started in the test runtime and in the production runtime → integration tests
 #
-# No production credentials, no AWS access, no secrets: the only keys are the ones the local
-# Supabase generates for itself inside the job. ClamAV runs in its own workflows (EICAR against
-# the approved 1.4.6 engine: clamav-engine-candidate.yml, clamav-signatures.yml); here the
-# upload-security tests use the development fixture scanner, and the clamd-backed EICAR test is
-# skipped (it needs IPA_TEST_CLAMD_HOST).
+# No production credentials, no cloud account, no secrets: the only keys are the ones the local
+# Supabase generates for itself inside the job. ClamAV runs in its own workflow (EICAR against an
+# engine candidate: clamav-engine-candidate.yml); here the upload-security tests use the
+# development fixture scanner, and the clamd-backed EICAR test is skipped (it needs
+# IPA_TEST_CLAMD_HOST). Beta L2 (docs/beta.md §14): no AWS anywhere.
 #
 # Branch protection (an external prerequisite, set in GitHub): require both jobs on main.
 

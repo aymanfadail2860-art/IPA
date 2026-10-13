@@ -18,13 +18,15 @@ import { publishEvaluation } from "./publish-run.ts";
  * (docs/08b §4.5, D-7, D-18; 8B-I7). The separate step after `npm run eval:retrieval`:
  *
  *   --report       <dir>/<run-id>.json (the .md, .performance.json and .sha256 beside it are used)
- *   --gates        gate set name (evals/retrieval/gates/<name>.json), default "gates-v1"
+ *   --gates        gate set name (evals/retrieval/gates/<name>.json), default "gates-v1"; a
+ *                  product_documents report needs "product-documents-gates-v1" (B-036)
  *   --mode         "baseline" or "regression": what the job intends. Diagnostic only (8B-I7.1) —
  *                  the database classifies the run and the alarms follow its classification.
  *
  * The connection (secure transport, I7): TLS with certificate verification against the Supabase
  * CA, as evaluation_publisher_login and nothing else. The credential is injected for this one job
- * (CI fetches it from Secrets Manager through a short-lived OIDC role; never a stored secret):
+ * from the runner's secret store (never a value in the repository; the evaluation environment of
+ * the beta is L9):
  *
  *   IPA_PUBLISHER_DB_HOST, IPA_PUBLISHER_DB_PORT (5432), IPA_PUBLISHER_DB_NAME (postgres),
  *   IPA_PUBLISHER_DB_USER (evaluation_publisher_login[.<project-ref>]), IPA_PUBLISHER_DB_PASSWORD,

@@ -1,7 +1,7 @@
 "use server";
 
 import { hasPermission } from "@/lib/auth/permissions";
-import { getServerSession } from "@/lib/auth/server-session";
+import { sessionInArea } from "@/lib/auth/server-session";
 import { logIndividualAccess } from "@/lib/data/identity";
 
 /**
@@ -10,7 +10,8 @@ import { logIndividualAccess } from "@/lib/data/identity";
  * leader's scope.
  */
 export async function openEmployeeView(subjectId: string): Promise<{ allowed: boolean }> {
-  const session = await getServerSession();
+  // Not in the beta (B-035, L2): the area is hidden, and so is its action.
+  const session = await sessionInArea("analytics");
   if (!session || !hasPermission(session.grants, "analytics.team.read")) return { allowed: false };
   return { allowed: await logIndividualAccess(subjectId, "learning.progress.read") };
 }

@@ -22,6 +22,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { meetsRequirement } from "@/lib/auth/permissions";
+import { surfaceOf } from "@/config/navigation";
 import { useSession } from "@/lib/auth/session";
 import { searchEntriesForUser, type SearchEntry } from "@/lib/search";
 import type { CaseSummary } from "@/types/domain";
@@ -45,12 +46,13 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
  */
 export function GlobalSearch({ entries, cases }: { entries: readonly SearchEntry[]; cases: readonly CaseSummary[] }) {
   const { searchOpen, setSearchOpen } = useShell();
-  const { grants } = useSession();
+  const session = useSession();
+  const { grants } = session;
   const router = useRouter();
   const [query, setQuery] = useState("");
 
   const isAdmin = meetsRequirement(grants, { anyOf: ["knowledge.document.write", "identity.user.manage"] });
-  const visible = searchEntriesForUser({ entries, cases, isAdmin });
+  const visible = searchEntriesForUser({ entries, cases, isAdmin, surface: surfaceOf(session) });
   const groups = [...new Set(visible.map((entry) => entry.group))];
 
   function go(href: string) {

@@ -10,8 +10,7 @@ import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import type { EvidenceSet } from "./core/evidence";
-import { applicationProviderRuntime, providersForContext } from "./providers/configured";
-import { observedRuntime, type ProviderCallLog } from "./providers/provider-metrics";
+import { providersForContext } from "./providers/configured";
 import { activeModelFromContext, assessRetrieval, type RetrievalAvailability } from "./retrieval-availability";
 import {
   DEFAULT_RETRIEVAL_CONFIG,
@@ -54,7 +53,7 @@ export async function getRetrievalAvailability(): Promise<RetrievalAvailability>
   if (isDemoMode() || !getSupabaseConfig()) return assessRetrieval({ demo: isDemoMode(), databaseConfigured: false, activeModel: null });
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
   const context = await readRetrievalContext(knowledge);
-  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, runtime: applicationProviderRuntime });
+  return assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context });
 }
 
 let applicationSink: AlertSink | null = null;
@@ -82,7 +81,7 @@ export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev:
   const requestId = randomUUID();
   const telemetry = createRetrievalTelemetry({ sink: alertSink(), requestId });
   try {
-    const set = await retrieveObserved(request, dev, telemetry.observe, requestId);
+    const set = await retrieveObserved(request, dev, telemetry.observe);
     await telemetry.succeeded(set);
     return set;
   } catch (error) {
@@ -92,12 +91,7 @@ export async function retrieveEvidence(request: ClassifiedRetrievalRequest, dev:
   }
 }
 
-/** One JSON line per provider call (8B-I8 C3); the platform aggregates them (deploy/monitoring/). */
-const writeProviderCall: ProviderCallLog = (fields) => {
-  process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...fields })}\n`);
-};
-
-async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions, observe: RetrievalObserver, requestId: string): Promise<EvidenceSet> {
+async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: RetrievalDevOptions, observe: RetrievalObserver): Promise<EvidenceSet> {
   if (isDemoMode()) throw new RetrievalError("unavailable", "Retrieval kræver en database og er ikke tilgængelig i demoen.");
   // An active platform user is required. WHICH documents the user may read is decided by the
   // database (docs/07 §4.1): administrators through the role, advisors and leaders through
@@ -106,12 +100,11 @@ async function retrieveObserved(request: ClassifiedRetrievalRequest, dev: Retrie
 
   const knowledge = (await createSupabaseServerClient()).schema("knowledge");
   const context = await readRetrievalContext(knowledge);
-  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context, runtime: applicationProviderRuntime });
+  const availability = assessRetrieval({ demo: false, databaseConfigured: true, activeModel: activeModelFromContext(context), context });
   // Unavailable is a system failure, never an empty (= "insufficient") result.
   if (availability.state === "unavailable") throw new RetrievalError("unavailable", availability.reason);
   if (!context) throw new RetrievalError("unavailable", "Retrieval-konfigurationen kunne ikke læses fra databasen.");
-  const labels = { runtime: "application" as const, request_id: requestId, configuration_id: context.configuration?.id ?? null, configuration_fingerprint: context.configuration?.fingerprint ?? null };
-  const providers = providersForContext(context, () => observedRuntime(applicationProviderRuntime(), labels, writeProviderCall));
+  const providers = providersForContext(context);
   // product_documents (B-035): the configuration in service decides the method — never the request.
   if (providers.method === "product_documents") {
     const configuration = context.configuration;

@@ -4,18 +4,18 @@ import { fileURLToPath } from "node:url";
 import { clamdScanner, type MalwareScanner } from "../workers/ingestion/security/scanner.ts";
 
 /**
- * Verification of a CANDIDATE scanner image before it is pushed and deployed (8B-I5.5,
- * .github/workflows/clamav-signatures.yml). The candidate container is started locally in CI and
- * checked over the clamd protocol — the same client the worker uses:
+ * Verification of a scanner image before it is used (8B-I5.5): the engine candidate workflow
+ * (clamav-engine-candidate.yml) and, in the beta, the operator before each import (runbook L3;
+ * deploy/import/compose.yaml). The container is checked over the clamd protocol — the same
+ * client the worker uses:
  *
  *   * the engine is ClamAV at the pinned version;
  *   * the signature version and time are known, not in the future and FRESH (at most
  *     maxBuildAgeSeconds old — well inside the 24-hour release limit);
  *   * the EICAR test file is detected and a clean file is not.
  *
- * Any failure exits non-zero: nothing is pushed, nothing is deployed, the running scanner stays,
- * and the workflow failure is the alarm. The output names the scanner revision
- * (ipa-clamav:<engine>-<signature version>) — the immutable ECR tag that verdicts trace back to.
+ * Any failure exits non-zero: the scanner is not used. The output names the scanner revision
+ * (ipa-clamav:<engine>-<signature version>) that verdicts trace back to.
  *
  *   node scripts/verify-clamav-scanner.ts --host 127.0.0.1 --port 3310 [--engine <version>]
  *
@@ -41,7 +41,7 @@ export type VerifyResult =
 
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-/** The scanner revision a verdict traces back to (= the ECR tag). Mirrors the database column. */
+/** The scanner revision a verdict traces back to. Mirrors the database column. */
 export function scannerRevision(engineVersion: string, signatureVersion: string): string {
   return `ipa-clamav:${engineVersion}-${signatureVersion}`;
 }

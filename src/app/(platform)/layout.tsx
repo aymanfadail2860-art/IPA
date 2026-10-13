@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/shell/app-shell";
 import { ShellProvider } from "@/components/shell/shell-context";
+import { isAreaAvailable, surfaceOf } from "@/config/navigation";
 import { hasPermission } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/server-session";
 import { SessionProvider } from "@/lib/auth/session";
@@ -14,7 +15,8 @@ export default async function PlatformLayout({ children }: { children: React.Rea
   // Server-side guard: no session → /login. The session and its permissions come from
   // Supabase Auth and the identity schema — never from the client.
   const session = await requireSession();
-  const cases = hasPermission(session.grants, "advise.case.read") ? await listMyCases() : [];
+  // Customer cases belong to Advise, which the beta hides (B-035): not even loaded there.
+  const cases = isAreaAvailable("advise", surfaceOf(session)) && hasPermission(session.grants, "advise.case.read") ? await listMyCases() : [];
 
   const notifications = mockChanges.map((change) => ({
     id: change.id,

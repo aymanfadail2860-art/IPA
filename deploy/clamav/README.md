@@ -1,87 +1,25 @@
-# ClamAV-tjenesten — deployment-specifikation (8B-I5.5)
+# ClamAV-scanneren (8B-I5.5; beta B-035 L2)
 
-Workerens malware-scanner som **egen ECS Fargate-service** (`docs/08b` §21.7, B-027). Den
-læser fjendtlige filer og har derfor ingen AWS-credentials, ingen secrets og ingen vej ud.
+Workerens malware-scanner kører i **sin egen container**, aldrig i workerens (`docs/08b` §21.7,
+B-027). Den læser fjendtlige filer og har derfor ingen credentials, intet miljø og ingen vej ud.
+I betaen kører den sammen med workeren som engangsimport på en betroet maskine
+(`deploy/import/compose.yaml`, `docs/beta.md` §6). AWS-specifikationerne fra 8B (ECS, Cloud Map,
+security groups, IAM og CloudWatch) er fjernet i L2 og kan gendannes fra Git-historikken.
 
 | Fil | Indhold |
 |-----|---------|
-| `engine.json` | Den godkendte engine (8B-I5.6): LTS-linje 1.4, production 1.4.6, base-image og dets godkendte digest. Ændres kun ved godkendt engine-opgradering |
-| `Dockerfile` | Den godkendte engine (via `CLAMAV_BASE`, med digest fra pipelinen) med officielle signaturer bygget ind ved byggetid; ikke-root; byggeregistrering i `/usr/share/ipa/scanner-build.txt` |
+| `engine.json` | Den godkendte engine (8B-I5.6): LTS-linje 1.4, production 1.4.6, base-image og dets godkendte digest. Ændres kun ved godkendt engine-opgradering (`clamav-engine-candidate.yml`) |
+| `Dockerfile` | Den godkendte engine (via `CLAMAV_BASE`) med officielle signaturer bygget ind ved byggetid; ikke-root; byggeregistrering i `/usr/share/ipa/scanner-build.txt` |
 | `clamd.conf` | TCP 3310, ingen signaturopdatering ved kørsel, grænser over 50 MB, fund ved overskredne grænser |
-| `task-definition.json` | Fargate 1 vCPU/3 GB, **ingen taskrolle**, intet miljø, ingen secrets, skrivebeskyttet rodfilsystem, `/tmp`-volumen, image refereret med digest |
-| `service.json` | Private subnets, ingen offentlig IP, ingen ECS Exec, Cloud Map-registrering, rullende udskiftning (100/200 %) med circuit breaker og rollback |
-| `service-discovery.json` | Cloud Map: privat namespace `ipa-worker.internal`, service `clamav`, A-record (TTL 10 s), kun sunde tasks |
-| `security-group.json` | Indgående kun TCP 3310 fra workerens security group. Udgående kun 443 til VPC-endpoints (ECR, logs) og S3-gatewayen |
-| `iam/execution-role-policy.json` | Execution-rollen (ECS' egen): hente `ipa-clamav`-imaget og skrive `/ipa/clamav` — intet andet |
-| `iam/ci-publisher-*.json` | Den planlagte pipelines rolle (GitHub OIDC, kun `main`): pushe `ipa-clamav`, udrulle `ipa-clamav`, videregive kun scannerens execution-rolle |
-| `alarms.json` | Metric filters og alarmer: signaturalder over 18 t, tekniske scanfejl, mislykket udrulning |
 
-## Roller
+**Isolation** (`deploy/import/compose.yaml`, testet i `src/tests/scanner-isolation.test.ts`):
+- egen container;
+- uprivilegeret bruger, skrivebeskyttet rodfilsystem, ingen capabilities og ingen
+  rettighedsforøgelse;
+- intet miljø og ingen credentials;
+- kun det interne netværk `scan`, som ingen andre end workeren er på, og ingen internetadgang;
+- workeren når den kun på det faste endpoint `clamav:3310`.
 
-- **Taskrolle:** ingen. Processerne i containeren får ingen AWS-credentials, så de kan hverken
-  kalde Bedrock eller nogen anden AWS-tjeneste.
-- **Execution-rolle** (`ipa-clamav-execution`): bruges kun af ECS/Fargate-agenten til at hente
-  imaget og sende logs. Den er ikke tilgængelig for containerens processer.
-- Workerens taskrolle (Embed v4) hører kun til worker-tasken.
-
-## Netværk
-
-```
-worker-task (SG ipa-ingestion-worker) ── TCP 3310 ──► ClamAV-task (SG ipa-clamav, private subnets)
-                                                        └─ 443 kun til VPC-endpoints: ecr.api, ecr.dkr, logs; S3-gateway
-```
-
-- Ingen 0.0.0.0/0, ingen NAT-rute og ingen offentlig IP. Port 3310 er ikke åben for VPC'en, kun
-  for workerens security group.
-- Workeren finder tjenesten via Cloud Map-DNS. Kun tasks, hvis healthcheck (`clamdscan --ping`)
-  består, registreres.
-
-## Signaturer og udrulning
-
-Planlagt workflow `.github/workflows/clamav-signatures.yml` (hver 6. time):
-
-1. Byg imaget. `freshclam` henter de officielle signaturer ved byggetid.
-2. Start kandidaten skrivebeskyttet og uprivilegeret.
-3. Verificér med `scripts/verify-clamav-scanner.ts`:
-   - engine = den godkendte (`engine.json`), som refresh aldrig ændrer;
-   - signaturversion og -tid kendt, ikke i fremtiden og højst 8 timer gamle;
-   - EICAR findes;
-   - en ren fil er ren.
-4. Push med det uforanderlige tag `<engine>-<signaturversion>`. Det er scanner-revisionen, som
-   står i `security_verdicts.scanner_revision`.
-5. Registrér en taskrevision med image-digest, udrul og vent, til servicen er stabil.
-
-**Hvis noget fejler:**
-
-- Intet nyt udrulles, og den kørende scanner bliver.
-- Alarmerne udløses: workflowfejl, `SERVICE_DEPLOYMENT_FAILED`, signaturalder over 18 timer og
-  tekniske scanfejl.
-- Når signaturerne passerer 24 timer, giver ingen scanning `safe`. Filerne venter som "Teknisk
-  scanfejl" og frigives ved genforsøg, når en frisk revision kører.
-- Der findes intet flag, der ignorerer forældede signaturer.
-
-**Manuel kørsel:** `workflow_dispatch` på workflowet. Byg aldrig et produktionsimage i hånden.
-
-## Engine-opgradering (8B-I5.6)
-
-En ny ClamAV 1.4.x-patch går aldrig automatisk i production:
-
-1. Review releasen.
-2. Kør `clamav-engine-candidate.yml` med versionen. Den bygger kandidaten med base-digest og
-   kører scanner-, EICAR-, clean-file- og PDF-/sikkerhedstests. Den pusher til
-   `candidate-<version>-<signatur>` og udruller ikke.
-3. Godkend med en reviewet ændring af `engine.json` (version og base-digest), Dockerfilens
-   default og en migrationsrække i `knowledge.security_approved_scanner_engines`.
-4. Den næste signaturopdatering bygger og udruller den nye engine.
-5. Træk den gamle version tilbage (`revoked_at`), når den nye kører.
-
-## Forudsætninger (når produktionskontoen findes)
-
-- ECR-repositoriet `ipa-clamav` (uforanderlige tags).
-- Private subnets til scanneren og VPC-endpoints for ECR api/dkr, CloudWatch Logs og
-  S3-gatewayen.
-- Cloud Map-namespacet `ipa-worker.internal` (`service-discovery.json`).
-- Rollerne `ipa-clamav-execution` og `ipa-clamav-publisher` med GitHub OIDC-provider.
-- Repository-variablerne `IPA_AWS_ACCOUNT_ID` og `IPA_ECS_CLUSTER`. Indtil de er sat, gør
-  workflowet ingenting.
-- Alarmtopic (`${ALARM_TOPIC_ARN}`, åbent spørgsmål Å-5).
+**Signaturer:** imaget bygges lige før hver import med friske officielle signaturer. Workeren
+afviser signaturer, der er ældre end 24 timer, og fejler lukket, hvis scanneren ikke svarer.
+Runbooken følger i L3.

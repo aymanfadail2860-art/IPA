@@ -197,12 +197,9 @@ export function authorizeEgress(request: EgressRequest, options: { log?: EgressL
  * constants, not data. A new provider adds its constants here (a reviewed change), never in its
  * own adapter. Model and profile ids are checked separately as machine ids.
  */
-export const PROTOCOL_CONSTANTS: ReadonlySet<string> = new Set([
-  // Cohere Embed v4 on Bedrock
-  "search_document",
-  "search_query",
-  "float",
-  "NONE",
+export const PROTOCOL_CONSTANTS: ReadonlySet<string> = new Set<string>([
+  // Empty since the beta's L2: the Cohere/Bedrock constants went with their adapters
+  // (docs/beta.md §14). The Claude adapter (L4) adds its own here, as a reviewed change.
 ]);
 
 const MACHINE_ID = /^[a-z0-9][a-z0-9_.:-]{0,127}$/;

@@ -15,6 +15,10 @@ import { describe, expect, it } from "vitest";
  *
  * Adding a new provider or transport therefore means editing the allowlists below — a change a
  * reviewer sees.
+ *
+ * Beta L2 (docs/beta.md §14): the Bedrock transport and adapters are removed, so the allowlists
+ * are empty — no module may reach an external AI provider until the Claude adapter (L4) is added
+ * to them, behind the same checks.
  */
 
 const REPO = path.resolve(__dirname, "../..");
@@ -60,13 +64,16 @@ const NETWORK = [
   /require\(["'](@aws-sdk|openai|@anthropic-ai|https?|undici|axios)/,
 ];
 
-/** The ONLY modules allowed to talk to an external AI provider. Each must call assertTransmittable. */
-const ALLOWED_TRANSPORTS = ["src/lib/knowledge/providers/bedrock/sdk-transport.ts"];
+/**
+ * The ONLY modules allowed to talk to an external AI provider. Each must call assertTransmittable.
+ * Empty since L2: the Claude adapter (L4) is the next entry.
+ */
+const ALLOWED_TRANSPORTS: string[] = [];
 
 /**
  * Network clients that are NOT a way to an AI provider, each with what it may reach. 8B-I5: the
- * malware scanner speaks the clamd protocol to the ClamAV sidecar on the loopback interface of
- * the same task (production configuration refuses any other host).
+ * malware scanner speaks the clamd protocol to the ClamAV service at its fixed endpoint
+ * (production configuration refuses any other host; deploy/import/compose.yaml).
  */
 const NON_AI_NETWORK: Record<string, RegExp> = {
   "workers/ingestion/security/scanner.ts": /^import \{ connect \} from "node:net";$/m,
@@ -79,9 +86,6 @@ const NON_AI_NETWORK: Record<string, RegExp> = {
   // 8B-I7: the evaluation provisioning downloads a PUBLIC source named in the manifest and
   // refuses it unless its SHA-256 matches. It sends nothing.
   "evals/engine/provision.ts": /^ {2}const download = options\.download \?\? \(async \(url: string\) => new Uint8Array\(await \(await fetch\(url\)\)\.arrayBuffer\(\)\)\);$/m,
-  // 8B-I8: the evaluation job's credential source reads the temporary credentials GitHub OIDC put
-  // in the job's environment. It reaches no AI provider and sends no content.
-  "src/lib/knowledge/providers/credentials-environment.ts": /^import \{ fromEnv \} from "@aws-sdk\/credential-provider-env";$/m,
 };
 
 describe("external transports: only allowlisted, and only behind the egress check", () => {
@@ -102,6 +106,8 @@ describe("external transports: only allowlisted, and only behind the egress chec
   });
 
   it("every allowlisted transport checks the authorization before any network I/O", () => {
+    // L2: there is none (the Bedrock transport is removed); the rule stays for the next one.
+    expect(ALLOWED_TRANSPORTS).toEqual([]);
     for (const file of ALLOWED_TRANSPORTS) {
       const text = read(path.join(REPO, file));
       expect(text, file).toMatch(/import \{ assertTransmittable \} from ["'][^"']*egress\/policy\.ts["']/);
@@ -112,37 +118,27 @@ describe("external transports: only allowlisted, and only behind the egress chec
     }
   });
 
-  it("the transport contract requires an authorization on every invocation", () => {
-    const transport = read(path.join(REPO, "src/lib/knowledge/providers/bedrock/transport.ts"));
-    expect(transport).toMatch(/egress: AuthorizedEgress;/);
+  it("the transport check requires a genuine authorization on every transmission", () => {
+    const policy = read(path.join(REPO, "src/lib/egress/policy.ts"));
+    expect(policy).toMatch(/export function assertTransmittable\(egress: AuthorizedEgress, expected: \{ provider: string; modelId: string; body: unknown; log\?: EgressLog \}\): void \{/);
   });
 
-  it("the only AI/cloud SDK dependency is the Bedrock runtime client", () => {
+  it("there is no AI or cloud SDK dependency at all (beta L2: AWS removed)", () => {
     const pkg = JSON.parse(read(path.join(REPO, "package.json")));
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
-    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual([
-      "@aws-sdk/client-bedrock-runtime",
-      // 8B-I8: credential sources, one per runtime (no AI transport).
-      "@aws-sdk/credential-provider-env",
-    ]);
-    expect(deps.filter((name) => /^(@smithy\/|@vercel\/)/.test(name)).sort()).toEqual(["@smithy/credential-provider-imds", "@vercel/oidc-aws-credentials-provider"]);
+    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual([]);
+    expect(deps.filter((name) => /^(@smithy\/|@vercel\/)/.test(name))).toEqual([]);
+    const lock = read(path.join(REPO, "package-lock.json"));
+    expect(lock).not.toMatch(/"node_modules\/@aws-sdk\/|"node_modules\/@smithy\/|"node_modules\/@aws-crypto\/|oidc-aws-credentials-provider/);
   });
 });
 
 describe("adapters authorize before they invoke", () => {
   it("every module that invokes a provider transport calls authorizeEgress first", () => {
-    const METRICS = "src/lib/knowledge/providers/provider-metrics.ts";
     const invokers = sources.filter(({ text }) => /\.transport\.invoke\(|\btransport\.invoke\(/.test(text));
-    expect(invokers.map(({ file }) => file).sort()).toEqual([
-      "src/lib/knowledge/providers/bedrock/cohere-embed-v4.ts",
-      "src/lib/knowledge/providers/bedrock/cohere-rerank-3-5.ts",
-      METRICS,
-    ]);
-    // The metrics decorator (8B-I8 C3) forwards the already authorized call unchanged and builds nothing.
-    const metrics = invokers.find(({ file }) => file === METRICS)!.text;
-    expect(metrics.match(/transport\.invoke\(([^)]*)\)/g)).toEqual(["transport.invoke(call)"]);
-    expect(metrics).not.toMatch(/body\s*:|egress\s*:|authorizeEgress|\.texts/);
-    for (const { file, text } of invokers.filter(({ file }) => file !== METRICS)) {
+    // L2: no adapter invokes a transport (the Bedrock adapters are removed); the rule stays.
+    expect(invokers.map(({ file }) => file)).toEqual([]);
+    for (const { file, text } of invokers) {
       const authorize = text.indexOf("authorizeEgress(");
       expect(authorize, file).toBeGreaterThan(-1);
       expect(text.indexOf("transport.invoke("), file).toBeGreaterThan(authorize);

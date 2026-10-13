@@ -6,7 +6,7 @@ import { evaluationEnvironmentFromEnv } from "../../evals/engine/evaluation-envi
 import { createReranker } from "@/lib/knowledge/core/registry";
 
 import { loadExample } from "./fixtures/eval-retrieval";
-import { FIXTURE_MODEL, FIXTURE_USER, fixtureContext, fixtureDb, fixtureRow, productionProviders } from "./fixtures/production-config";
+import { declaredProductionDoubles, FIXTURE_MODEL, FIXTURE_USER, fixtureContext, fixtureDb, fixtureRow } from "./fixtures/production-config";
 
 /**
  * 8B-I7 — the evaluation environment adapter (docs/08b §4.5) with a fake environment: the run
@@ -43,7 +43,7 @@ function fakeEnvironment(authId: string, checksums: string[] = ["c1"]) {
 }
 
 function adapter(env: EvaluationEnvironment) {
-  const providers = productionProviders();
+  const providers = declaredProductionDoubles();
   return createDatabaseRetrieval({
     env, manifest: inputs.set.manifest, snapshot: snapshot("c1"), embedder: providers.embedder, embeddingModelId: FIXTURE_MODEL.id,
     reranker: providers.reranker, baselineReranker: createReranker("none"),

@@ -9,7 +9,7 @@ const caseB: CaseSummary = { id: "b", companyName: "Testvirksomhed B", status: "
 
 describe("global search shows only own and assigned cases (docs/04 §21, docs/03 §10)", () => {
   it("lists exactly the cases the server loaded under RLS", () => {
-    const entries = searchEntriesForUser({ entries: mockSearchIndex, cases: [caseA, caseB], isAdmin: false });
+    const entries = searchEntriesForUser({ entries: mockSearchIndex, cases: [caseA, caseB], isAdmin: false, surface: "demo" });
     expect(entries.filter((entry) => entry.group === OWN_CASES_GROUP).map((entry) => entry.href)).toEqual(["/advise/a", "/advise/b"]);
   });
 
@@ -18,15 +18,26 @@ describe("global search shows only own and assigned cases (docs/04 §21, docs/03
       entries: [{ id: "x", group: OWN_CASES_GROUP, title: "Testvirksomhed X", href: "/advise/x" }],
       cases: [],
       isAdmin: false,
+      surface: "demo",
     });
     expect(leaked).toEqual([]);
     expect(mockSearchIndex.some((entry) => (entry.group as string) === OWN_CASES_GROUP)).toBe(false);
   });
 
   it("shows administration entries only to administrators", () => {
-    const advisor = searchEntriesForUser({ entries: mockSearchIndex, cases: [], isAdmin: false });
-    const admin = searchEntriesForUser({ entries: mockSearchIndex, cases: [], isAdmin: true });
+    const advisor = searchEntriesForUser({ entries: mockSearchIndex, cases: [], isAdmin: false, surface: "demo" });
+    const admin = searchEntriesForUser({ entries: mockSearchIndex, cases: [], isAdmin: true, surface: "demo" });
     expect(advisor.some((entry) => entry.adminOnly)).toBe(false);
     expect(admin.some((entry) => entry.adminOnly)).toBe(true);
+  });
+
+  it("beta (B-035, L2): no entry into a hidden area — no cases, no Analytics, no Min profil", () => {
+    for (const isAdmin of [false, true]) {
+      const entries = searchEntriesForUser({ entries: mockSearchIndex, cases: [caseA, caseB], isAdmin, surface: "beta" });
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.filter((entry) => /^\/(advise|analytics|profile)(\/|$|\?)/.test(entry.href))).toEqual([]);
+    }
+    // Not vacuous: the demo offers them.
+    expect(searchEntriesForUser({ entries: mockSearchIndex, cases: [caseA], isAdmin: false, surface: "demo" }).some((entry) => entry.href === "/profile")).toBe(true);
   });
 });

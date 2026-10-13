@@ -279,27 +279,21 @@ describe("separation (D-7, D-18): the evaluation and the publication never share
     expect(publish).toMatch(/evaluation_publisher_login/);
   });
 
-  it("the workflow keeps the two credentials in two jobs, two environments and two roles", () => {
-    const workflow = read(".github/workflows/retrieval-evaluation.yml");
-    const [evaluate, publish] = workflow.split(/\n  publish:\n/);
-    expect(evaluate).toMatch(/environment: evaluation\n/);
-    expect(evaluate).toMatch(/ipa-evaluation-runner/);
-    expect(evaluate).toMatch(/ipa\/evaluation\/supabase/);
-    expect(evaluate).not.toMatch(/evaluation-publisher\/db|IPA_PUBLISHER_DB/);
-    expect(publish).toMatch(/environment: evaluation-publication/);
-    expect(publish).toMatch(/ipa-evaluation-publisher/);
-    expect(publish).not.toMatch(/ipa\/evaluation\/supabase|IPA_EVAL_SUPABASE/);
-    expect(workflow).toMatch(/cron: /);
-    expect(workflow).not.toMatch(/AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.|postgres(ql)?:\/\/[^\s"]*:[^\s"]*@/);
-  });
-
-  it("each OIDC role can read exactly one secret", () => {
-    const runner = JSON.parse(read("deploy/evaluation/iam/runner-policy.json"));
-    const publisher = JSON.parse(read("deploy/evaluation/iam/publisher-policy.json"));
-    const secrets = (policy: { Statement: { Action: string; Resource: string | string[] }[] }) =>
-      policy.Statement.filter((s) => s.Action === "secretsmanager:GetSecretValue").flatMap((s) => [s.Resource].flat());
-    expect(secrets(runner)).toEqual(["arn:aws:secretsmanager:eu-central-1:${EVAL_AWS_ACCOUNT_ID}:secret:ipa/evaluation/supabase-*"]);
-    expect(secrets(publisher)).toEqual(["arn:aws:secretsmanager:eu-central-1:${AWS_ACCOUNT_ID}:secret:ipa/production/evaluation-publisher/db-*"]);
-    expect(publisher.Statement).toHaveLength(1);
+  it("the two credentials never meet in code: the evaluation reads only IPA_EVAL_*, the publication only IPA_PUBLISHER_DB_* (beta L2)", () => {
+    // 8B-I7 kept them apart in two CI jobs, two environments and two AWS roles. L2 removed that
+    // workflow and its IAM (docs/beta.md §14); the separation the code itself enforces stays.
+    const engine = fs.readdirSync(path.join(root, "evals/engine")).filter((file) => file.endsWith(".ts")).map((file) => read(`evals/engine/${file}`)).join("\n");
+    // publication.ts is the publisher's library: it takes a connection, never a credential.
+    expect(engine).not.toMatch(/IPA_PUBLISHER_DB/);
+    expect(engine).toMatch(/IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY/);
+    const publish = read("workers/evaluation/publish.ts").replace(/\/\*[\s\S]*?\*\//g, "");
+    const readsEnv = [...publish.matchAll(/env\.([A-Z_]+)/g)].map((match) => match[1]!);
+    expect(readsEnv.length).toBeGreaterThan(0);
+    // Every credential or connection value it reads is the publisher's own (IPA_RUNTIME_ENV is not one).
+    expect(readsEnv.filter((name) => /DB|KEY|SECRET|PASSWORD|TOKEN|URL|USER/.test(name) && !name.startsWith("IPA_PUBLISHER_DB_"))).toEqual([]);
+    expect(readsEnv).toEqual(expect.arrayContaining(["IPA_PUBLISHER_DB_HOST", "IPA_PUBLISHER_DB_USER", "IPA_PUBLISHER_DB_PASSWORD"]));
+    // The application's and the evaluation project's keys are refused outside local/test.
+    expect(publish).toMatch(/const FORBIDDEN = \["SUPABASE_SERVICE_ROLE_KEY", "IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY"\];/);
+    expect(publish).toMatch(/for \(const name of FORBIDDEN\) if \(process\.env\[name\] && !local\) fail\(/);
   });
 });

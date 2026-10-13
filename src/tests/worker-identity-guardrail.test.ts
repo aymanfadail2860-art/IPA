@@ -124,8 +124,6 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/integration/upload-security.integration.test.ts",
       "src/tests/integration/worker-runtime.integration.test.ts",
       "src/tests/worker-identity-guardrail.test.ts",
-      // 8B-I8: builds a local/test worker configuration to show the fake Bedrock transport is accepted only there (test only).
-      "src/tests/worker-production-embedder.test.ts",
       "src/tests/worker-runtime-architecture.test.ts",
       "src/tests/worker-runtime.test.ts",
       // 8B-I7: the publication step names the key only to refuse it (D-18).

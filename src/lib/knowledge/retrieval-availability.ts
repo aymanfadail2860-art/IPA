@@ -5,7 +5,7 @@ import { assessProduction, PRODUCTION_SCHEMA_VERSION, type ProductionCondition }
 import { createEmbedder, createReranker } from "./core/registry";
 import type { RetrievalMethod } from "./core/provider";
 import type { RetrievalContext } from "./core/retrieval-context";
-import { providersForContext, type ProviderRuntime } from "./providers/configured";
+import { providersForContext } from "./providers/configured";
 
 /**
  * Whether retrieval can run at all — a state the rest of the system can read, not only a log
@@ -54,14 +54,9 @@ export interface AvailabilityInput {
   activeModel: EmbeddingModelSpec | null | undefined;
   /** knowledge.retrieval_context(); undefined = not read (startup check), null = unreadable. */
   context?: RetrievalContext | null;
-  runtime?: () => ProviderRuntime;
   rerankerId?: string;
   environment?: RuntimeEnv;
 }
-
-const RUNTIME_MISSING = (): ProviderRuntime => {
-  throw new Error("Der er ingen forbindelse til Bedrock.");
-};
 
 /** The conditions that can be assessed without a query. */
 const STATIC_CONDITIONS: readonly ProductionCondition[] = ["P1", "P2", "P3", "P4", "P6", "P9"];
@@ -100,7 +95,7 @@ export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability
   if (input.context) {
     let providers;
     try {
-      providers = providersForContext(input.context, input.runtime ?? RUNTIME_MISSING, environment);
+      providers = providersForContext(input.context, environment);
     } catch (error) {
       return { state: "unavailable", reason: (error as Error).message };
     }

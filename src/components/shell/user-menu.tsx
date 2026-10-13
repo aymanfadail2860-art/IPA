@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { isAreaAvailable, surfaceOf } from "@/config/navigation";
 import { SHORTCUTS } from "@/config/shortcuts";
 import { usePlatform } from "@/hooks/use-shortcut";
 import { formatShortcut } from "@/config/shortcuts";
@@ -23,7 +24,10 @@ import { DEMO_ROLE_LABELS, DEMO_ROLES } from "@/dev/demo/demo-mode";
 
 /** User menu — identity, own profile and the documented keyboard shortcuts (§20). */
 export function UserMenu() {
-  const { user, demo } = useSession();
+  const session = useSession();
+  const { user, demo } = session;
+  // Min profil is hidden in the beta (B-035, L2); the server refuses the page too.
+  const profileAvailable = isAreaAvailable("profile", surfaceOf(session));
   const platform = usePlatform();
   const shortcuts = Object.values(SHORTCUTS)
     .map((definition) => ({ definition, label: formatShortcut(definition, platform) }))
@@ -47,13 +51,17 @@ export function UserMenu() {
             {user.title} · {user.teamName}
           </p>
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/profile">
-            <UserRound aria-hidden />
-            Min profil
-          </Link>
-        </DropdownMenuItem>
+        {profileAvailable ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/profile">
+                <UserRound aria-hidden />
+                Min profil
+              </Link>
+            </DropdownMenuItem>
+          </>
+        ) : null}
         {shortcuts.length > 0 ? (
           <>
             <DropdownMenuSeparator />

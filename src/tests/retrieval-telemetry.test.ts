@@ -4,7 +4,7 @@ import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type RetrievalDeps, type Retrie
 import type { Alert } from "@/lib/observability/alerts";
 import { ALERT_COOLDOWN_MS, createRetrievalTelemetry, resetTelemetryCooldowns } from "@/lib/observability/retrieval-telemetry";
 
-import { FIXTURE_MODEL, fixtureContext, fixtureDb, fixtureQuery, fixtureRow, productionProviders } from "./fixtures/production-config";
+import { declaredProductionDoubles, FIXTURE_MODEL, fixtureContext, fixtureDb, fixtureQuery, fixtureRow } from "./fixtures/production-config";
 
 /**
  * 8B-I7 — retrieval telemetry (docs/08b §12, §14): every step is timed through runRetrieval's
@@ -15,7 +15,7 @@ import { FIXTURE_MODEL, fixtureContext, fixtureDb, fixtureQuery, fixtureRow, pro
 const NOW = () => new Date("2026-10-05T10:00:00Z");
 
 function deps(overrides: Partial<RetrievalDeps> = {}): RetrievalDeps {
-  const providers = productionProviders();
+  const providers = declaredProductionDoubles();
   return {
     db: fixtureDb({ rows: [fixtureRow(1), fixtureRow(2)], context: fixtureContext() }),
     embedding: { embedder: providers.embedder, modelId: FIXTURE_MODEL.id },
