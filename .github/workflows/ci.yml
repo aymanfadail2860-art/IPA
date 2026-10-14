@@ -163,8 +163,8 @@ jobs:
       IPA_IMPORT_SUPABASE_URL: https://unused.invalid
       IPA_IMPORT_PUBLISHABLE_KEY: unused
       IPA_IMPORT_EMAIL: unused@unused.invalid
-      IPA_IMPORT_FOLDER: ${{ runner.temp }}/import
-      IPA_IMPORT_REPORTS: ${{ runner.temp }}/reports
+      IPA_IMPORT_FOLDER: /tmp/ipa-import
+      IPA_IMPORT_REPORTS: /tmp/ipa-import-reports
     steps:
       - uses: actions/checkout@v4
 
