@@ -34,32 +34,23 @@ import type { AnthropicTransport } from "./transport";
  *      spending;
  *   4. the provider counts the request's tokens (free). Over the reservation's input ceiling the
  *      call is refused — the basis is never cut;
- *   5. at most `max_attempts` attempts, each opened in the database under the same reservation.
- *      429 and 5xx are retried after the provider's retry-after (or a short backoff); any other
- *      HTTP error stops. A network error or timeout is never retried: the provider may have
- *      processed the call;
+ *   5. ONE attempt, opened in the database under the reservation. Nothing is ever retried: a retry
+ *      is a new paid call the user did not ask for;
  *   6. the reservation is settled with the provider's usage (cache reads and writes included),
- *      released when the provider definitely did not process the call, or marked uncertain and
- *      counted in full.
+ *      released only when the provider certainly did not process the call (it refused the request
+ *      itself: 400, 401, 402, 403, 404, 413, 422 — errors.ts), or else marked uncertain and counted
+ *      in full until reconciled. 429, 5xx and 529 are uncertain: the adapter cannot establish that
+ *      nothing was billed (B-039, clarified 14 October 2026).
  *
  * No fallback to another model and no fallback to the stub — a failure is a failure.
  */
 
-/** The longest retry-after the adapter waits; a longer one stops the call. */
-export const MAX_RETRY_AFTER_MS = 20_000;
-/** Backoff before a retry when the provider gave no retry-after. */
-export const RETRY_BACKOFF_MS: readonly number[] = [1_000, 4_000];
-
 export interface AnthropicModelOptions {
   config: AnthropicConfig;
   transport: AnthropicTransport;
-  /** Tests skip real waiting. */
-  sleep?: (ms: number) => Promise<void>;
   /** Prompt caching (cache-ready). Defaults to PROMPT_CACHING_ACTIVE, which is false in L4. */
   cache?: boolean;
 }
-
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function categoryOf(error: ProviderError): ModelCallCategory {
   switch (error.failure) {
@@ -74,6 +65,7 @@ function categoryOf(error: ProviderError): ModelCallCategory {
     case "rate_limited":
     case "overloaded":
     case "server_error":
+    case "http_other":
       return "provider_unavailable";
     default:
       return "provider_uncertain";
@@ -82,7 +74,6 @@ function categoryOf(error: ProviderError): ModelCallCategory {
 
 export function createAnthropicModel(options: AnthropicModelOptions): Model<"production"> {
   const { config, transport } = options;
-  const sleep = options.sleep ?? wait;
   const cache = options.cache ?? PROMPT_CACHING_ACTIVE;
 
   async function generate(input: ModelInput, egress?: AuthorizedEgress, call?: ModelCallContext): Promise<ModelOutput> {
@@ -153,72 +144,64 @@ export function createAnthropicModel(options: AnthropicModelOptions): Model<"pro
       throw new ModelCallError("token_budget", "input_token_budget_exceeded", report);
     }
 
-    // 5. Attempts under the reservation.
-    let last: ProviderError | null = null;
-    for (;;) {
-      try {
-        report.attempts = await ledger.beginAttempt(reservation);
-      } catch (error) {
-        // No further attempt may be made. Every earlier attempt got an HTTP error (not processed).
-        const code = last?.code ?? (error instanceof UsageLimitError ? error.code : "attempt_refused");
-        await release(code);
-        throw new ModelCallError(last ? categoryOf(last) : "usage_unavailable", code, report);
-      }
-
-      let message: ApiMessage;
-      try {
-        const sent = await transport.create(egress, built.body);
-        message = sent.message;
-        report.providerRequestId = sent.requestId;
-      } catch (error) {
-        if (error instanceof EgressPolicyError) {
-          await release("egress_refused");
-          throw error;
-        }
-        const failure = error instanceof ProviderError ? error : new ProviderError("unknown");
-        if (!failure.definitive) {
-          // The provider may have processed (and billed) the call: keep the reservation, no retry.
-          await uncertain(failure.code);
-          throw new ModelCallError("provider_uncertain", failure.code, report);
-        }
-        last = failure;
-        const delay = failure.retryAfterMs ?? RETRY_BACKOFF_MS[Math.min(report.attempts - 1, RETRY_BACKOFF_MS.length - 1)]!;
-        if (failure.retryable && report.attempts < limits.maxAttempts && delay <= MAX_RETRY_AFTER_MS) {
-          await sleep(delay);
-          continue;
-        }
-        await release(failure.code);
-        throw new ModelCallError(categoryOf(failure), failure.code, report);
-      }
-
-      // 6. Billed: settle with the provider's usage, whatever the answer turns out to be.
-      const usage = message.usage;
-      report.inputTokens = usage.input_tokens;
-      report.outputTokens = usage.output_tokens;
-      report.cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
-      report.cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
-      report.stopReason = message.stop_reason;
-      try {
-        report.actualCostUsd = await ledger.settle(
-          reservation,
-          {
-            inputTokens: report.inputTokens,
-            outputTokens: report.outputTokens,
-            cacheCreationInputTokens: report.cacheCreationInputTokens,
-            cacheReadInputTokens: report.cacheReadInputTokens,
-          },
-          { countedInputTokens: report.countedInputTokens, outcome: `stop_${message.stop_reason ?? "none"}` },
-        );
-        report.status = "settled";
-      } catch {
-        // Not settled: the reservation stays open and counts at its full reserved cost.
-      }
-
-      // Only a finished answer can be shown: a cut-off, refused or otherwise stopped answer is not.
-      if (message.stop_reason !== "end_turn") throw new ModelCallError("output", `stop_${message.stop_reason ?? "none"}`, report);
-      const converted = convertMessage(message, built.documents, input.outputContract);
-      return { raw: converted.raw, citations: converted.citations, usage: report };
+    // 5. One attempt under the reservation — never a second.
+    try {
+      report.attempts = await ledger.beginAttempt(reservation);
+    } catch (error) {
+      // Nothing was sent for a message: the reservation can be released.
+      const code = error instanceof UsageLimitError ? error.code : "attempt_refused";
+      await release(code);
+      throw new ModelCallError("usage_unavailable", code, report);
     }
+
+    let message: ApiMessage;
+    try {
+      const sent = await transport.create(egress, built.body);
+      message = sent.message;
+      report.providerRequestId = sent.requestId;
+    } catch (error) {
+      if (error instanceof EgressPolicyError) {
+        await release("egress_refused");
+        throw error;
+      }
+      const failure = error instanceof ProviderError ? error : new ProviderError("unknown");
+      if (failure.notProcessed) {
+        await release(failure.code);
+      } else {
+        // The provider may have processed (and billed) the call: keep the reservation in full,
+        // marked for reconciliation. No retry.
+        await uncertain(failure.code);
+      }
+      throw new ModelCallError(categoryOf(failure), failure.code, report);
+    }
+
+    // 6. Billed: settle with the provider's usage, whatever the answer turns out to be.
+    const usage = message.usage;
+    report.inputTokens = usage.input_tokens;
+    report.outputTokens = usage.output_tokens;
+    report.cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
+    report.cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
+    report.stopReason = message.stop_reason;
+    try {
+      report.actualCostUsd = await ledger.settle(
+        reservation,
+        {
+          inputTokens: report.inputTokens,
+          outputTokens: report.outputTokens,
+          cacheCreationInputTokens: report.cacheCreationInputTokens,
+          cacheReadInputTokens: report.cacheReadInputTokens,
+        },
+        { countedInputTokens: report.countedInputTokens, outcome: `stop_${message.stop_reason ?? "none"}` },
+      );
+      report.status = "settled";
+    } catch {
+      // Not settled: the reservation stays open and counts at its full reserved cost.
+    }
+
+    // Only a finished answer can be shown: a cut-off, refused or otherwise stopped answer is not.
+    if (message.stop_reason !== "end_turn") throw new ModelCallError("output", `stop_${message.stop_reason ?? "none"}`, report);
+    const converted = convertMessage(message, built.documents, input.outputContract);
+    return { raw: converted.raw, citations: converted.citations, usage: report };
   }
 
   return Object.freeze({ id: config.modelId, version: config.modelId, grade: "production" as const, generate });

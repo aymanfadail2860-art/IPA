@@ -14,7 +14,8 @@ import { createModel, ModelNotConfiguredError } from "@/lib/ai/core/registry";
 import type { AiRequest, ModelInput, SentPart } from "@/lib/ai/core/types";
 import { estimateTokens, MODEL_CALL_MESSAGES } from "@/lib/ai/core/usage";
 import { AnthropicConfigError, readAnthropicConfig } from "@/lib/ai/providers/anthropic/config";
-import { createAnthropicModel, MAX_RETRY_AFTER_MS } from "@/lib/ai/providers/anthropic/model";
+import { NOT_PROCESSED_STATUSES } from "@/lib/ai/providers/anthropic/errors";
+import { createAnthropicModel } from "@/lib/ai/providers/anthropic/model";
 import { buildMessageRequest } from "@/lib/ai/providers/anthropic/request";
 import { convertMessage } from "@/lib/ai/providers/anthropic/response";
 import { createAnthropicTransport } from "@/lib/ai/providers/anthropic/transport";
@@ -53,18 +54,16 @@ const CASE_ID = "11111111-1111-4111-8111-111111111111";
 const QUESTION = "Dækker erhvervsansvaret skade på ting under reparation?";
 const ROLEPLAY = "22222222-2222-4222-8222-222222222222";
 
-/** The Claude model with the fake transport. Retries do not wait. */
+/** The Claude model with the fake transport. */
 function claude(options: { fake?: FakeAnthropic; timeoutMs?: number; cache?: boolean } = {}) {
   const fake = options.fake ?? fakeAnthropic();
-  const sleeps: number[] = [];
   const transport = createAnthropicTransport({ modelId: FAKE_MODEL, apiKey: FAKE_API_KEY, timeoutMs: options.timeoutMs ?? 5_000, fetch: fake.fetch });
   const model = createAnthropicModel({
     config: { modelId: FAKE_MODEL, apiKey: FAKE_API_KEY, effort: null },
     transport,
-    sleep: async (ms) => void sleeps.push(ms),
     cache: options.cache,
   });
-  return { model, fake, sleeps };
+  return { model, fake };
 }
 
 const production = (items: EvidenceItem[] = [evidenceItem(1), evidenceItem(2)]) => issueEvidence(items, { embedder: "production", reranker: "production" });
@@ -392,42 +391,36 @@ describe("14. the token budget is enforced — without silent truncation", () =>
   });
 });
 
-describe("15–16. timeouts, 429 and 5xx — and retries never escape the reservation", () => {
+describe("15–16. timeouts, 429 and 5xx — never retried, released only when certainly not processed", () => {
   const run = async (replies: FakeReply[], options: { timeoutMs?: number; limits?: Parameters<typeof memoryLedger>[0] } = {}) => {
     const fake = fakeAnthropic({ replies });
-    const { model, sleeps } = claude({ fake, timeoutMs: options.timeoutMs });
+    const { model } = claude({ fake, timeoutMs: options.timeoutMs });
     const h = gateway(model, { ledger: memoryLedger(options.limits) });
     const outcome = await runGateway(copilot(), h.deps);
-    return { outcome, fake, sleeps, h };
+    return { outcome, fake, h };
   };
 
-  it("429 with retry-after: waits as told, retries once, settles once", async () => {
-    const { outcome, fake, sleeps, h } = await run([{ kind: "error", status: 429, type: "rate_limit_error", retryAfter: "2" }, { kind: "message" }]);
-    expect(outcome.kind).toBe("answer");
-    expect(sleeps).toEqual([2000]);
-    expect(fake.messages()).toHaveLength(2);
-    expect(h.ledger.reservations).toHaveLength(1);
-    expect(h.ledger.reservations[0]).toMatchObject({ status: "settled", attempts: 2 });
-  });
-
-  it("529 and 500: backoff without retry-after, within the attempts", async () => {
-    const { outcome, sleeps, h } = await run([{ kind: "error", status: 529, type: "overloaded_error" }, { kind: "error", status: 500 }, { kind: "message" }]);
-    expect(outcome.kind).toBe("answer");
-    expect(sleeps).toEqual([1000, 4000]);
-    expect(h.ledger.reservations[0]).toMatchObject({ status: "settled", attempts: 3 });
-  });
-
-  it("429 every time: stops after max_attempts, released (not processed), the user sees a fixed text", async () => {
-    const { outcome, fake, h } = await run(Array.from({ length: 5 }, () => ({ kind: "error" as const, status: 429 })));
+  it.each([
+    [429, "rate_limit_error", "provider_rate_limited", "2"],
+    [529, "overloaded_error", "provider_overloaded", undefined],
+    [500, "api_error", "provider_server_error", undefined],
+    [503, "api_error", "provider_server_error", "1"],
+  ] as const)("%i: one attempt, no retry — the reservation is kept in full and marked for reconciliation", async (status, type, code, retryAfter) => {
+    const { outcome, fake, h } = await run([{ kind: "error", status, type, retryAfter }, { kind: "message" }]);
     expect(outcome).toEqual({ kind: "unavailable", message: MODEL_CALL_MESSAGES.provider_unavailable });
-    expect(fake.messages()).toHaveLength(3);
-    expect(h.ledger.reservations[0]).toMatchObject({ status: "released", outcome: "provider_rate_limited", attempts: 3 });
+    expect(fake.messages()).toHaveLength(1);
+    expect(h.ledger.reservations).toHaveLength(1);
+    expect(h.ledger.reservations[0]).toMatchObject({ status: "uncertain", outcome: code, attempts: 1 });
+    // Not released: the full reserved cost still counts against every budget.
+    expect(h.ledger.spent()).toBeCloseTo(h.ledger.reservations[0]!.reservedCostUsd, 10);
   });
 
-  it("a retry-after longer than the adapter waits: no retry", async () => {
-    const { outcome, fake } = await run([{ kind: "error", status: 429, retryAfter: String(MAX_RETRY_AFTER_MS / 1000 + 1) }, { kind: "message" }]);
-    expect(outcome.kind).toBe("unavailable");
-    expect(fake.messages()).toHaveLength(1);
+  it("an HTTP status outside the not-processed list (e.g. 408, 409) is uncertain too", async () => {
+    for (const status of [408, 409, 418]) {
+      const { fake, h } = await run([{ kind: "error", status }, { kind: "message" }]);
+      expect(fake.messages()).toHaveLength(1);
+      expect(h.ledger.reservations[0]).toMatchObject({ status: "uncertain", outcome: "provider_http_other" });
+    }
   });
 
   it.each([
@@ -435,12 +428,23 @@ describe("15–16. timeouts, 429 and 5xx — and retries never escape the reserv
     [403, "permission_error", "configuration", "provider_permission"],
     [402, "billing_error", "budget", "provider_billing"],
     [400, "invalid_request_error", "provider_rejected", "provider_rejected"],
+    [404, "not_found_error", "provider_rejected", "provider_rejected"],
     [413, "request_too_large", "provider_rejected", "provider_rejected"],
-  ] as const)("%i is never retried and releases the reservation", async (status, type, category, code) => {
+    [422, "invalid_request_error", "provider_rejected", "provider_rejected"],
+  ] as const)("%i: refused by the provider before processing — never retried, the reservation released", async (status, type, category, code) => {
     const { outcome, fake, h } = await run([{ kind: "error", status, type }, { kind: "message" }]);
     expect(outcome).toEqual({ kind: "unavailable", message: MODEL_CALL_MESSAGES[category] });
     expect(fake.messages()).toHaveLength(1);
     expect(h.ledger.reservations[0]).toMatchObject({ status: "released", outcome: code });
+    expect(h.ledger.spent()).toBe(0);
+  });
+
+  it("the release list is exactly the statuses at which the provider refuses the request itself", () => {
+    expect([...NOT_PROCESSED_STATUSES]).toEqual([400, 401, 402, 403, 404, 413, 422]);
+    // No loop and no waiting in the adapter: exactly one transport.create per call.
+    const source = read("src/lib/ai/providers/anthropic/model.ts");
+    expect(source).not.toMatch(/sleep|setTimeout|for \(|while \(|continue;|retryAfterMs/);
+    expect(source.match(/transport\.create\(/g)).toHaveLength(1);
   });
 
   it("a timeout or network error: never retried (the provider may have processed it), counted in full", async () => {
@@ -453,11 +457,11 @@ describe("15–16. timeouts, 429 and 5xx — and retries never escape the reserv
     }
   });
 
-  it("16. the database's attempt limit caps the retries — however retryable the error", async () => {
-    const { fake, h } = await run(Array.from({ length: 5 }, () => ({ kind: "error" as const, status: 529 })), { limits: { limits: { maxAttempts: 2 } } });
-    expect(fake.messages()).toHaveLength(2);
-    expect(h.ledger.reservations).toHaveLength(1);
-    expect(h.ledger.reservations[0]).toMatchObject({ status: "released", attempts: 2 });
+  it("16. the database's attempt limit is respected: with max_attempts reached, nothing is sent and the reservation released", async () => {
+    const { outcome, fake, h } = await run([{ kind: "message" }], { limits: { limits: { maxAttempts: 0 } } });
+    expect(outcome).toEqual({ kind: "unavailable", message: MODEL_CALL_MESSAGES.usage_unavailable });
+    expect(fake.messages()).toHaveLength(0);
+    expect(h.ledger.reservations[0]).toMatchObject({ status: "released", outcome: "attempts_exhausted" });
   });
 
   it("16. the same request id cannot reserve twice — no double registration", async () => {

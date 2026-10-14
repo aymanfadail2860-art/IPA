@@ -55,7 +55,7 @@ async function gatewayAs(key: SeedUserKey, replies: FakeReply[] = [], count?: nu
   const client = await signedInClient(key);
   const fake = fakeAnthropic({ replies, count });
   const transport = createAnthropicTransport({ modelId: MODEL, apiKey: FAKE_API_KEY, timeoutMs: 200, fetch: fake.fetch });
-  const model = createAnthropicModel({ config: { modelId: MODEL, apiKey: FAKE_API_KEY, effort: null }, transport, sleep: async () => {} });
+  const model = createAnthropicModel({ config: { modelId: MODEL, apiKey: FAKE_API_KEY, effort: null }, transport });
   const { data: me } = await client.schema("identity").rpc("current_user_id");
   const { data: permissions } = await client.schema("identity").rpc("my_permissions");
   const grants = (permissions ?? []) as { permission: string; scope: string }[];
@@ -186,14 +186,14 @@ describe.skipIf(!configured)("AI usage limits in the database (beta L4)", () => 
     expect(results.filter((r): r is PromiseRejectedResult => r.status === "rejected").map((r) => (r.reason as UsageLimitError).code)).toEqual(["active_user", "active_user", "active_user", "active_user"]);
   });
 
-  it("retries run under the one reservation and stop at the database's attempt limit", async () => {
+  it("529 is never retried and never released: one attempt, the reservation uncertain (for reconciliation)", async () => {
     await setLimits({ max_attempts: 2 });
     const { client, deps, fake } = await gatewayAs("advisorA", [{ kind: "error", status: 529 }, { kind: "error", status: 529 }, roleplayReply]);
     const session = await startRoleplay(client);
     sessions.push([client, session]);
     expect((await runGateway(turn(session), deps)).kind).toBe("unavailable");
-    expect(fake.messages()).toHaveLength(2);
-    expect(await reservations()).toEqual([expect.objectContaining({ status: "released", attempts: 2, outcome_code: "provider_overloaded" })]);
+    expect(fake.messages()).toHaveLength(1);
+    expect(await reservations()).toEqual([expect.objectContaining({ status: "uncertain", attempts: 1, outcome_code: "provider_overloaded" })]);
   });
 
   it("a timeout keeps the reservation in full (uncertain) — and it counts against the next call's budget", async () => {

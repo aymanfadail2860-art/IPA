@@ -10,6 +10,77 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-040 — L4 godkendt; L4b godkendt; regnskab ved HTTP-fejl uden automatiske gentagelser
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §16.18, §16.20, §17; `CLAUDE.md` §1; `docs/roadmap.md`;
+`src/lib/ai/providers/anthropic/`; `src/tests/live/`; `vitest.l4b.config.mts`
+
+**Beslutning:**
+- **L4 er godkendt** med grøn CI på commit `25fb1c5`.
+- **L4b er godkendt** som den første kontrollerede test med en rigtig Claude-model (`docs/beta.md`
+  §17). Rammerne er projektejerens:
+  - højst fire betalbare Messages-kald med syntetiske data: en rollespilsreplik og tre
+    Copilot-spørgsmål (klart dækket, tydelig undtagelse, kan ikke besvares);
+  - én gratis tokenoptælling til at afprøve inputloftet;
+  - ingen automatiske gentagelser;
+  - højst 3.000 output-tokens pr. kald;
+  - stop, hvis den samlede maksimale omkostning ville overstige 1,84 USD;
+  - stop ved en kritisk fejl.
+
+  Ingen migrationer mod hostet Supabase, ingen ændringer i Vercels produktionsmiljø og ingen
+  rigtige forsikringsdokumenter eller kundedata.
+- **Miljøet** er projektets cloud-udviklingsmiljø med lokal Supabase (projektejerens valg).
+  API-nøglen lægges af projektejeren som miljøvariabel i cloud-miljøets indstillinger og aldrig i
+  samtalen, Git eller en rapport.
+- **Regnskab ved HTTP-fejl** (projektejerens ordlyd):
+
+  > Godkend ikke som generel regel, at HTTP 429 og 5xx er gratis. En reservation må kun frigives,
+  > når den implementerede mekanisme sikkert kan fastslå, at der ikke er fakturerbart forbrug. Hvis
+  > det er usikkert, om en forespørgsel blev behandlet eller faktureret, skal reservationen forblive
+  > konservativt håndteret og markeres til afstemning. Ingen usynlige retries, der kan forbruge flere
+  > tokens end testplanen forudsætter.
+
+  Implementeret sådan:
+  - reservationen frigives kun, når udbyderen selv afviste forespørgslen før behandling: 400, 401,
+    402, 403, 404, 413 og 422;
+  - alt andet markeres usikkert og tæller fuldt, indtil det er afstemt: 429, 5xx, 529, enhver anden
+    HTTP-status, netværksfejl, timeout og afbrydelse;
+  - adapteren gentager aldrig et kald. Databasens `max_attempts` er et ekstra værn, og L4b sætter
+    den til 1;
+  - tokenoptællingen (`count_tokens`) er gratis efter Anthropics dokumentation. En fejl dér frigiver
+    fortsat.
+
+**Overvejede alternativer:**
+- *Frigive ved 429/5xx og gentage under samme reservation (L4's oprindelige adfærd).* Fravalgt af
+  projektejeren. Det byggede på en udledt antagelse om fakturering.
+- *Gentage med en ny reservation.* Fravalgt. En gentagelse er et nyt betalbart kald, som brugeren
+  ikke har bedt om.
+
+**Begrundelse:** Forbrugsgrænserne skal holde, også når udbyderen fejler. Kan det ikke fastslås,
+at et kald var gratis, må det ikke tælle som gratis.
+
+**Beslutninger i forberedelsen af L4b** (`docs/beta.md` §17):
+- **Et L4b-program uden for testsuiten** (`src/tests/live/l4b.live.ts`, `npm run l4b`). Det kører
+  ét trin ad gangen og bruger appens egen kæde: gatewayen, RLS som den rigtige rådgiver, ledgeren i
+  databasen, `product_documents`-retrieval og appens egen modelfabrik.
+- **Værnene læses fra databasen,** så en genkørsel aldrig kan overskride planen:
+  - højst fire sendte beskeder for modellen;
+  - summen af de sendte kalds maksimale omkostning er højst 1,84 USD;
+  - et tilfælde gentages aldrig;
+  - en kritisk fejl skriver en stopfil, som standser alle senere live-trin.
+- **Testkonfigurationerne tømmer API-nøglen.** Ingen almindelig testkørsel kan se den rigtige nøgle,
+  heller ikke i et miljø, der har den.
+
+**Udledt (til bekræftelse):**
+1. Statuskoderne 400, 401, 402, 403, 404, 413 og 422 betyder, at Anthropic afviste forespørgslen
+   før behandling og ikke fakturerer den.
+2. L4b's `product_documents`-konfiguration registreres med evalueringsmotorens fixture-rapport for
+   D1–D6. Den afprøver registrets mekanik, ikke metodens kvalitet (`docs/beta.md` §5.1, §17.4). Den
+   godkender hverken svarkvaliteten eller betaen.
+
+---
+
 ## B-039 — L3 godkendt; egen Anthropic Console-organisation til betaen; L4 godkendt til implementering
 
 **Dato:** 14. oktober 2026
@@ -99,7 +170,8 @@ fordi forbindelsen kun er konfiguration, kan IPA overtage den uden at røre forr
 2. Rigtige brugeres fritekst sendes først til Claude efter en beslutning om restrisiko og
    databehandling. L4b bruger syntetiske testprompter.
 3. Et HTTP-fejlsvar fra Anthropic faktureres ikke, så reservationen frigives og 429/5xx kan
-   gentages.
+   gentages. *(Ikke bekræftet. Afgjort anderledes i B-040: 429, 5xx og 529 er usikre, og intet
+   kald gentages.)*
 4. Retentionsperioder for AI-logs og forbrugsrækker er ikke besluttet, og ingen er opfundet.
 
 ---

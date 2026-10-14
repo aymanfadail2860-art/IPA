@@ -33,9 +33,11 @@ godkendt (B-038). **L3** (sikker dokumentimport uden AWS; `docs/beta.md` §15, r
 `docs/import-runbook.md`, B-038) er godkendt (B-039). Udestående for L3: selskab/udgiver har intet
 felt i datamodellen **[AFKLARES]**, og de hostede forudsætninger for den første rigtige import er
 ikke udført (`docs/beta.md` §15.7). **L4** (Claude-adapter, egress pr. profil, budget og
-forbrugsgrænser; `docs/beta.md` §16, B-039) er gennemført med fake transport og afventer
-godkendelse. Betaen bruger projektejerens egen Anthropic Console-organisation med en dedikeret
-server-side API-nøgle (B-039). Ingen rigtige betalbare Claude-kald før L4b er særskilt godkendt.
+forbrugsgrænser; `docs/beta.md` §16, B-039) er godkendt (B-040). **L4b** (den første kontrollerede
+test med en rigtig Claude-model; `docs/beta.md` §17, B-040) er godkendt og forberedt: højst fire
+betalbare kald med syntetiske data mod lokal Supabase i cloud-miljøet. Kaldene er ikke foretaget.
+Betaen bruger projektejerens egen Anthropic Console-organisation med en dedikeret server-side
+API-nøgle (B-039). L5 påbegyndes ikke uden godkendelse.
 Udestående før rigtig betadrift (`docs/beta.md` §11, §16.20): indholdsloggen over for L4's
 logkrav, retentionsperioder og rigtige brugeres fritekst til Claude **[AFKLARES]**.
 

@@ -51,3 +51,6 @@ next-env.d.ts
 *.pdf
 *.PDF
 importliste.csv
+
+# Beta L4b: the live test's state and reports (synthetic answers) stay local (docs/beta.md §17).
+/.l4b/

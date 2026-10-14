@@ -43,7 +43,8 @@ create table ai.usage_limits (
   user_daily_budget_usd numeric(12, 4) not null check (user_daily_budget_usd >= 0),
   -- Hvor længe en åben reservation holder en plads i samtidigheden (ikke i budgettet).
   reservation_ttl_seconds integer not null check (reservation_ttl_seconds between 30 and 3600),
-  -- Det højeste antal forsøg mod udbyderen under én reservation (første forsøg + retries).
+  -- Det højeste antal forsøg mod udbyderen under én reservation. Adapteren gentager aldrig et
+  -- kald (B-040) og bruger højst ét forsøg; grænsen er databasens værn.
   max_attempts integer not null check (max_attempts between 1 and 5),
   updated_by uuid references identity.users (id) on delete set null,
   updated_at timestamptz not null default now()
@@ -207,7 +208,8 @@ create table ai.usage_reservations (
   profile_id text not null check (ai.is_code(profile_id)),
   action text not null check (ai.is_code(action)),
   -- pending: åben. settled: afstemt med den faktiske usage. released: udbyderen behandlede
-  -- beviseligt ikke kaldet. uncertain: udbyderen kan have behandlet kaldet (netværksfejl, timeout).
+  -- beviseligt ikke kaldet. uncertain: udbyderen kan have behandlet kaldet (netværksfejl, timeout,
+  -- 429, 5xx og 529 — B-040); tæller fuldt, indtil det er afstemt.
   status text not null default 'pending' check (status in ('pending', 'settled', 'released', 'uncertain')),
   reserved_input_tokens integer not null check (reserved_input_tokens > 0),
   reserved_output_tokens integer not null check (reserved_output_tokens > 0),

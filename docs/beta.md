@@ -1,11 +1,11 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
-**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026; B-038 og
-B-039, 14. oktober 2026.
+**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026; B-038,
+B-039 og B-040, 14. oktober 2026.
 **Status:** L0 og L1 er godkendt (B-036). L1.1 (§13) og L2 (§14, B-037) er godkendt (B-038). L3
 (sikker dokumentimport, §15) er godkendt (B-039). L4 (Claude-adapter, egress pr. profil, budget og
-forbrugsgrænser, §16) er gennemført på branchen `beta/fast-beta-without-aws` med fake transport og
-afventer godkendelse. L4b–L9 er ikke påbegyndt.
+forbrugsgrænser, §16) er godkendt (B-040). L4b (§17) er godkendt og forberedt; de betalbare kald er
+ikke foretaget. L5–L9 er ikke påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -492,8 +492,8 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 | L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Godkendt (B-038) |
 | L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Godkendt (B-038) |
 | L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Godkendt (B-039) |
-| L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Gennemført, afventer godkendelse (§16) |
-| L4b | Første rigtige Claude-kald (kun efter særskilt godkendelse) | Ikke påbegyndt |
+| L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Godkendt (B-040) |
+| L4b | Første rigtige Claude-kald (højst fire, syntetiske data, §17) | Godkendt og forberedt; kaldene er ikke foretaget |
 | L5 | Copilot (produktvalg, svarkontrakt med dækning/undtagelser/begrænsninger, kildevalidering) | Ikke påbegyndt |
 | L6 | Learn | Ikke påbegyndt |
 | L7 | Practice | Ikke påbegyndt |
@@ -1101,7 +1101,7 @@ To huller blev fundet og lukket før den endelige kørsel:
 
 ---
 
-## 16. L4 — Claude-adapter, egress pr. profil, budget og forbrugsgrænser (gennemført, afventer godkendelse; B-039)
+## 16. L4 — Claude-adapter, egress pr. profil, budget og forbrugsgrænser (godkendt, B-040)
 
 Specifikationen er godkendt til implementering 14. oktober 2026 (B-039). Den gengives her, så
 repoet og ikke en chatlog er kilden. Implementeringen står i §16.14 ff.
@@ -1145,6 +1145,9 @@ afprøves fuldt ud med fake transport.
   - 401, 403, 429, 5xx og netværksfejl håndteres hver for sig;
   - providerens `retry-after` respekteres;
   - der stoppes ved budgetfejl.
+
+  *Præciseret i B-040: adapteren gentager aldrig et kald, og 429/5xx frigiver ikke reservationen
+  (§16.18).*
 - Ingen rigtige API-kald i L4. Tests bruger fake transport.
 - Adapteren genbruges af Copilot, Learn og Practice gennem de eksisterende gateway-profiler.
   Assessment følger fortsat sine særskilte prøveregler.
@@ -1411,17 +1414,19 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
     priserne på reservationstidspunktet);
   - åbne og usikre kald med den fulde reserverede omkostning;
   - frigivne kald med 0.
-- **Frigivelse** sker kun, når udbyderen beviseligt ikke behandlede kaldet:
-  - et HTTP-fejlsvar;
+- **Frigivelse** sker kun, når det sikkert kan fastslås, at der ikke er fakturerbart forbrug
+  (B-040):
+  - udbyderen afviste selv forespørgslen før behandling: 400, 401, 402, 403, 404, 413 eller 422;
   - en afvisning før afsendelse;
-  - tokenoptællingen over loftet.
-- **Netværksfejl og timeout** markerer reservationen som usikker. Den tæller fuldt, frigives
-  aldrig og gentages ikke. Et afbrudt kald, der aldrig afsluttes, tæller også fuldt.
-- **Retries:** 429, 529 og 5xx gentages efter udbyderens `retry-after` (højst 20 sekunder) eller en
-  kort backoff. Det sker under samme reservation og højst `max_attempts` gange, hvilket databasen
-  håndhæver (`ai.begin_attempt`). Andre HTTP-fejl stopper kaldet: 401/403 som konfiguration, 402 som
-  budget og 400/404/413/422 som afvist. Ét request-id giver én reservation, så der sker ingen
-  dobbeltregistrering.
+  - tokenoptællingen over loftet (optællingen er gratis).
+- **Usikker** er alt andet: 429, 5xx, 529, enhver anden HTTP-status, netværksfejl, timeout og
+  afbrydelse. Reservationen tæller fuldt, frigives ikke og markeres til afstemning. Et afbrudt
+  kald, der aldrig afsluttes, tæller også fuldt.
+- **Ingen gentagelser:** adapteren sender én besked pr. kald og gentager den aldrig, heller ikke
+  efter `retry-after`. En gentagelse er et nyt betalbart kald, som brugeren ikke har bedt om.
+  Databasens `max_attempts` (`ai.begin_attempt`) er et ekstra værn. HTTP-fejl kategoriseres for
+  brugeren: 401/403 som konfiguration, 402 som budget, 400/404/413/422 som afvist og 429/5xx/529 som
+  utilgængelig. Ét request-id giver én reservation, så der sker ingen dobbeltregistrering.
 - **Tokenbudget:** udbyderens egen tokenoptælling (`count_tokens`, gratis) afgør loftet, før
   beskeden sendes. Gatewayens lokale estimat (4 tegn pr. token, bevidst optimistisk) afviser kun
   et grundlag, der klart er for stort, før noget forlader platformen. Estimatet fremstilles aldrig
@@ -1476,15 +1481,15 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
    - L4b begrænses til kontrollerede, syntetiske testprompter (§16.5);
    - rigtige rådgiveres fritekst må først sendes til Claude efter en beslutning om restrisiko og
      databehandling (K7, §11).
-3. **Udledt, til bekræftelse:** et HTTP-fejlsvar (429, 5xx, 529) betyder, at udbyderen ikke
-   behandlede kaldet og ikke fakturerer det. Derfor frigives reservationen, og 429/5xx kan
-   gentages. Ved netværksfejl og timeout antages det modsatte.
+3. **Afgjort i B-040 (ikke bekræftet som udledt):** et HTTP-fejlsvar på 429, 5xx eller 529 regnes
+   ikke for gratis. Reservationen markeres usikker og tæller fuldt, og intet kald gentages. Kun
+   400, 401, 402, 403, 404, 413 og 422 frigiver (§16.18).
 4. **Outputloftet og thinking.** Nogle modeller tænker altid, og tænketokens tæller i
    outputloftet på 3.000. Et svar, der rammer loftet, vises ikke (det er afstemt og betalt). L4b
    måler det. `IPA_AI_EFFORT` kan sænkes uden kodeændring.
-5. **Varighed på Vercel.** Et forsøg har højst 120 sekunder, og der er op til tre forsøg.
-   Funktionens maksimale varighed på Vercel skal passe til det; ellers afbrydes kaldet, og
-   reservationen tæller fuldt. Det er en L4b-forudsætning.
+5. **Varighed på Vercel.** Et kald har højst 120 sekunder og ét forsøg (B-040). Funktionens
+   maksimale varighed på Vercel skal passe til det; ellers afbrydes kaldet, og reservationen tæller
+   fuldt. Det skal afklares, før Claude kører på Vercel (L4b kører i cloud-miljøet, §17).
 6. **Rate limits gælder kun eksterne modeller.** Stubben (kun lokalt og i test) reserverer intet.
 7. **`count_tokens` sender indholdet til Anthropic** (gratis, men det forlader platformen). Kaldet
    logges derfor som sendt, også når beskeden aldrig sendes.
@@ -1552,6 +1557,10 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
   - inputloft uden prisens gyldighed;
   - dublet-request tilladt.
 
+Efter B-040 er gentagelseskoden fjernet. Mutationerne "timeout gentaget" og "`retry-after`
+ignoreret" har derfor intet at ramme mere. De er erstattet af mutationer, der genindfører en
+gentagelse eller frigiver ved 429/5xx (§17.8).
+
 ### 16.23 Verifikation (lokalt)
 
 - **lint, typecheck og build:** bestået. Builden er kørt med en sentinel-nøgle, og
@@ -1565,7 +1574,7 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
 - Ingen rigtige Anthropic-kald, ingen API-nøgle, ingen hostet migration, ingen rigtige dokumenter
   og ingen betalte ressourcer.
 
-### 16.24 L4b — forudsætninger (ikke udført)
+### 16.24 L4b — forudsætninger (se §17 for planen)
 
 1. En dedikeret API-nøgle i projektejerens Anthropic Console-organisation, kun til Insurance
    Partners, med en uafhængig månedlig forbrugsgrænse sat i Console.
@@ -1577,3 +1586,178 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
    regler i datakategori-matricen for modellen.
 5. Funktionens maksimale varighed på Vercel passer til timeouts og forsøg (§16.20, punkt 5).
 6. Kun et syntetisk dokument og kontrollerede, syntetiske testprompter (§16.20, punkt 2).
+
+---
+
+## 17. L4b — første kontrollerede test med en rigtig Claude-model (godkendt, forberedt; B-040)
+
+L4 er godkendt på commit `25fb1c5`, og L4b er godkendt (B-040). Afsnittet er planen og
+overdragelsen: en ny session i cloud-miljøet skal kunne gennemføre L4b herfra uden den samtale,
+der forberedte den.
+
+### 17.1 Miljø og afgrænsning
+
+- **Cloud-udviklingsmiljøet** med lokal Supabase (`npx supabase start`), branchen
+  `beta/fast-beta-without-aws`. Ingen hostet Supabase, intet Vercel-produktionsmiljø, ingen merge
+  til main.
+- **Ét syntetisk dokument:** fiktive betingelser for erhvervsansvar med dækning (§ 2), undtagelser
+  (§ 3) og forsikringssum og selvrisiko (§ 4). Det ligger kun i L4b-programmet, aldrig som fil i
+  repoet. Ingen rigtige forsikringsdokumenter og ingen kundedata.
+- **Model og nøgle:** modellen er den, projektejeren har godkendt til L4b. Den står i godkendelsen
+  og i miljøet (`IPA_AI_MODEL`), ikke i repoet. Nøglen er en dedikeret nøgle i projektejerens
+  Anthropic Console-organisation, i et eget workspace med en forbrugsgrænse på 10 USD. Projektejeren
+  lægger den selv ind som miljøvariablen `IPA_ANTHROPIC_API_KEY` i cloud-miljøets indstillinger og
+  fjerner den efter L4b. Den skrives aldrig i samtalen, Git, en rapport eller en log.
+  `IPA_AI_EFFORT=low`.
+- **Afvigelser fra den fulde kæde (meldes i rapporten):**
+  - Kaldene går gennem appens egen kæde (gatewayen, RLS som rådgiveren, ledgeren i databasen,
+    `product_documents`-retrieval og appens modelfabrik), men ikke gennem Next.js-brugerfladen.
+    Practice har ingen brugerflade endnu, og Copilot mangler produktvalg (L5).
+  - Dokumentet går gennem Admin-uploadens vej og workerens sikkerhedskæde med den lokale
+    udviklingsscanner, ikke L3's Docker-import med ClamAV.
+  - `product_documents`-konfigurationen registreres med evalueringsmotorens fixture-rapport for
+    D1–D6 og godkendes og aktiveres af administratoren som i integrationstesten. Det afprøver
+    registrets mekanik, ikke metodens kvalitet (§5.1).
+
+### 17.2 Planen
+
+Højst fire betalbare Messages-kald, ét ad gangen. Hvert resultat vurderes, før det næste sendes.
+
+| # | Tilfælde | Forventet |
+|---|---|---|
+| 1 | Practice: en kort rollespilsreplik | En kort, afsluttet replik fra den fiktive kunde |
+| 2 | Copilot: klart dækket (skade på kundens ting hos kunden) | Svar med citationer til § 2.1 |
+| 3 | Copilot: tydelig undtagelse (en kundes maskine modtaget til reparation) | Ikke dækket; citerer § 3.1. Må ikke fremstille skaden som dækket |
+| 4 | Copilot: kan ikke besvares (årspræmien) | Utilstrækkeligt grundlag; ingen opfundet pris, dækning eller citation |
+
+Dertil én gratis tokenoptælling, der afprøver inputloftet: samme forespørgsel som tilfælde 2 med
+loftet sat én token under udbyderens optælling for tilfælde 2. Kaldet skal afvises før afsendelse,
+og reservationen frigives.
+
+**Grænser** (håndhævet i programmet og i databasen):
+
+- højst 3.000 output-tokens pr. kald og ét forsøg (`max_attempts` = 1);
+- ingen automatiske gentagelser, og et fejlet kald erstattes aldrig af et nyt;
+- inputloftet og reservationssystemet gælder uændret, og inputtet optælles af udbyderen før
+  afsendelse;
+- stop, hvis summen af de sendte kalds maksimale omkostning ville overstige 1,84 USD (fire kald à
+  0,46 USD ved 100.000 input- og 3.000 output-tokens til 4 og 20 USD pr. million). Databasens
+  globale dagsbudget sættes også til 1,84 USD;
+- stop ved global eller brugerens grænse, ukendt pris, usikker reservation eller fejlet
+  autorisation;
+- stop ved en kritisk fejl: andet udfald end forventet, en reservation, der ikke er afstemt, mere
+  end ét forsøg, en reserveret omkostning, der afviger fra planen, et grundlag med andet end den
+  syntetiske, godkendte version, eller en citation uden for grundlaget.
+
+### 17.3 Programmet
+
+`src/tests/live/l4b.live.ts` kører med `npm run l4b` og kun med `vitest.l4b.config.mts`
+(`IPA_RUNTIME_ENV=local`). Det hører ikke til nogen testsuite og gør intet uden `IPA_L4B_STEP`. De
+almindelige testkonfigurationer tømmer API-nøglen.
+
+| Trin | `IPA_L4B_STEP` | Hvad |
+|---|---|---|
+| 1 | `setup` | Produkt, dokument (karantæne, scanning, worker, gennemgang, godkendelse), rådgiverens tildeling og en aktiv `product_documents`-konfiguration. Kontrollerer production-evidens for rådgiveren og intet for en anden rådgiver |
+| 2 | `dry` | De fire tilfælde og loftstesten gennem hele kæden med falsk transport og et fiktivt model-id. Intet netværk. Rydder sine egne rækker op |
+| 3 | `price` | Godkender modellen med de verificerede priser (`IPA_L4B_PRICE`, `IPA_L4B_PRICE_SOURCE`), de smalle matrice-rækker og L4b-grænserne |
+| 4 | `live` + `IPA_L4B_CASE` | Ét betalbart tilfælde. Kræver `IPA_L4B_CONFIRM=ja` |
+| 5 | `ceiling` | Loftstesten (efter tilfælde 2). En besked kan ikke sendes: en vagt i `fetch` lader kun tokenoptællingen gå til API'et |
+| 6 | `teardown` | Deaktiverer modellen og gendanner grænserne. Samlet forbrug fra databasen |
+
+**Værn, læst fra databasen før hvert live-trin**, så en genkørsel aldrig kan overskride planen:
+
+- ingen stopfil (`.l4b/halted`);
+- nøglen findes (den skrives aldrig ud), og effort er `low`;
+- modellen er godkendt med pris;
+- matricen rummer præcis de smalle rækker;
+- `max_output_tokens` er 3.000, `max_attempts` er 1, og det globale dagsbudget er højst 1,84 USD;
+- færre end fire sendte beskeder for modellen;
+- summen af maksimal omkostning plus næste kald er højst 1,84 USD;
+- ingen åben eller usikker reservation;
+- tilfældet er ikke kørt før. Det registreres, før kaldet sendes.
+
+**Datakategorier for modellen:** `knowledge` tillad, `user_question` tillad efter redaction,
+`training_fictional` tillad, `customer_identifiable` og `audit_access` afvis. Der er ingen
+`learning`-række; Learn indgår ikke. Det er ingen generel godkendelse af sagsbundet fritekst
+(§16.20, punkt 2).
+
+Rapporterne ligger i `.l4b/` og ignoreres af Git. Svarene er syntetiske og står kun dér, så en
+person kan vurdere dem.
+
+### 17.4 Forberedt og afprøvet (uden betalte kald)
+
+- **Regnskab ved HTTP-fejl (B-040)** i `errors.ts` og `model.ts`. `claude-adapter.test.ts` §15–16
+  er skrevet om, og integrationstesten viser, at 529 giver ét forsøg og en usikker reservation.
+- **Programmet** er kørt mod en frisk lokal Supabase fra `npx supabase start`:
+  - `setup` gav fem uddrag, production-evidens for rådgiveren og intet for en anden rådgiver;
+  - `dry` bestod alle fire tilfælde. Hver gav én besked med `max_tokens` 3.000 og effort `low`, en
+    afstemt reservation på 0,46 USD og ét forsøg. Loftstesten blev afvist af udbyderens optælling
+    og frigivet uden afsendelse;
+  - live-trinnet afviste uden bekræftelse og uden nøgle;
+  - `price` og `teardown` er afprøvet med et fiktivt model-id.
+- Kvalitetskontrollen i tilfælde 3 markerede korrekt, at den falske transports svar ikke citerede
+  undtagelsen. Kontrollen virker; den falske transport svarer ikke fagligt.
+
+### 17.5 Overdragelse: sådan gennemføres L4b i en ny session
+
+1. **Nøglen:** projektejeren har sat `IPA_ANTHROPIC_API_KEY` i cloud-miljøets miljøvariabler.
+   Kontrollér kun længden, aldrig værdien.
+2. **Lokal Supabase:** start Docker (`dockerd`), kør
+   `npx supabase start -x studio,imgproxy,realtime,edge-runtime,logflare,vector,supavisor,postgres-meta`
+   og skriv `.env.local` som CI-jobbet `database` (URL, anon-nøgle, service role, et tilfældigt
+   seed-password og `IPA_TEST_DB_ADMIN_URL`). Kør `npm run db:seed`.
+3. **Grøn CI** på branchens seneste commit. Kør lint, typecheck og enhedstests lokalt.
+4. **Verificér modellen, priserne og adgangen** mod Anthropics officielle dokumentation og den
+   faktiske Console: model-id, pris pr. million input- og output-tokens, cache-priser,
+   kontekstvindue og maksimal output. Kontrollér desuden adgangen med modellens metadata fra
+   `GET /v1/models/<model>`, som er gratis og ikke genererer noget. Afvig fra de godkendte priser →
+   stop.
+5. `IPA_L4B_STEP=setup npm run l4b`, derefter `IPA_L4B_STEP=dry npm run l4b`.
+6. `IPA_L4B_STEP=price` med `IPA_AI_MODEL`, `IPA_L4B_PRICE` (input, output, cache write, cache
+   read, kontekstvindue, maksimal output) og `IPA_L4B_PRICE_SOURCE` (kilde og dato).
+7. `IPA_L4B_STEP=live IPA_L4B_CASE=1 IPA_L4B_CONFIRM=ja IPA_AI_EFFORT=low npm run l4b`. Vurdér
+   rapporten (svar, usage, pris, latency, citationer, afstemning, fejl), før næste tilfælde. Derefter
+   2, `ceiling`, 3 og 4. Ved en kritisk fejl standser programmet. Der fortsættes ikke uden
+   projektejerens beslutning.
+8. `IPA_L4B_STEP=teardown`. Sammenlign det samlede forbrug med Console.
+9. **Slutrapport** med de ti punkter fra godkendelsen. Stop efter L4b; L5 påbegyndes ikke uden
+   godkendelse.
+
+### 17.6 Hvad L4b ikke beviser
+
+Et bestået transportkald beviser ikke, at Copilot er produktionsklar. L4b validerer hverken
+brugerfladen, den endelige svarkontrakt, visningen af citater eller svarkvaliteten over et
+evalueringssæt. Det hører til L5 og L9.
+
+### 17.7 Udskudte beslutninger (må ikke glemmes)
+
+- **Logpolitik:** indholdsloggen over for L4's logkrav (§16.20, punkt 1).
+- **Rigtige rådgiveres fritekst** til Claude (§16.20, punkt 2).
+- **Retention** for AI-logs og forbrugsrækker (§16.19).
+- **Databehandling og licenser** for dokumenter og AI (§11, K7).
+- **Selskab og udgiver** i dokumenternes metadata (§15).
+
+### 17.8 Verifikation af forberedelsen (lokalt)
+
+- **lint og typecheck:** bestået.
+- **Enhedstests:** 1040 bestået og 4 sprunget over. Heraf er 6 nye værnstests
+  (`l4b-harness.test.ts`), og §15–16 i `claude-adapter.test.ts` er skrevet om.
+- **pgTAP:** 1059 bestået på en frisk database.
+- **Integration** mod en frisk lokal Supabase: 146 bestået, 38 sprunget over (rutetests uden app og
+  Docker-importen).
+- **Mutationer:** 14 nye, alle dræbt:
+  - 429 frigives;
+  - 5xx frigives;
+  - alle HTTP-fejl frigives;
+  - en usikker reservation frigives;
+  - gentagelse genindført;
+  - 400 usikker;
+  - forsøgsgrænsen ignoreret;
+  - nøglen ikke tømt i testkonfigurationen;
+  - L4b med fem kald;
+  - L4b med et loft på 2 USD;
+  - frigivne kald talt som sendt;
+  - live uden bekræftelse;
+  - loftstesten kan sende en besked;
+  - tilfældet registreres ikke før kaldet.
+- Ingen rigtige Anthropic-kald, ingen API-nøgle, ingen hostet migration og ingen rigtige dokumenter.

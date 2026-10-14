@@ -17,7 +17,7 @@ export const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
 export const API_KEY_ENV_NAME = "IPA_ANTHROPIC_API_KEY";
 export const ANTHROPIC_EFFORT_ENV = "IPA_AI_EFFORT";
 
-/** Per attempt at the provider. A call has at most ai.usage_limits.max_attempts attempts. */
+/** Per call at the provider. The adapter makes one attempt and never retries (model.ts). */
 export const ANTHROPIC_TIMEOUT_MS = 120_000;
 
 /**
