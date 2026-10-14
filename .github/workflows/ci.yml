@@ -182,10 +182,15 @@ jobs:
           docker compose -f deploy/import/compose.yaml build --no-cache clamav
           docker compose -f deploy/import/compose.yaml build worker
 
+      # TEST CONFIGURATION ONLY (B-038, clarified 14 October 2026): CI proves that the real scanner
+      # builds, starts, scans a clean file clean and finds EICAR — not how often ClamAV publishes. It
+      # therefore accepts official signatures up to 24 hours old (ClamAV's own release limit). The
+      # actual import keeps the 8-hour limit: deploy/import/ipa-import.sh passes no limit, so the
+      # check's default of 8 hours applies (src/tests/import-signature-age.test.ts).
       - name: Start the scanner and run the import's scanner check
         run: |
           docker compose -f deploy/import/compose.yaml up -d --wait clamav
-          docker compose -f deploy/import/compose.yaml run --rm -T --entrypoint node worker scripts/verify-clamav-scanner.ts --host clamav --port 3310 | tee "$RUNNER_TEMP/scanner-check.json"
+          docker compose -f deploy/import/compose.yaml run --rm -T --entrypoint node worker scripts/verify-clamav-scanner.ts --host clamav --port 3310 --max-age-hours 24 | tee "$RUNNER_TEMP/scanner-check.json"
           jq -e '.ok == true and .engineVersion == "1.4.6"' "$RUNNER_TEMP/scanner-check.json"
 
       - name: The running scanner keeps its isolation

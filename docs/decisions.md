@@ -170,6 +170,28 @@ en klient, der kan genoptages, og et bevis for, at hele versionen er gemt.
 3. `sider` er valgfri, men anbefalet.
 4. Der køres én import ad gangen og fra én maskine.
 
+**Præcisering (14. oktober 2026, projektejerens beslutning efter L4's CI):** CI-jobbet
+`import-scanner` kører scannerkontrollen med `--max-age-hours 24`.
+- **Hvorfor:** jobbet fejlede to gange på rad med signaturer, der var 12 og 15 timer gamle. ClamAV
+  havde ikke udgivet nye officielle signaturer i det tidsrum. Jobbet skal bevise, at den rigtige
+  scanner kan bygges, starte, scanne en ren fil ren og finde EICAR. Det skal ikke afhænge af, hvor
+  ofte ClamAV udgiver.
+- **Ren testkonfiguration.** Grænsen på 24 timer står kun i CI-trinnet i
+  `.github/workflows/ci.yml`. Den når hverken importen, workeren eller nogen runtime-konfiguration.
+- **Den faktiske import kræver fortsat højst 8 timer gamle signaturer.** `deploy/import/ipa-import.sh`
+  angiver ingen grænse, så scannerkontrollens standard på 8 timer gælder. Det er uændret.
+- **Uændret:** workerens egen regel (den aktive sikkerhedspolitik i databasen, 24 timer, ellers
+  `stale_signatures`), arbejdsgangen for motorkandidater (8 timer) og alle øvrige
+  sikkerhedskontroller.
+- **Bevis:** `src/tests/import-signature-age.test.ts` er deterministisk. Den kører importens egen
+  kontrol mod en falsk scanner med en fast signaturalder: 8 timer og 10 minutter afvises, 7 timer og
+  50 minutter godkendes. Grænsen prøves præcist med et fast ur. Testen fastslår også, at 24 timer
+  kun findes i CI-trinnet. Fem mutationer af grænsen er fanget.
+- **Grænsen hæves ikke yderligere** uden en ny beslutning. Fejler CI fortsat på grund af
+  signaturernes alder, rapporteres det.
+
+Den oprindelige tekst ovenfor er ikke ændret.
+
 ---
 
 ## B-037 — AWS fjernet fra den aktive beta; skjulte områder (beta L2)

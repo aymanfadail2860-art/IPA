@@ -907,7 +907,7 @@ sikkerhedskæde uændret og bygger ikke en parallel pipeline. Runbooken for admi
 | Indstillinger | `deploy/import/ipa-import.env.example` | Skabelon uden adgangskoder |
 | Image | `deploy/ingestion-worker/Dockerfile` | Samme image til worker, import og scannerkontrol. Base-image låst efter digest |
 | Scanner | `deploy/clamav/clamd.conf` | `TCPAddr 0.0.0.0`, så sundhedskontrollen virker uden IPv6 (§15.8) |
-| CI | `.github/workflows/ci.yml` | Jobbet `import-scanner` bygger den rigtige scanner og kontrollerer den |
+| CI | `.github/workflows/ci.yml` | Jobbet `import-scanner` bygger den rigtige scanner og kontrollerer den (signaturer op til 24 timer i CI; importen kræver 8 timer, §15.5) |
 
 ### 15.2 Kæden
 
@@ -978,7 +978,11 @@ version til betaens budget (§5.3) og adgangstildelingerne.
   - signaturer under 8 timer;
   - at EICAR bliver fundet, og at en ren fil er ren.
 
-  Den kører ved `forbered` og igen før hver `importer`.
+  Den kører ved `forbered` og igen før hver `importer`. Importen angiver ingen grænse, så kontrollens
+  standard på 8 timer gælder. CI-jobbet `import-scanner` kører den samme kontrol med
+  `--max-age-hours 24`. Det er ren testkonfiguration, som beviser, at den rigtige scanner bygges,
+  starter og scanner. Det påvirker aldrig importen eller runtime (præcisering af B-038, 14. oktober
+  2026; `src/tests/import-signature-age.test.ts`).
 - **Scanneren bygges uden cache** før hver import. Et cachet `freshclam`-lag ville ellers genbruge
   gamle signaturer (§15.8).
 - **Importen** kører som tjenesten `import`:
@@ -1554,8 +1558,8 @@ Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
   bundle-kontrollen finder hverken værdien, variabelnavnet, SDK'et eller API-hosten i browserens
   filer. Værdien findes heller ikke i serverbuilden. En negativ kontrol med en plantet værdi bliver
   fanget.
-- **Enhedstests:** 1023 bestået og 4 sprunget over (de fire motorkandidat-tests fra L3). Der var
-  965 i L3.
+- **Enhedstests:** 1030 bestået og 4 sprunget over (de fire motorkandidat-tests fra L3). Der var
+  965 i L3. Heraf er 7 fra præciseringen af B-038 (§15.5).
 - **pgTAP:** 1059 bestået (1005 + 54 nye). Kørt før og igen efter alle integrationstests.
 - **Integration:** 178 bestået og 6 sprunget over (de samme seks som i L3). Der var 168 i L3.
 - Ingen rigtige Anthropic-kald, ingen API-nøgle, ingen hostet migration, ingen rigtige dokumenter
