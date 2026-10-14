@@ -1,5 +1,5 @@
 import type { EvidenceSet } from "../../src/lib/knowledge/core/evidence.ts";
-import type { RetrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
+import type { RetrievalFingerprintMaterial, RetrievalMethod } from "../../src/lib/knowledge/core/provider.ts";
 
 /**
  * Retrieval evaluation (docs/08b §4–§5, 8B-I1). Types shared by the engine.
@@ -116,7 +116,7 @@ export interface EvalSet {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Gate set (docs/08b §4.4). Only Q1–Q7 thresholds are data. H1–H7 are code (hard-gates.ts).
+// Gate sets (docs/08b §4.4; B-036). Only thresholds are data. H1–H7 are code (gates.ts).
 // ---------------------------------------------------------------------------------------------
 
 export const QUALITY_GATE_IDS = ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7"] as const;
@@ -124,6 +124,14 @@ export type QualityGateId = (typeof QUALITY_GATE_IDS)[number];
 
 export const HARD_GATE_IDS = ["H1", "H2", "H3", "H4", "H5", "H6", "H7"] as const;
 export type HardGateId = (typeof HARD_GATE_IDS)[number];
+
+/**
+ * The quality gates of product_documents (B-036). The method delivers whole documents, so ranking
+ * (Q1–Q3, Q7) and retrieval-side abstention (Q4–Q5) have no meaning for it. These gates measure
+ * what it must do instead: deliver the complete, valid, authorized basis of exactly one product.
+ */
+export const DOCUMENT_GATE_IDS = ["D1", "D2", "D3", "D4", "D5", "D6"] as const;
+export type DocumentGateId = (typeof DOCUMENT_GATE_IDS)[number];
 
 export type Comparator = ">=" | "<=" | "not_lower";
 
@@ -134,13 +142,46 @@ export interface QualityGateSpec {
   threshold?: number;
 }
 
-export interface GateSet {
+/** A document gate is an invariant: share 1 (no case may miss). Locked in code (schema.ts). */
+export interface DocumentGateSpec {
+  metric: DocumentMetricId;
+  comparator: ">=";
+  threshold: 1;
+}
+
+/** The gate set of the ranking (hybrid) method, 8B. Has no "method" field (B-020, gates-v1). */
+export interface HybridGateSet {
   id: string;
   version: number;
   /** The decision that approved this gate set (docs/decisions.md). */
   decision: string;
+  description?: string;
   k: number;
   quality: Record<QualityGateId, QualityGateSpec>;
+}
+
+/**
+ * The gate set of product_documents (B-036). It names its method and can evaluate — and so
+ * approve — only a configuration of that method. K is the whole set: nothing is ranked.
+ */
+export interface DocumentGateSet {
+  id: string;
+  version: number;
+  decision: string;
+  description?: string;
+  method: "product_documents";
+  quality: Record<DocumentGateId, DocumentGateSpec>;
+}
+
+export type GateSet = HybridGateSet | DocumentGateSet;
+
+export function isDocumentGateSet(gates: GateSet): gates is DocumentGateSet {
+  return "method" in gates;
+}
+
+/** The retrieval method a gate set is for. A gate set without "method" is the hybrid one. */
+export function gateSetMethod(gates: GateSet): RetrievalMethod {
+  return isDocumentGateSet(gates) ? gates.method : "hybrid";
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -174,6 +215,16 @@ export interface RetrievalRun {
   raw?: unknown;
   /** chunk id → chunker version, for P7/H6. Missing entries count as uncovered (fail-closed). */
   chunkerVersions: Record<string, string>;
+  /**
+   * document version id → its number of chunks in the corpus. Required for product_documents
+   * (B-035): H6 verifies that every version of the basis is included in full.
+   */
+  versionChunkCounts?: Record<string, number>;
+  /**
+   * chunk id → sha256 of the chunk's text in the corpus. Required for product_documents (B-036):
+   * H6 and D3 verify that every chunk is delivered unabridged.
+   */
+  chunkDigests?: Record<string, string>;
 }
 
 export interface RetrievalUnderTest {
@@ -229,7 +280,53 @@ export interface CaseObservation {
   distractorItems: number;
   violations: Violation[];
   error: string | null;
+  /**
+   * product_documents only (B-036): what the basis held compared with what it must hold. Null
+   * when the retrieval failed. Absent in reports of the hybrid method.
+   */
+  documents?: DocumentObservation | null;
 }
+
+/**
+ * The basis of one case (B-036). "Expected" is derived from the manifest: every document of the
+ * case's product in the case's language, document types and documents, that the actor may read,
+ * in the version valid on the date. "Delivered" is what the retrieval returned for that basis.
+ */
+export interface DocumentObservation {
+  expectedVersions: number;
+  deliveredVersions: number;
+  /** Expected versions not delivered. */
+  missingVersions: number;
+  /** Delivered versions in the basis that are not expected (wrong version, no access, unknown). */
+  unexpectedVersions: number;
+  missingDocuments: number;
+  unexpectedDocuments: number;
+  /** Delivered versions that are not complete, contiguous, in chunk order and unabridged. */
+  incompleteVersions: number;
+  /** The retrieval was asked for exactly the case's product. */
+  productQueried: boolean;
+  /** Items from another product than the case's. */
+  foreignProductItems: number;
+  /** The facit's source versions, and how many of them were delivered. */
+  requiredDocuments: number;
+  requiredDocumentsCovered: number;
+  /** The facit's required passages (grade 3), and how many are covered anywhere in the set. */
+  requiredPassages: number;
+  requiredPassagesCovered: number;
+}
+
+export const DOCUMENT_METRIC_IDS = [
+  "required_document_coverage",
+  "required_passage_coverage",
+  "full_document_integrity",
+  "valid_version_coverage",
+  "correct_product_scope",
+  "authorized_document_coverage",
+] as const;
+export type DocumentMetricId = (typeof DOCUMENT_METRIC_IDS)[number];
+
+/** The metrics of product_documents (B-036): shares of cases, each with its Wilson interval. */
+export type DocumentMetrics = Record<DocumentMetricId, MetricValue>;
 
 export const METRIC_IDS = [
   "source_recall_at_k",
@@ -286,8 +383,8 @@ export interface HardGateResult {
 }
 
 export interface QualityGateResult {
-  id: QualityGateId;
-  metric: MetricId;
+  id: QualityGateId | DocumentGateId;
+  metric: MetricId | DocumentMetricId;
   comparator: Comparator;
   threshold: number | null;
   value: number | null;

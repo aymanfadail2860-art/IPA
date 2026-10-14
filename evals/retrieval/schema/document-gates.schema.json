@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://insurance-partners.invalid/evals/retrieval/document-gates.schema.json",
+  "title": "Gate-sæt med dokumentgates D1–D6 for product_documents (docs/beta.md §5.1, B-036)",
+  "description": "Metrik, retning og tærskel er låst (evals/engine/gates.ts, LOCKED_DOCUMENT_GATES). Hver gate er en invariant: andelen af spørgsmål, der opfylder kravet, skal være 1. De hårde gates H1–H7 er invarianter med nul tolerance og må ikke stå i et gate-sæt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "decision", "method", "quality"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "decision": { "type": "string", "pattern": "^B-\\d{3}$" },
+    "description": { "type": "string", "minLength": 1 },
+    "method": { "const": "product_documents" },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["D1", "D2", "D3", "D4", "D5", "D6"],
+      "properties": {
+        "D1": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "required_document_coverage" } } },
+        "D2": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "required_passage_coverage" } } },
+        "D3": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "full_document_integrity" } } },
+        "D4": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "valid_version_coverage" } } },
+        "D5": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "correct_product_scope" } } },
+        "D6": { "$ref": "#/$defs/invariant", "properties": { "metric": { "const": "authorized_document_coverage" } } }
+      }
+    }
+  },
+  "$defs": {
+    "invariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "comparator", "threshold"],
+      "properties": { "metric": { "type": "string" }, "comparator": { "const": ">=" }, "threshold": { "const": 1 } }
+    }
+  }
+}

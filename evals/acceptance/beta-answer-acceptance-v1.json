@@ -1,0 +1,14 @@
+{
+  "id": "beta-answer-acceptance",
+  "version": 1,
+  "decision": "B-036",
+  "description": "Beta-acceptkriterierne for Claudes færdige svar (docs/beta.md §5.2). Låst i evals/engine/acceptance.ts og ai.record_answer_quality. Opfyldte kriterier gør kun et resultat validerbart: et menneske med knowledge.version.publish validerer det og accepterer den statistiske usikkerhed eksplicit. Kontrollen kan ikke bestå før den rigtige Claude-model er afprøvet. Den medfører hverken godkendelse af retrieval-konfigurationen eller af betaen.",
+  "minimumQuestions": 40,
+  "minimumFullyCorrect": 0.95,
+  "maximumCriticalErrors": 0,
+  "maximumInventedCitations": 0,
+  "maximumExceptionFailures": 0,
+  "maximumRefusalFailures": 0,
+  "categories": ["direct", "exception", "multi_clause", "missing_coverage", "similar_product", "historical", "conflict", "unanswerable", "permission"],
+  "model": "Kun en rigtig Claude-model (id ^claude-). Stub- og testmodellen kan aldrig bestå."
+}

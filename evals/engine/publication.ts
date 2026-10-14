@@ -1,9 +1,11 @@
+import { documentMaterialProblem } from "../../src/lib/knowledge/core/provider.ts";
+
 import { checksumOf, configurationFingerprint, gateSetChecksum } from "./checksum.ts";
-import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "./gates.ts";
-import { computeMetrics } from "./metrics.ts";
+import { checkTypeMinimums, decide, evaluateDocumentGates, evaluateHardGates, evaluateQualityGates, qualityGateIds, tierFor } from "./gates.ts";
+import { computeDocumentMetrics, computeMetrics } from "./metrics.ts";
 import { parseRunEvent, type EvaluationMode, type RegisteredRunEvent } from "./regression.ts";
 import { REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport } from "./runner.ts";
-import { HARD_GATE_IDS, type GateSet, type HardGateId, type Violation } from "./types.ts";
+import { HARD_GATE_IDS, gateSetMethod, isDocumentGateSet, type GateSet, type HardGateId, type QualityGateResult, type Violation } from "./types.ts";
 
 /**
  * The separation between an evaluation RUN and a PUBLISHED evaluation result (docs/08b §4.5,
@@ -136,11 +138,29 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
     problems.push("Rapporten påstår, at fingeraftrykkene matcher, men det gør de ikke.");
   }
 
-  const metrics = computeMetrics(report.cases);
-  if (!same(metrics, report.metrics)) problems.push("Metrikkerne kan ikke genberegnes fra observationerne.");
-  const { withReranker } = report.rerankerComparison;
-  if (withReranker.passage_recall_at_k !== metrics.passage_recall_at_k.value || withReranker.mrr_at_k !== metrics.mrr_at_k.value) {
-    problems.push("Sammenligningen med kørslen uden reranker bruger andre tal end metrikkerne.");
+  // B-036: a gate set evaluates exactly one retrieval method, and the report says which.
+  if (report.gateSet.method !== gateSetMethod(gates)) problems.push("Rapporten beskriver gate-sættets metode anderledes end gate-sættet.");
+  if (gateSetMethod(gates) !== (isDocumentMaterialConfiguration(report.configuration.declared) ? "product_documents" : "hybrid")) {
+    problems.push("Gate-sættet gælder en anden retrieval-metode end konfigurationen.");
+  }
+
+  let qualityGates: QualityGateResult[];
+  if (isDocumentGateSet(gates)) {
+    const metrics = computeDocumentMetrics(report.cases);
+    if (!same(metrics, report.metrics)) problems.push("Metrikkerne kan ikke genberegnes fra observationerne.");
+    if (report.rerankerComparison !== null) problems.push("En kørsel af product_documents har ingen sammenligning uden reranker.");
+    if (report.cases.some((observation) => observation.documents === undefined || (observation.error === null) !== (observation.documents !== null))) {
+      problems.push("En observation mangler sin dokumentobservation.");
+    }
+    qualityGates = evaluateDocumentGates(metrics, gates);
+  } else {
+    const metrics = computeMetrics(report.cases);
+    if (!same(metrics, report.metrics)) problems.push("Metrikkerne kan ikke genberegnes fra observationerne.");
+    const comparison = report.rerankerComparison;
+    if (!comparison || comparison.withReranker.passage_recall_at_k !== metrics.passage_recall_at_k.value || comparison.withReranker.mrr_at_k !== metrics.mrr_at_k.value) {
+      problems.push("Sammenligningen med kørslen uden reranker bruger andre tal end metrikkerne.");
+    }
+    qualityGates = comparison ? evaluateQualityGates(metrics, comparison, gates) : [];
   }
 
   const isHard = (gate: string): gate is HardGateId => (HARD_GATE_IDS as readonly string[]).includes(gate);
@@ -153,14 +173,13 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
 
   const hardGates = evaluateHardGates([...runViolations, ...caseViolations]);
   if (!same(hardGates, report.hardGates)) problems.push("De hårde gates kan ikke genberegnes.");
-  const qualityGates = evaluateQualityGates(metrics, report.rerankerComparison, gates);
   if (!same(qualityGates, report.qualityGates)) problems.push("Kvalitetsgates kan ikke genberegnes med gate-sættet.");
   const minimums = checkTypeMinimums(report.cases);
   if (!same(minimums, report.minimums)) problems.push("Minimum pr. type kan ikke genberegnes.");
   if (report.evalSet.activeCases !== report.cases.length) problems.push("Antallet af spørgsmål stemmer ikke med observationerne.");
   if (tierFor(report.cases.length) !== report.tier) problems.push("Tier stemmer ikke med antallet af spørgsmål.");
 
-  const decision = decide(hardGates, qualityGates, minimums);
+  const decision = decide(hardGates, qualityGates, minimums, qualityGateIds(gates));
   const errors = report.cases.filter((observation) => observation.error !== null).length;
   const valid = decision.valid && errors === 0;
   const verdict = valid ? decision.verdict : "fail";
@@ -169,8 +188,18 @@ export function verifyReport(report: EvaluationReport, gates: GateSet): Verifica
   return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }
 
-/** A configuration with the test embedder or the "none" reranker can never be approved (§3.4, §10.2). */
+/**
+ * A configuration with the test embedder or the "none" reranker can never be approved (§3.4,
+ * §10.2). A product_documents configuration (B-035) is no development configuration — but only
+ * with valid material; invalid material always is. The same rule as the database
+ * (knowledge.retrieval_material_is_development).
+ */
+function isDocumentMaterialConfiguration(configuration: EvaluationReport["configuration"]["declared"]): boolean {
+  return "method" in configuration;
+}
+
 export function isDevelopmentConfiguration(configuration: EvaluationReport["configuration"]["declared"]): boolean {
+  if ("method" in configuration) return documentMaterialProblem(configuration) !== null;
   return configuration.embedding === null || configuration.embedding.provider === "test" || configuration.reranker.id === "none" || configuration.reranker.model === "none";
 }
 

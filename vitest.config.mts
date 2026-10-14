@@ -14,6 +14,8 @@ export default defineConfig({
     exclude: ["src/tests/integration/**", "node_modules/**"],
     // Explicit, never inherited from the shell (8B-I6 housekeeping): a test that needs another
     // runtime environment — or none — sets it itself.
-    env: { IPA_RUNTIME_ENV: "test" },
+    // The Claude API key is blanked: no test can see a real key, even in an environment that has
+    // one (beta L4b, docs/beta.md §17).
+    env: { IPA_RUNTIME_ENV: "test", IPA_ANTHROPIC_API_KEY: "" },
   },
 });

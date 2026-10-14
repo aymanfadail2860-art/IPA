@@ -1,11 +1,13 @@
 import { syntheticText } from "../../src/lib/egress/synthetic.ts";
 import { withControlDriftMarker } from "../../src/lib/knowledge/core/control-set.ts";
 import type { EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
-import { retrievalFingerprintMaterial } from "../../src/lib/knowledge/core/provider.ts";
+import { documentRetrievalMaterial, retrievalFingerprintMaterial, type DocumentRetrievalParams } from "../../src/lib/knowledge/core/provider.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
 import {
   DEFAULT_RETRIEVAL_CONFIG,
+  PRODUCT_DOCUMENTS_ALGORITHM_VERSION,
   RETRIEVAL_ALGORITHM_VERSION,
+  runProductDocumentRetrieval,
   runRetrieval,
   type KnowledgeRpcClient,
   type RetrievalConfig,
@@ -30,20 +32,31 @@ import type { ConfigurationInput, EvalCase, Manifest, RetrievalRun, RetrievalUnd
  *   * observe: the duration of every step (§12), for the performance measurement.
  */
 
-export interface DatabaseRetrievalOptions {
+interface DatabaseRetrievalBase {
   env: EvaluationEnvironment;
   manifest: Manifest;
   /** Read before the run (provisioned corpus). */
   snapshot: CorpusSnapshot;
+  now?: () => Date;
+  /** Step timings of the main run (not the Q7 baseline). */
+  observe?: RetrievalObserver;
+}
+
+/** product_documents (B-035): no embedder, no reranker, the budget; no run without reranker (Q7). */
+export interface DatabaseDocumentRetrievalOptions extends DatabaseRetrievalBase {
+  documents: DocumentRetrievalParams;
+}
+
+export type DatabaseRetrievalOptions = DatabaseHybridRetrievalOptions | DatabaseDocumentRetrievalOptions;
+
+export interface DatabaseHybridRetrievalOptions extends DatabaseRetrievalBase {
+  documents?: undefined;
   embedder: EmbeddingProvider;
   /** The embedding model's id in the evaluation environment (its embeddings exist for every chunk). */
   embeddingModelId: string;
   reranker: RerankingProvider;
   baselineReranker: RerankingProvider;
   config?: RetrievalConfig;
-  now?: () => Date;
-  /** Step timings of the main run (not the Q7 baseline). */
-  observe?: RetrievalObserver;
   /**
    * The embedding model failed the control check (8B-I8 C6): the runtime reports a marked model
    * version, so the runtime fingerprint differs from the declared one (H6).
@@ -64,7 +77,7 @@ function recording(db: KnowledgeRpcClient, log: unknown[]): KnowledgeRpcClient {
 
 export function createDatabaseRetrieval(options: DatabaseRetrievalOptions): RetrievalUnderTest {
   const { env, manifest, snapshot } = options;
-  const config = options.config ?? DEFAULT_RETRIEVAL_CONFIG;
+  const config = options.documents ? DEFAULT_RETRIEVAL_CONFIG : (options.config ?? DEFAULT_RETRIEVAL_CONFIG);
   const sessions = new Map<string, Promise<ActorSession & { verifiedUserId: string | null }>>();
 
   async function session(actor: string) {
@@ -84,7 +97,8 @@ export function createDatabaseRetrieval(options: DatabaseRetrievalOptions): Retr
     return pending;
   }
 
-  function configuration(reranker: RerankingProvider): ConfigurationInput {
+  function configuration(hybrid: DatabaseHybridRetrievalOptions, reranker: RerankingProvider): ConfigurationInput {
+    const options = hybrid;
     return retrievalFingerprintMaterial({
       embedding: options.controlDrift ? withControlDriftMarker(options.embedder.descriptor) : options.embedder.descriptor,
       reranker: reranker.descriptor,
@@ -94,49 +108,83 @@ export function createDatabaseRetrieval(options: DatabaseRetrievalOptions): Retr
     });
   }
 
-  function adapter(reranker: RerankingProvider, baseline: boolean): RetrievalUnderTest {
+  function request(evalCase: EvalCase) {
+    const filters = evalCase.filters ?? {};
+    const unknown = "00000000-0000-4000-8000-000000000000";
     return {
-      name: baseline ? "evaluation-database (uden reranker)" : "evaluation-database",
-      environment: "evaluation",
-      configuration: () => configuration(reranker),
-      binding: () => snapshot.binding,
-      versionText: (document, version) => snapshot.texts.get(`${document}\u0000${version}`) ?? null,
-      // Read anew: a corpus that changes during the run is an H7 breach.
-      corpusChecksum: async () => (await env.snapshot(manifest)).checksum,
-      async run(evalCase: EvalCase): Promise<RetrievalRun> {
-        const actor = await session(evalCase.actor);
-        const log: unknown[] = [];
-        const filters = evalCase.filters ?? {};
-        const unknown = "00000000-0000-4000-8000-000000000000";
-        const set = await runRetrieval(
-          {
-            // An evaluation question is synthetic material, scanned for customer data (8B-I2.5).
-            query: syntheticText(evalCase.question),
-            mode: evalCase.mode,
-            ...(evalCase.asOf ? { asOf: evalCase.asOf } : {}),
-            language: evalCase.language,
-            ...(filters.products ? { productIds: filters.products.map((key) => snapshot.binding.products[key] ?? unknown) } : {}),
-            ...(filters.documents ? { documentIds: filters.documents.map((key) => snapshot.binding.documents[key]?.documentId ?? unknown) } : {}),
-            ...(filters.documentTypes ? { documentTypes: filters.documentTypes } : {}),
-          },
-          {
-            db: recording(actor.client.schema("knowledge"), log),
-            embedding: { embedder: options.embedder, modelId: options.embeddingModelId },
-            reranker,
-            config,
-            now: options.now,
-            ...(baseline ? {} : { observe: options.observe }),
-          },
-        );
-        // H7: the run counts as the case's actor only when the database confirms the identity.
-        const confirmed = actor.verifiedUserId !== null && actor.verifiedUserId === actor.authId;
-        return { actor: confirmed ? evalCase.actor : `unverified:${evalCase.actor}`, set, raw: log, chunkerVersions: snapshot.chunkerVersions };
-      },
-      withoutReranker: () => (baseline ? null : adapter(options.baselineReranker, true)),
+      // An evaluation question is synthetic material, scanned for customer data (8B-I2.5).
+      query: syntheticText(evalCase.question),
+      mode: evalCase.mode,
+      ...(evalCase.asOf ? { asOf: evalCase.asOf } : {}),
+      language: evalCase.language,
+      ...(filters.products ? { productIds: filters.products.map((key) => snapshot.binding.products[key] ?? unknown) } : {}),
+      ...(filters.documents ? { documentIds: filters.documents.map((key) => snapshot.binding.documents[key]?.documentId ?? unknown) } : {}),
+      ...(filters.documentTypes ? { documentTypes: filters.documentTypes } : {}),
     };
   }
 
-  return adapter(options.reranker, false);
+  /** H7: the run counts as the case's actor only when the database confirms the identity. */
+  function confirmedActor(evalCase: EvalCase, actor: Awaited<ReturnType<typeof session>>): string {
+    const confirmed = actor.verifiedUserId !== null && actor.verifiedUserId === actor.authId;
+    return confirmed ? evalCase.actor : `unverified:${evalCase.actor}`;
+  }
+
+  const common = {
+    environment: "evaluation" as const,
+    binding: () => snapshot.binding,
+    versionText: (document: string, version: string) => snapshot.texts.get(`${document}\u0000${version}`) ?? null,
+    // Read anew: a corpus that changes during the run is an H7 breach.
+    corpusChecksum: async () => (await env.snapshot(manifest)).checksum,
+  };
+
+  // product_documents (B-035): the real runProductDocumentRetrieval, the real SQL function, RLS.
+  if (options.documents) {
+    const params = options.documents;
+    return {
+      ...common,
+      name: "evaluation-database (produktdokumenter)",
+      configuration: () =>
+        documentRetrievalMaterial({ algorithmVersion: PRODUCT_DOCUMENTS_ALGORITHM_VERSION, params, chunkerVersions: [...new Set(Object.values(snapshot.chunkerVersions))].sort() }),
+      async run(evalCase: EvalCase): Promise<RetrievalRun> {
+        const actor = await session(evalCase.actor);
+        const log: unknown[] = [];
+        const set = await runProductDocumentRetrieval(request(evalCase), {
+          db: recording(actor.client.schema("knowledge"), log),
+          params,
+          now: options.now,
+          observe: options.observe,
+        });
+        return { actor: confirmedActor(evalCase, actor), set, raw: log, chunkerVersions: snapshot.chunkerVersions, versionChunkCounts: snapshot.versionChunkCounts, chunkDigests: snapshot.chunkDigests };
+      },
+      // There is no reranker, so there is no run without one (Q7).
+      withoutReranker: () => null,
+    };
+  }
+
+  const hybrid = options;
+  function adapter(reranker: RerankingProvider, baseline: boolean): RetrievalUnderTest {
+    return {
+      ...common,
+      name: baseline ? "evaluation-database (uden reranker)" : "evaluation-database",
+      configuration: () => configuration(hybrid, reranker),
+      async run(evalCase: EvalCase): Promise<RetrievalRun> {
+        const actor = await session(evalCase.actor);
+        const log: unknown[] = [];
+        const set = await runRetrieval(request(evalCase), {
+          db: recording(actor.client.schema("knowledge"), log),
+          embedding: { embedder: hybrid.embedder, modelId: hybrid.embeddingModelId },
+          reranker,
+          config,
+          now: options.now,
+          ...(baseline ? {} : { observe: options.observe }),
+        });
+        return { actor: confirmedActor(evalCase, actor), set, raw: log, chunkerVersions: snapshot.chunkerVersions };
+      },
+      withoutReranker: () => (baseline ? null : adapter(hybrid.baselineReranker, true)),
+    };
+  }
+
+  return adapter(hybrid.reranker, false);
 }
 
 /** The id of the embedder's model in the evaluation environment (it must exist; provisioning creates it). */

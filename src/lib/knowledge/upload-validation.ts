@@ -1,4 +1,4 @@
-import { isDocumentTypeKey, type DocumentTypeKey } from "./document-types";
+import { isDocumentTypeKey, type DocumentTypeKey } from "./document-types.ts";
 
 /**
  * Validation of upload metadata before a signed upload URL is issued and before a version

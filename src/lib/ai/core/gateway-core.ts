@@ -14,7 +14,8 @@ import { buildMatrix, effectiveRule, type PolicyRow } from "./policy";
 import { profileFor, type WorkflowProfile } from "./profiles";
 import { createRedactor, reidentify, type KnownName } from "./redaction";
 import { createContractBreakingStub } from "./registry";
-import type { AiContext, AiRequest, DataCategory, ModelInput, SentPart } from "./types";
+import type { AiContext, AiRequest, CallUsageReport, DataCategory, ModelInput, SentPart } from "./types";
+import { estimateTokens, MODEL_CALL_MESSAGES, ModelCallError, type ModelCallCategory, type UsageLedger } from "./usage";
 
 /**
  * The AI Gateway pipeline (docs/08 §1). One entry, a fixed order of steps; a step that refuses
@@ -23,10 +24,42 @@ import type { AiContext, AiRequest, DataCategory, ModelInput, SentPart } from ".
  *
  * The pipeline takes its dependencies as parameters so it can be tested; application code calls
  * runAiRequest (gateway.ts), which wires the real database, retrieval and registry.
+ *
+ * Beta L4 (docs/beta.md §16): an external model spends only through the user's usage ledger
+ * (budget, rate limits, reservations), a product's document basis is sent whole or refused by a
+ * token budget (never cut), and every call writes one structured log line without content.
  */
 
 export const MAX_INPUT_CHARS = 1000;
 export const MAX_LABEL_CHARS = 200;
+
+/**
+ * The input budget for the in-process development model, which has no usage ledger. An external
+ * model always uses the database's limit (ai.usage_limits.max_input_tokens).
+ */
+export const DEVELOPMENT_MAX_INPUT_TOKENS = 100_000;
+
+/**
+ * One structured log line per call (docs/beta.md §16.11): numbers, codes and ids only. Never the
+ * question, a document, a prompt, a key, customer data or a provider's error message.
+ */
+export interface AiCallLogEntry {
+  event: "ai_call";
+  at: string;
+  requestId: string;
+  /** The platform user id — a pseudonymous reference, no name or e-mail. */
+  userRef: string | null;
+  profile: string;
+  action: string;
+  modelId: string | null;
+  outcome: AiOutcome["kind"];
+  reasonCode: string | null;
+  errorCategory: ModelCallCategory | "internal" | null;
+  latencyMs: number;
+  budgetStatus: "ok" | "refused" | "not_checked";
+  rateLimitStatus: "ok" | "refused" | "not_checked";
+  usage: Omit<CallUsageReport, "provider"> | null;
+}
 
 export interface GatewayUser {
   id: string;
@@ -72,6 +105,12 @@ export interface GatewayDeps {
   /** The configured model. Throws when it may not be used here (fail-closed registry). */
   model(): Model;
   record(entry: CallRecord): Promise<void>;
+  /** The user's usage ledger (beta L4). Required for an external model — without it nothing is sent. */
+  usage?: UsageLedger;
+  /** The structured log (beta L4). Defaults to none; the application wires it (gateway.ts). */
+  log?: (entry: AiCallLogEntry) => void;
+  /** The request id of the call (tests). Defaults to a random UUID. */
+  requestId?: () => string;
   environment?: RuntimeEnv;
   now?: () => number;
 }
@@ -136,8 +175,19 @@ function minimizeContext(context: AiContext | undefined, profile: WorkflowProfil
   return { context: kept, removed };
 }
 
-function evidencePart(item: EvidenceItem, maxChars: number): SentPart {
-  const text = [item.excerpt.leadIn, item.excerpt.text].filter(Boolean).join("\n").slice(0, maxChars);
+/** The text of an evidence item as sent: its lead-in (heading chain) and the source's own text. */
+const evidenceText = (item: EvidenceItem) => [item.excerpt.leadIn, item.excerpt.text].filter(Boolean).join("\n");
+
+/** The document version's title as sent with the part — Knowledge Engine metadata, classified as knowledge. */
+function documentTitle(item: EvidenceItem): string {
+  const title = item.document.title.trim();
+  return item.document.versionLabel ? `${title} (version ${item.document.versionLabel})` : title;
+}
+
+/** An evidence part. `maxChars` null: the text is sent whole (product_documents — never cut). */
+function evidencePart(item: EvidenceItem, maxChars: number | null): SentPart {
+  const text = maxChars === null ? evidenceText(item) : evidenceText(item).slice(0, maxChars);
+  const title = documentTitle(item);
   return Object.freeze({
     kind: "evidence" as const,
     category: "knowledge" as const,
@@ -148,7 +198,10 @@ function evidencePart(item: EvidenceItem, maxChars: number): SentPart {
       label: item.sourceReference.label,
       temporalStatus: item.validity.temporalStatus,
       inConflict: item.conflicts.length > 0,
+      documentId: item.documentId,
+      documentVersionId: item.documentVersionId,
     }),
+    ...(title ? { sourceTitle: knowledgeText(title) } : {}),
   });
 }
 
@@ -156,11 +209,18 @@ function evidencePart(item: EvidenceItem, maxChars: number): SentPart {
 function forLog(input: ModelInput) {
   return {
     ...input,
-    parts: input.parts.map(({ content, ...part }) => ({
+    parts: input.parts.map(({ content, sourceTitle, ...part }) => ({
       ...part,
+      ...(sourceTitle ? { sourceTitle: sourceTitle.text } : {}),
       provenance: { category: content.provenance.category, caseBound: content.provenance.caseBound, redacted: content.provenance.redacted },
     })),
   };
+}
+
+/** A refusal or failure of an external model call → the user's outcome. Fixed Danish texts only. */
+function modelCallStop(error: ModelCallError): Stop {
+  const message = MODEL_CALL_MESSAGES[error.category];
+  return error.category === "token_budget" ? invalid(message, error.code) : unavailable(message, error.code);
 }
 
 function permissionsFor(profile: WorkflowProfile): { key: PermissionKey; scope: PermissionScope }[] {
@@ -199,12 +259,16 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
   let removedFields = 0;
   let sent: ModelInput | null = null;
   let returned: unknown = null;
+  let validatedRaw: unknown = null;
   let cited: string[] = [];
   let sentEvidenceIds = new Set<string>();
   let gapQuestion: string | null = null;
   let outcome: AiOutcome;
   let reasonCode: string | null = null;
   let errorCode: string | null = null;
+  const requestId = deps.requestId ? deps.requestId() : globalThis.crypto.randomUUID();
+  let usageReport: CallUsageReport | null = null;
+  let errorCategory: AiCallLogEntry["errorCategory"] = null;
 
   try {
     // 1. Authn — an active platform user (identity.users.status).
@@ -316,11 +380,33 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     const parts: SentPart[] = [Object.freeze({ kind: "question" as const, category: "user_question" as const, text: question, content: questionContent })];
     if (label && labelContent) parts.push(Object.freeze({ kind: "context" as const, category: "user_question" as const, text: label, content: labelContent }));
     let total = parts.reduce((sum, part) => sum + part.text.length, 0);
-    for (const item of evidence?.items.slice(0, profile.limits.maxEvidence) ?? []) {
-      const part = evidencePart(item, profile.limits.maxCharsPerPart);
-      if (total + part.text.length > profile.limits.maxTotalChars) break;
-      total += part.text.length;
-      parts.push(part);
+    if (evidence?.retrieval.method === "product_documents") {
+      // product_documents (B-036, beta L4): the whole basis is the evidence, sent whole. The
+      // authoritative control is a TOKEN budget (docs/beta.md §16.7): here a local, optimistic
+      // estimate refuses a basis that is clearly too large before anything leaves the platform;
+      // an external model then enforces the exact limit with the provider's own token count.
+      // Nothing is ever cut or left out — over budget, the call is refused.
+      const external = model.grade !== "development";
+      let maxInputTokens = DEVELOPMENT_MAX_INPUT_TOKENS;
+      if (deps.usage || external) {
+        try {
+          if (!deps.usage) throw new Error("no_usage_ledger");
+          maxInputTokens = (await deps.usage.limits()).maxInputTokens;
+        } catch {
+          throw unavailable(MODEL_CALL_MESSAGES.usage_unavailable, "usage_limits_unreadable");
+        }
+      }
+      const items = evidence.items.map((item) => evidencePart(item, null));
+      const estimate = estimateTokens([profile.system, ...parts.map((part) => part.text), ...items.flatMap((part) => [part.text, part.sourceTitle?.text ?? ""])].join("\n"));
+      if (estimate > maxInputTokens) throw invalid(MODEL_CALL_MESSAGES.token_budget, "document_basis_too_large");
+      parts.push(...items);
+    } else {
+      for (const item of evidence?.items.slice(0, profile.limits.maxEvidence) ?? []) {
+        const part = evidencePart(item, profile.limits.maxCharsPerPart);
+        if (total + part.text.length > profile.limits.maxTotalChars) break;
+        total += part.text.length;
+        parts.push(part);
+      }
     }
     sentEvidenceIds = new Set(parts.flatMap((part) => (part.evidence ? [part.evidence.evidenceId] : [])));
     step("minimize");
@@ -348,15 +434,38 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
       outputContract: actionSpec.outputContract,
     });
     try {
+      const call = { requestId, usage: deps.usage ?? null };
       const output = await (model.grade === "development"
-        ? invokeModel(model as Model<"development">, evidence, sent)
-        : invokeModel(model as Model<"production">, evidence as never, sent));
-      returned = output.raw;
+        ? invokeModel(model as Model<"development">, evidence, sent, { call })
+        : invokeModel(model as Model<"production">, evidence as never, sent, { call }));
+      usageReport = output.usage ?? null;
+      // External models (L4): the native citations are kept with the answer, as locations and
+      // evidence ids — never the provider's copy of the cited text.
+      returned = output.citations
+        ? {
+            contract: output.raw,
+            nativeCitations: output.citations.map((c) => ({
+              documentIndex: c.documentIndex,
+              startBlockIndex: c.startBlockIndex,
+              endBlockIndex: c.endBlockIndex,
+              documentVersionId: c.documentVersionId,
+              evidenceIds: c.evidenceIds,
+            })),
+          }
+        : output.raw;
+      validatedRaw = output.raw;
     } catch (error) {
       if (error instanceof EgressPolicyError) {
         // Nothing left the platform: no model, no payload in the log.
         sent = null;
         throw egressBlocked(error);
+      }
+      if (error instanceof ModelCallError) {
+        usageReport = error.usage;
+        errorCategory = error.category;
+        // Only what reached the provider is logged as sent (the token count sends it too).
+        if (!error.usage?.transmitted) sent = null;
+        throw modelCallStop(error);
       }
       if ((error as Error).name === "EvidenceGradeError" || (error as Error).name === "EvidencePairingError") {
         throw unavailable("Svaret kan ikke dannes på et udviklingsgrundlag.", "evidence_pairing_refused");
@@ -367,7 +476,7 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
 
     // 12. Output contract — a breach is never shown (B-016).
     const evidenceItems = evidence ? evidence.items.filter((item) => sentEvidenceIds.has(item.evidenceId)) : [];
-    const validated = validateOutput(actionSpec.outputContract, returned, parts);
+    const validated = validateOutput(actionSpec.outputContract, validatedRaw, parts);
     step("contract");
     if (!validated.ok) {
       throw new Stop({ kind: "unverifiable", profile: profile.id, reason: validated.reason, evidence: structuredClone(evidenceItems) }, validated.reason);
@@ -391,6 +500,7 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     } else {
       outcome = { kind: "unavailable", message: "AI-funktionen kunne ikke gennemføres." };
       errorCode = "internal_error";
+      errorCategory = "internal";
     }
   }
   timings.total = Math.round(now() - started);
@@ -432,10 +542,44 @@ export async function runGateway(request: AiRequest, deps: GatewayDeps, dev: AiD
     try {
       await deps.record(entry);
     } catch {
+      writeLog(deps, { ...logEntry(), outcome: "unavailable", reasonCode: "record_failed" });
       return { kind: "unavailable", message: "Kaldet kunne ikke logges og vises derfor ikke." };
     }
   }
+  writeLog(deps, logEntry());
   return outcome;
+
+  function logEntry(): AiCallLogEntry {
+    const refused = (category: ModelCallCategory) => (errorCategory === category ? "refused" : usageReport && usageReport.status !== "none" ? "ok" : "not_checked");
+    const usage: Omit<CallUsageReport, "provider"> | null = usageReport
+      ? (Object.fromEntries(Object.entries(usageReport).filter(([key]) => key !== "provider")) as Omit<CallUsageReport, "provider">)
+      : null;
+    return {
+      event: "ai_call",
+      at: new Date().toISOString(),
+      requestId,
+      userRef: user?.id ?? null,
+      profile: profile?.id ?? "unknown",
+      action: actionSpec ? request.action : "unknown",
+      modelId: model?.id ?? null,
+      outcome: outcome.kind,
+      reasonCode: reasonCode ?? errorCode,
+      errorCategory,
+      latencyMs: timings.total ?? 0,
+      budgetStatus: refused("budget"),
+      rateLimitStatus: refused("rate_limit"),
+      usage,
+    };
+  }
+}
+
+/** The structured log never fails a call. */
+function writeLog(deps: GatewayDeps, entry: AiCallLogEntry): void {
+  try {
+    deps.log?.(entry);
+  } catch {
+    // A broken log sink must not change the outcome.
+  }
 }
 
 export type { DataCategory };

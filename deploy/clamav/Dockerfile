@@ -1,21 +1,21 @@
 # syntax=docker/dockerfile:1.7
 #
-# ClamAV scanner image — its own ECS service, not part of the worker task (docs/08b §21.7,
-# 8B-I5.5). Build context: the repository root. Built ONLY by the scheduled workflow
-# .github/workflows/clamav-signatures.yml, never by hand for production:
+# ClamAV scanner image — its own container, never part of the worker's (docs/08b §21.7,
+# 8B-I5.5; beta: deploy/import/compose.yaml). Build context: the repository root. Built right
+# before each import, so the official signatures are fresh (B-035 L2; the runbook is L3):
 #
-#   docker build -f deploy/clamav/Dockerfile -t ipa-clamav:candidate .
+#   docker compose -f deploy/import/compose.yaml build clamav
 #
 # * The ClamAV engine is the APPROVED one in deploy/clamav/engine.json (8B-I5.6, B-028): LTS
-#   line 1.4, production 1.4.6. The workflow passes the approved base image BY DIGEST as
-#   CLAMAV_BASE; the default below names the same release for local builds. The signature
-#   refresh never changes the engine — an engine upgrade is a separate, approved candidate.
+#   line 1.4, production 1.4.6. Pass the approved base image BY DIGEST as CLAMAV_BASE; the
+#   default below names the same release. A signature refresh never changes the engine — an
+#   engine upgrade is a separate, approved candidate (clamav-engine-candidate.yml).
 # * The OFFICIAL ClamAV signatures (main, daily, bytecode) are downloaded HERE, at build time, by
 #   freshclam from the official mirror — no third-party signatures. The running container
 #   downloads nothing and has no internet egress.
 # * The build records engine and signature versions in /usr/share/ipa/scanner-build.txt.
 # * No credentials, no environment, no secrets. Unprivileged user, read-only root filesystem;
-#   /tmp is a task volume.
+#   /tmp is a tmpfs (deploy/import/compose.yaml).
 
 ARG CLAMAV_BASE=docker.io/clamav/clamav:1.4.6_base
 

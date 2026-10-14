@@ -7,11 +7,17 @@
 #             every migration from scratch and the development seed → pgTAP → the app built and
 #             started in the test runtime and in the production runtime → integration tests
 #
-# No production credentials, no AWS access, no secrets: the only keys are the ones the local
-# Supabase generates for itself inside the job. ClamAV runs in its own workflows (EICAR against
-# the approved 1.4.6 engine: clamav-engine-candidate.yml, clamav-signatures.yml); here the
-# upload-security tests use the development fixture scanner, and the clamd-backed EICAR test is
-# skipped (it needs IPA_TEST_CLAMD_HOST).
+# No production credentials, no cloud account, no secrets: the only keys are the ones the local
+# Supabase generates for itself inside the job. Here the upload-security tests use the
+# development fixture scanner, and the clamd-backed EICAR test is skipped (it needs
+# IPA_TEST_CLAMD_HOST). Beta L2 (docs/beta.md §14): no AWS anywhere.
+#
+#   import-scanner  (beta L3) the import's REAL scanner: deploy/clamav/Dockerfile built through
+#             deploy/import/compose.yaml with fresh official signatures (freshclam), started in
+#             its isolation and verified by the import's scanner check from the worker's service (approved engine,
+#             signatures under 8 hours, EICAR found, a clean file clean). No database, no
+#             document, no credential. The import end to end in Docker is
+#             src/tests/integration/import-docker.integration.test.ts (opt-in, local).
 #
 # Branch protection (an external prerequisite, set in GitHub): require both jobs on main.
 
@@ -68,8 +74,28 @@ jobs:
           # 0 pass, 1 fail/uncertain (the example set is small): the run completed. 2 or 3 is an error.
           test "$CODE" -le 1
 
+      - name: Evaluation engine, product_documents (fixture adapter, D1–D6, B-036)
+        env:
+          IPA_RUNTIME_ENV: test
+        run: |
+          set +e
+          npm run eval:retrieval -- --set example-documents-v1 --configuration product-documents-fixture --out "$RUNNER_TEMP/eval-documents"
+          CODE=$?
+          set -e
+          # The fixture environment fails H7 by design, so the run is "fail" (1). 2 or 3 is an error.
+          test "$CODE" -le 1
+
       - name: Build
+        env:
+          # Beta L4: a sentinel in place of the Claude API key — never a real key. The next step
+          # proves its value never reaches a browser.
+          IPA_ANTHROPIC_API_KEY: ci-bundle-sentinel-not-a-real-key-4f9c2a71
         run: npm run build
+
+      - name: The client bundle carries no API key, SDK or API host (beta L4)
+        env:
+          IPA_BUNDLE_SENTINEL: ci-bundle-sentinel-not-a-real-key-4f9c2a71
+        run: node scripts/check-client-bundle.ts .next
 
   database:
     name: Fresh database, pgTAP and integration
@@ -131,3 +157,48 @@ jobs:
       - name: App logs on failure
         if: failure()
         run: tail -n 100 "$RUNNER_TEMP"/app-*.log || true
+
+  import-scanner:
+    name: Import scanner (ClamAV in Docker, official signatures)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # docker compose reads every service's settings. None of these is a credential, and no
+      # container that would use them is started here.
+      IPA_WORKER_DB_HOST: unused.invalid
+      IPA_WORKER_DB_USER: unused
+      IPA_WORKER_DB_PASSWORD: unused
+      IPA_WORKER_STORAGE_URL: https://unused.invalid
+      IPA_IMPORT_SUPABASE_URL: https://unused.invalid
+      IPA_IMPORT_PUBLISHABLE_KEY: unused
+      IPA_IMPORT_EMAIL: unused@unused.invalid
+      IPA_IMPORT_FOLDER: /tmp/ipa-import
+      IPA_IMPORT_REPORTS: /tmp/ipa-import-reports
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the scanner with fresh official signatures, and the worker image
+        run: |
+          docker compose -f deploy/import/compose.yaml build --no-cache clamav
+          docker compose -f deploy/import/compose.yaml build worker
+
+      # TEST CONFIGURATION ONLY (B-038, clarified 14 October 2026): CI proves that the real scanner
+      # builds, starts, scans a clean file clean and finds EICAR — not how often ClamAV publishes. It
+      # therefore accepts official signatures up to 24 hours old (ClamAV's own release limit). The
+      # actual import keeps the 8-hour limit: deploy/import/ipa-import.sh passes no limit, so the
+      # check's default of 8 hours applies (src/tests/import-signature-age.test.ts).
+      - name: Start the scanner and run the import's scanner check
+        run: |
+          docker compose -f deploy/import/compose.yaml up -d --wait clamav
+          docker compose -f deploy/import/compose.yaml run --rm -T --entrypoint node worker scripts/verify-clamav-scanner.ts --host clamav --port 3310 --max-age-hours 24 | tee "$RUNNER_TEMP/scanner-check.json"
+          jq -e '.ok == true and .engineVersion == "1.4.6"' "$RUNNER_TEMP/scanner-check.json"
+
+      - name: The running scanner keeps its isolation
+        run: |
+          id=$(docker compose -f deploy/import/compose.yaml ps -q clamav)
+          docker inspect "$id" | jq -e '.[0] | (.HostConfig.PortBindings // {}) == {} and .HostConfig.ReadonlyRootfs == true and .HostConfig.CapDrop == ["ALL"] and .Config.User == "10001:10001" and (.NetworkSettings.Networks | keys) == ["ipa-import_scan"]'
+          docker network inspect ipa-import_scan | jq -e '.[0].Internal == true'
+
+      - name: Stop
+        if: always()
+        run: docker compose -f deploy/import/compose.yaml down --remove-orphans

@@ -42,10 +42,10 @@ IPA_RUNTIME_ENV=test npm run eval:retrieval
 IPA_RUNTIME_ENV=test npm run eval:retrieval -- --set example-v1 --gates gates-v1 --configuration fixture-development
 ```
 
-Med `--providers bedrock` evalueres production-adapterne fra 8B-I2 (Cohere Embed v4 via EU-profilen,
-1024 dimensioner, og Rerank 3.5 i eu-central-1) mod kandidatkonfigurationen
-`bedrock-embed-v4-eu-1024-rerank-3-5`. Det kræver AWS-credentials fra standardkæden (OIDC eller rolle).
-Uden dem fejler kørslen lukket.
+Betaen kører uden AWS (B-035). Production-adapterne fra 8B-I2 (Bedrock) er fjernet i L2
+(`docs/beta.md` §14). Den hybride metode kan derfor kun evalueres med test-embedderen.
+Betaens primære metode er `product_documents`. Den evalueres med gate-sættet
+`product-documents-gates-v1` (B-036).
 
 Som standard bruger fixture-retrieval test-embedderen og rerankeren "none" fra registret. Registret afviser
 dem, medmindre `IPA_RUNTIME_ENV` udtrykkeligt er `local` eller `test`. Kørslen skriver
@@ -59,7 +59,7 @@ gennemføres (alarm `evaluation_failed`).
 ```bash
 # Evalueringsprojektets egne credentials — aldrig produktionens:
 export IPA_EVAL_SUPABASE_URL=... IPA_EVAL_SUPABASE_ANON_KEY=... IPA_EVAL_SUPABASE_SERVICE_ROLE_KEY=...
-npm run eval:retrieval -- --adapter evaluation --providers bedrock --provision \
+npm run eval:retrieval -- --adapter evaluation --provision \
   --set terms-v1 --configuration <navn> --mode baseline|regression
 ```
 
@@ -73,8 +73,8 @@ npm run eval:retrieval -- --adapter evaluation --providers bedrock --provision \
 - Output: `<id>.json`, `<id>.md`, `<id>.performance.json` (p50/p95 pr. trin og ingestion mod
   §12) og `<id>.sha256`.
 - Registrering i produktion er et særskilt trin som `evaluation_publisher`:
-  `npm run eval:publish -- --report <dir>/<id>.json --mode baseline|regression`
-  (`deploy/evaluation/README.md`).
+  `npm run eval:publish -- --report <dir>/<id>.json --mode baseline|regression`.
+  Publisher-credentials ligger i kørselsmiljøets secret-håndtering, aldrig i repoet.
 
 ## Regler for indholdet
 
@@ -178,6 +178,23 @@ metrik, der ikke kan beregnes, dumper sit gate.
 1. en ny version af gate-sættet,
 2. en ny versionsstyret baseline og
 3. en eksplicit godkendt beslutning i `docs/decisions.md`.
+
+**`product_documents` (B-036)** evalueres med sit eget gate-sæt, `gates/product-documents-gates-v1.json`
+(D1–D6, `docs/beta.md` §5.1), aldrig med Q1–Q7. Q1–Q7 evaluerer omvendt aldrig `product_documents`.
+- Hver dokumentgate er en invariant med tærsklen 1 og gør aldrig en kørsel "uncertain".
+- H4 kræver, at retrieval blev spurgt om netop spørgsmålets ene produkt.
+- H6 kræver hele grundlaget: hver version komplet, sammenhængende, i rækkefølge og uforkortet, ingen
+  manglende gyldig version, og inden for budgettet.
+- Et sæt for metoden skal angive netop ét produkt pr. spørgsmål. `example-documents-v1` er
+  eksemplet:
+
+  ```
+  npm run eval:retrieval -- --set example-documents-v1 --configuration product-documents-fixture
+  ```
+
+E2E-kontrollen af de færdige svar (`evals/acceptance/`, `evals/engine/acceptance.ts`) er adskilt fra
+retrieval-gates og kan ikke bestå uden den rigtige Claude-model og en menneskelig, faglig
+validering (`docs/beta.md` §5.2).
 
 ## Pilot-regler
 

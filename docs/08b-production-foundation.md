@@ -3454,3 +3454,25 @@ Ingen af dem er et kodehul. De kræver deployment, validering, compliance eller 
   - pilotsættet `terms-v1`;
   - vedligeholder (Å-3) og retningslinjer (Å-4);
   - modtager af alarmer (Å-5).
+
+---
+
+### 21.16 Betaen uden AWS (B-035)
+
+8B-specifikationen og deltrinene ovenfor er uændret historik. For betaen (`docs/beta.md`) gælder:
+
+- **AWS erstattes.** Bedrock (Embed v4, Rerank 3.5), ECS-workeren, ClamAV som ECS-service, Secrets
+  Manager, OIDC til AWS og evalueringskontoen erstattes. AWS-koden fjernes i L2, når den nye vej er
+  testet.
+- **Retrieval-metoden `product_documents` (L1)** har hverken embedding eller reranker.
+  - **P1 og P2 er tilpasset eksplicit og kun for den metode** (`docs/beta.md` §5.1, §12):
+    - P1: metoden, der kørte, og konfigurationens metode er `product_documents`, og der er ingen
+      embedder og ingen embedding-model.
+    - P2: der kørte ingen reranker, og konfigurationen har ingen.
+  - **H6 er tilpasset tilsvarende:** metoden er den evaluerede, der er hverken embedder eller
+    reranker, og hver version i grundlaget er komplet.
+  - **Uændret:** P3–P9, H1–H5 og H7, for hybride konfigurationer også P1, P2 og H6.
+- **Kvalitetsgates Q1–Q7 er uændrede.** De passer ikke til en ikke-rangerende metode. Et gate-sæt
+  for metoden afventer beslutning (`docs/beta.md` §5.1). Indtil da kan en
+  `product_documents`-konfiguration ikke godkendes.
+

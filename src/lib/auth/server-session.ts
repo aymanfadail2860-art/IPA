@@ -1,8 +1,9 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
+import { isAreaAvailable, surfaceOf } from "@/config/navigation";
 import { meetsRequirement, type PermissionGrant, type PermissionKey, type PermissionRequirement, type PermissionScope } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
 import { isDemoMode } from "@/dev/demo/demo-mode";
@@ -88,6 +89,23 @@ export async function requireSession(): Promise<Session> {
   const session = await getServerSession();
   if (!session) redirect("/login");
   return session;
+}
+
+/**
+ * Server-side guard for an area the beta hides (B-035, docs/beta.md §1, L2): the page is not
+ * served — a 404, as if it did not exist — whatever the URL or the permissions. The demo without
+ * login (B-003) keeps every area.
+ */
+export async function requireArea(area: string): Promise<Session> {
+  const session = await requireSession();
+  if (!isAreaAvailable(area, surfaceOf(session))) notFound();
+  return session;
+}
+
+/** For server actions of an area: the session when the area exists on its surface, else null. */
+export async function sessionInArea(area: string): Promise<Session | null> {
+  const session = await getServerSession();
+  return session && isAreaAvailable(area, surfaceOf(session)) ? session : null;
 }
 
 /**

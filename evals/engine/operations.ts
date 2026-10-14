@@ -5,6 +5,7 @@ import path from "node:path";
 import { CONTROL_REFERENCES } from "../../src/lib/knowledge/core/control-references.ts";
 import { referenceFor, runControlCheck, type ControlReference } from "../../src/lib/knowledge/core/control-set.ts";
 import { modelLabel, type EmbeddingProvider } from "../../src/lib/knowledge/core/embedding.ts";
+import type { DocumentRetrievalParams } from "../../src/lib/knowledge/core/provider.ts";
 import type { RerankingProvider } from "../../src/lib/knowledge/core/reranker.ts";
 
 import { createDatabaseRetrieval, embeddingModelIdFor } from "./database-retrieval.ts";
@@ -37,12 +38,17 @@ export { classificationAlerts, type EvaluationMode } from "./regression.ts";
  */
 
 
-export interface EvaluationOperationOptions {
+/**
+ * The implementations under evaluation: a hybrid configuration's embedder and rerankers, or —
+ * for product_documents (B-035) — none, only the budget from the declared configuration.
+ */
+export type EvaluationImplementations =
+  | { documents?: undefined; embedder: EmbeddingProvider; reranker: RerankingProvider; baselineReranker: RerankingProvider }
+  | { documents: DocumentRetrievalParams };
+
+export type EvaluationOperationOptions = EvaluationImplementations & {
   inputs: LoadedInputs;
   mode: EvaluationMode;
-  embedder: EmbeddingProvider;
-  reranker: RerankingProvider;
-  baselineReranker: RerankingProvider;
   /** The evaluation environment. Without one, nothing runs (the fixture adapter is cli.ts's own path). */
   env: EvaluationEnvironment;
   /** Provision the corpus first (idempotent). */
@@ -52,7 +58,7 @@ export interface EvaluationOperationOptions {
   log?: (event: Record<string, unknown>) => void;
   /** The approved control-set references (8B-I8 C6). Default: core/control-references.ts. */
   controlReferences?: readonly ControlReference[];
-}
+};
 
 export interface EvaluationOperationResult {
   report: EvaluationReport;
@@ -68,28 +74,35 @@ export async function runEvaluationOperation(options: EvaluationOperationOptions
       env,
       manifest: inputs.set.manifest,
       fixtures: inputs.fixtures,
-      embedders: [options.embedder],
+      // product_documents needs no embeddings (B-035).
+      embedders: options.documents ? [] : [options.embedder],
       awaitWorker: options.awaitWorker,
       log: options.log,
       now: options.now,
     });
     ingestion = provisioned.ingestion;
   }
-  const control = await controlCheck(options.embedder, options.controlReferences ?? CONTROL_REFERENCES, options.log);
   const snapshot = await env.snapshot(inputs.set.manifest);
   const recorder = createPerformanceRecorder();
-  const retrieval = createDatabaseRetrieval({
-    env,
-    manifest: inputs.set.manifest,
-    snapshot,
-    embedder: options.embedder,
-    embeddingModelId: await embeddingModelIdFor(env, options.embedder),
-    reranker: options.reranker,
-    baselineReranker: options.baselineReranker,
-    now: options.now,
-    observe: recorder.observer,
-    controlDrift: control === "fail",
-  });
+  let retrieval;
+  if (options.documents) {
+    // No embedding model, so no control set (8B-I8 C6 concerns embedding vectors only).
+    retrieval = createDatabaseRetrieval({ env, manifest: inputs.set.manifest, snapshot, documents: options.documents, now: options.now, observe: recorder.observer });
+  } else {
+    const control = await controlCheck(options.embedder, options.controlReferences ?? CONTROL_REFERENCES, options.log);
+    retrieval = createDatabaseRetrieval({
+      env,
+      manifest: inputs.set.manifest,
+      snapshot,
+      embedder: options.embedder,
+      embeddingModelId: await embeddingModelIdFor(env, options.embedder),
+      reranker: options.reranker,
+      baselineReranker: options.baselineReranker,
+      now: options.now,
+      observe: recorder.observer,
+      controlDrift: control === "fail",
+    });
+  }
   const report = await runEvaluation({
     set: inputs.set,
     gates: inputs.gates,

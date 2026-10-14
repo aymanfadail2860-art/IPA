@@ -1,8 +1,11 @@
 {
-  "$comment": "Aggregerede alarmer (B-033, 8B-I8 C3). Maskinlæsbar og versioneret; aggregate-alarms.md forklarer den. Ændres kun med en ny version og en beslutning i docs/decisions.md.",
-  "version": 1,
+  "$comment": "Aggregerede alarmer (B-033, 8B-I8 C3; version 2: beta L2, B-037). Maskinlæsbar og versioneret; aggregate-alarms.md forklarer den. Ændres kun med en ny version og en beslutning i docs/decisions.md.",
+  "version": 2,
   "minimumSamples": 20,
-  "minimumSamplesAppliesTo": ["rate", "p95"],
+  "minimumSamplesAppliesTo": [
+    "rate",
+    "p95"
+  ],
   "singleEventAlarms": [
     "hard_gate_regression",
     "configuration_suspended",
@@ -13,47 +16,45 @@
     "publication_refused",
     "retrieval_unavailable",
     "scanner_failures",
-    "ipa-scanner-technical-failures",
-    "ipa-scanner-signatures-ageing",
     "malware_found",
-    "dead_letter",
-    "ipa-health-check-silent"
+    "dead_letter"
   ],
   "sources": {
     "retrieval": {
       "event": "retrieval",
       "where": "Vercel (appens funktioner)",
-      "emittedBy": ["src/lib/observability/retrieval-telemetry.ts"],
-      "fields": ["request_id", "outcome", "error_code", "failed_steps", "steps_ms", "configuration_id", "provider_errors"]
-    },
-    "provider_call": {
-      "event": "provider_call",
-      "where": "Vercel (appens funktioner) og CloudWatch /ipa/ingestion-worker",
-      "emittedBy": ["src/lib/knowledge/providers/provider-metrics.ts", "src/lib/knowledge/core/provider.ts"],
+      "emittedBy": [
+        "src/lib/observability/retrieval-telemetry.ts"
+      ],
       "fields": [
-        "runtime",
-        "provider",
-        "operation",
-        "model",
-        "outcome",
-        "duration_ms",
-        "provider_error_kind",
-        "throttled",
-        "timeout",
-        "retryable",
-        "http_status",
-        "error_class",
-        "correlation_id",
         "request_id",
+        "outcome",
+        "error_code",
+        "failed_steps",
+        "steps_ms",
         "configuration_id",
-        "configuration_fingerprint"
+        "provider_errors"
       ]
     },
     "job_step": {
       "event": "job_step",
-      "where": "CloudWatch /ipa/ingestion-worker",
-      "emittedBy": ["workers/ingestion/runtime.ts", "workers/ingestion/pipeline.ts", "src/lib/knowledge/core/provider.ts"],
-      "fields": ["step", "ms", "outcome", "error", "provider_error_kind", "throttled", "timeout", "http_status", "attempts"]
+      "where": "Importkørslens log (workerens stdout, deploy/import/compose.yaml)",
+      "emittedBy": [
+        "workers/ingestion/runtime.ts",
+        "workers/ingestion/pipeline.ts",
+        "src/lib/knowledge/core/provider.ts"
+      ],
+      "fields": [
+        "step",
+        "ms",
+        "outcome",
+        "error",
+        "provider_error_kind",
+        "throttled",
+        "timeout",
+        "http_status",
+        "attempts"
+      ]
     }
   },
   "alarms": [
@@ -64,21 +65,6 @@
       "source": "retrieval",
       "numerator": "failed_steps indeholder query_embedding",
       "denominator": "steps_ms.query_embedding findes eller failed_steps indeholder query_embedding",
-      "comparator": ">",
-      "threshold": 0.05,
-      "windowMinutes": 15,
-      "severity": "warning",
-      "minimumSamples": 20,
-      "basis": "§14"
-    },
-    {
-      "id": "A2",
-      "name": "Embedding-fejlrate, ingestion",
-      "kind": "rate",
-      "source": "provider_call",
-      "filter": "runtime = worker og operation = embed_document",
-      "numerator": "outcome = error",
-      "denominator": "alle",
       "comparator": ">",
       "threshold": 0.05,
       "windowMinutes": 15,
@@ -125,35 +111,22 @@
       "severity": "warning",
       "minimumSamples": 20,
       "basis": "§14 (tærskel), B-033 (vindue og alvor)"
-    },
-    {
-      "id": "A6",
-      "name": "429-rate (throttling), embedding",
-      "kind": "rate",
-      "source": "provider_call",
-      "filter": "operation = embed_query eller embed_document; pr. runtime",
-      "numerator": "throttled = true",
-      "denominator": "alle",
-      "comparator": ">",
-      "threshold": 0.05,
-      "windowMinutes": 15,
-      "severity": "warning",
-      "minimumSamples": 20,
-      "basis": "§14 (embedding-fejl og 429-rate, fejlrate > 5 %)"
     }
   ],
-  "metricsWithoutAlarm": [
-    {
-      "id": "provider_timeout_rate",
-      "source": "provider_call",
-      "definition": "timeout = true / alle, pr. runtime og operation",
-      "note": "Kan beregnes og vises. §14 fastsætter ingen tærskel, så der er ingen alarm (ingen opfundet tærskel)."
-    },
-    {
-      "id": "provider_error_rate",
-      "source": "provider_call",
-      "definition": "outcome = error / alle, pr. runtime, operation og provider_error_kind",
-      "note": "A2 er den for ingestion. Rerank og forespørgsler alarmeres pr. retrieval (A1 og A3)."
-    }
-  ]
+  "metricsWithoutAlarm": [],
+  "removedInVersion2": {
+    "note": "Beta L2 (docs/beta.md §14, B-037): AWS Bedrock er fjernet. Linjen provider_call (én pr. kald til Bedrock) og alarmerne A2 (embedding-fejlrate i ingestion) og A6 (429-rate for embedding) havde kun Bedrock som kilde. CloudWatch-alarmerne ipa-scanner-technical-failures, ipa-scanner-signatures-ageing og ipa-health-check-silent fandtes kun i ECS-udrulningen. Claude-adapteren (L4) får sine egne kald-linjer og alarmer i en ny version.",
+    "alarms": [
+      "A2",
+      "A6"
+    ],
+    "sources": [
+      "provider_call"
+    ],
+    "singleEventAlarms": [
+      "ipa-scanner-technical-failures",
+      "ipa-scanner-signatures-ageing",
+      "ipa-health-check-silent"
+    ]
+  }
 }

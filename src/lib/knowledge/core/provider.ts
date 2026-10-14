@@ -253,13 +253,87 @@ export interface RetrievalParams {
   rrfK: number;
 }
 
-/** What defines a retrieval configuration. Everything that changes results; nothing else. */
-export interface RetrievalFingerprintMaterial {
+/**
+ * The retrieval methods (B-035). "hybrid" is 8B's ranking search (vector ∥ lexical, RRF,
+ * reranker). "product_documents" has no embedding and no reranker: the authorized, published and
+ * valid document versions of ONE product, in full and in document order, within a budget.
+ */
+export type RetrievalMethod = "hybrid" | "product_documents";
+export const PRODUCT_DOCUMENTS = "product_documents" as const;
+
+/** The parameters of product_documents: the most characters one call may carry. Over it, the call is refused. */
+export interface DocumentRetrievalParams {
+  maxChars: number;
+}
+
+/** What defines a hybrid retrieval configuration (8B-I6). Everything that changes results; nothing else. */
+export interface HybridRetrievalMaterial {
   embedding: EmbeddingMaterial | null;
   reranker: RerankerMaterial;
   algorithmVersion: string;
   params: RetrievalParams;
   chunkerVersions: string[];
+}
+
+/** What defines a product_documents configuration (B-035). No embedding, no reranker — by definition. */
+export interface DocumentRetrievalMaterial {
+  method: typeof PRODUCT_DOCUMENTS;
+  embedding: null;
+  reranker: null;
+  algorithmVersion: string;
+  params: DocumentRetrievalParams;
+  chunkerVersions: string[];
+}
+
+/** The fingerprinted material. Hybrid material has no "method" field, so 8B fingerprints are unchanged. */
+export type RetrievalFingerprintMaterial = HybridRetrievalMaterial | DocumentRetrievalMaterial;
+
+/** The method a material describes (the database's knowledge.retrieval_material_method). */
+export function retrievalMethodOf(material: RetrievalFingerprintMaterial): RetrievalMethod {
+  return "method" in material && material.method === PRODUCT_DOCUMENTS ? PRODUCT_DOCUMENTS : "hybrid";
+}
+
+export function isDocumentMaterial(material: RetrievalFingerprintMaterial): material is DocumentRetrievalMaterial {
+  return retrievalMethodOf(material) === PRODUCT_DOCUMENTS;
+}
+
+/**
+ * The database's rule for product_documents material (knowledge.document_retrieval_material_problem),
+ * mirrored for the publisher's own check. Null = valid.
+ */
+export function documentMaterialProblem(material: unknown): string | null {
+  if (typeof material !== "object" || material === null || Array.isArray(material)) return "materialet har ikke de definerende felter";
+  const m = material as Record<string, unknown>;
+  const keys = Object.keys(m).sort();
+  if (keys.join(",") !== "algorithmVersion,chunkerVersions,embedding,method,params,reranker") return "materialet har ikke de definerende felter";
+  if (m.method !== PRODUCT_DOCUMENTS) return "ukendt retrieval-metode";
+  if (m.embedding !== null) return "metoden product_documents har ingen embedding-model";
+  if (m.reranker !== null) return "metoden product_documents har ingen reranker";
+  if (typeof m.algorithmVersion !== "string" || !/^product-documents-[0-9]{1,6}$/.test(m.algorithmVersion)) return "algoritmeversionen er ugyldig";
+  const params = m.params as Record<string, unknown> | null;
+  if (typeof params !== "object" || params === null || Object.keys(params).join(",") !== "maxChars") return "parametrene er ufuldstændige";
+  if (!Number.isInteger(params.maxChars) || (params.maxChars as number) < 10_000 || (params.maxChars as number) > 2_000_000) return "parameteren maxChars er ugyldig";
+  const versions = m.chunkerVersions;
+  if (!Array.isArray(versions) || versions.length === 0 || !versions.every((v) => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,99}$/.test(v))) {
+    return "chunker-versionerne er ugyldige";
+  }
+  return null;
+}
+
+/** The material of a product_documents configuration. */
+export function documentRetrievalMaterial(input: {
+  algorithmVersion: string;
+  params: DocumentRetrievalParams;
+  chunkerVersions: readonly string[];
+}): DocumentRetrievalMaterial {
+  return {
+    method: PRODUCT_DOCUMENTS,
+    embedding: null,
+    reranker: null,
+    algorithmVersion: input.algorithmVersion,
+    params: { maxChars: input.params.maxChars },
+    chunkerVersions: [...input.chunkerVersions],
+  };
 }
 
 export function embeddingMaterial(descriptor: EmbeddingProviderDescriptor): EmbeddingMaterial {
@@ -291,7 +365,7 @@ export function retrievalFingerprintMaterial(input: {
   algorithmVersion: string;
   params: RetrievalParams;
   chunkerVersions: readonly string[];
-}): RetrievalFingerprintMaterial {
+}): HybridRetrievalMaterial {
   return {
     embedding: input.embedding ? embeddingMaterial(input.embedding) : null,
     reranker: rerankerMaterial(input.reranker),

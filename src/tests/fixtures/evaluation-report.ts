@@ -2,16 +2,39 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { checksumOf, configurationFingerprint, gateSetChecksum } from "../../../evals/engine/checksum.ts";
-import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor } from "../../../evals/engine/gates.ts";
-import { computeMetrics } from "../../../evals/engine/metrics.ts";
-import { caseQualityFailures, compareScope, ENGINE_VERSION, NOT_PRODUCTION_REASON, REPORT_SCHEMA_VERSION, reportChecksum, type EvaluationReport, type Failure } from "../../../evals/engine/runner.ts";
+import { checkTypeMinimums, decide, evaluateDocumentGates, evaluateHardGates, evaluateQualityGates, qualityGateIds, tierFor } from "../../../evals/engine/gates.ts";
+import { computeDocumentMetrics, computeMetrics } from "../../../evals/engine/metrics.ts";
+import {
+  caseQualityFailures,
+  compareScope,
+  documentQualityFailures,
+  ENGINE_VERSION,
+  NOT_PRODUCTION_REASON,
+  REPORT_SCHEMA_VERSION,
+  reportChecksum,
+  type EvaluationReport,
+  type Failure,
+} from "../../../evals/engine/runner.ts";
 import { validateGateSet } from "../../../evals/engine/schema.ts";
-import { CASE_TYPES, type CaseObservation, type CaseType, type ConfigurationInput, type GateSet, type RerankerComparison, type Violation } from "../../../evals/engine/types.ts";
+import {
+  CASE_TYPES,
+  gateSetMethod,
+  isDocumentGateSet,
+  type CaseObservation,
+  type CaseType,
+  type ConfigurationInput,
+  type DocumentGateSet,
+  type DocumentObservation,
+  type GateSet,
+  type HybridGateSet,
+  type RerankerComparison,
+  type Violation,
+} from "../../../evals/engine/types.ts";
 
-import { FIXTURE_SCOPE, fixtureMaterial, type FixtureScopeEntry } from "./production-config";
+import { FIXTURE_SCOPE, fixtureDocumentMaterial, fixtureMaterial, type FixtureScopeEntry } from "./production-config";
 
 /**
- * ⚠ TEST FIXTURE — an evaluation report in the REAL I1 format (runner.ts, reportSchema 5) for a
+ * ⚠ TEST FIXTURE — an evaluation report in the REAL format (runner.ts, reportSchema 6) for a
  * production-grade fixture configuration, assembled with the engine's own functions so that
  * verifyReport and knowledge.record_evaluation_run both recompute it exactly (8B-I6).
  *
@@ -21,9 +44,14 @@ import { FIXTURE_SCOPE, fixtureMaterial, type FixtureScopeEntry } from "./produc
  * Fictional: no documents, no AWS, no evaluation environment.
  */
 
-export const GATES_V1: GateSet = validateGateSet(
+export const GATES_V1 = validateGateSet(
   JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../evals/retrieval/gates/gates-v1.json"), "utf8")),
-);
+) as HybridGateSet;
+
+/** The gate set of product_documents (B-036): D1–D6, every one an invariant. */
+export const PRODUCT_DOCUMENTS_GATES_V1 = validateGateSet(
+  JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../evals/retrieval/gates/product-documents-gates-v1.json"), "utf8")),
+) as DocumentGateSet;
 
 export const PASSING_COUNTS: Readonly<Record<CaseType, number>> = Object.freeze({
   direct: 75,
@@ -61,7 +89,36 @@ export interface ReportOptions {
   withoutReranker?: { passage_recall_at_k: number | null; mrr_at_k: number | null };
 }
 
-function observation(id: string, type: CaseType): CaseObservation {
+/**
+ * A product_documents basis that meets every document requirement (B-036): one product queried,
+ * two complete, valid versions delivered — for an abstaining (permission or unanswerable) question
+ * the actor's whole basis, which may be empty.
+ */
+export function passingDocuments(answerable: boolean): DocumentObservation {
+  return {
+    expectedVersions: 2,
+    deliveredVersions: 2,
+    missingVersions: 0,
+    unexpectedVersions: 0,
+    missingDocuments: 0,
+    unexpectedDocuments: 0,
+    incompleteVersions: 0,
+    productQueried: true,
+    foreignProductItems: 0,
+    requiredDocuments: answerable ? 1 : 0,
+    requiredDocumentsCovered: answerable ? 1 : 0,
+    requiredPassages: answerable ? 1 : 0,
+    requiredPassagesCovered: answerable ? 1 : 0,
+  };
+}
+
+function observation(id: string, type: CaseType, documents: boolean): CaseObservation {
+  const entry = baseObservation(id, type);
+  if (documents) entry.documents = passingDocuments(entry.outcome === "evidence");
+  return entry;
+}
+
+function baseObservation(id: string, type: CaseType): CaseObservation {
   if (ABSTAINING.includes(type)) {
     return {
       caseId: id, type, split: "dev", outcome: "insufficient", itemCount: 0, empty: true, sourceRank: null, firstGrade3Rank: null,
@@ -78,10 +135,11 @@ function observation(id: string, type: CaseType): CaseObservation {
 /** A report exactly as runEvaluation would write it for these observations. */
 export function buildReport(options: ReportOptions = {}): EvaluationReport {
   const gates = options.gates ?? GATES_V1;
+  const documents = isDocumentGateSet(gates);
   const counts = { ...PASSING_COUNTS, ...options.counts };
-  const cases: CaseObservation[] = CASE_TYPES.flatMap((type) => Array.from({ length: counts[type] }, (_, i) => observation(`${type}-${String(i + 1).padStart(3, "0")}`, type)));
+  const cases: CaseObservation[] = CASE_TYPES.flatMap((type) => Array.from({ length: counts[type] }, (_, i) => observation(`${type}-${String(i + 1).padStart(3, "0")}`, type, documents)));
   options.observe?.(cases);
-  const declared = options.configuration ?? fixtureMaterial();
+  const declared = options.configuration ?? (documents ? fixtureDocumentMaterial() : fixtureMaterial());
   const runtime = options.runtime ?? declared;
   const declaredFingerprint = configurationFingerprint(declared);
   const runtimeFingerprint = configurationFingerprint(runtime);
@@ -92,26 +150,29 @@ export function buildReport(options: ReportOptions = {}): EvaluationReport {
   if (runtimeFingerprint !== declaredFingerprint) runViolations.push({ gate: "H6", caseId: null, explanation: "Runtime-fingeraftrykket matcher ikke den evaluerede konfiguration." });
   if (environment !== "evaluation") runViolations.push({ gate: "H7", caseId: null, explanation: `Kørslen er ikke foretaget i evalueringsmiljøet (miljø: "${environment}").` });
 
-  const metrics = computeMetrics(cases);
-  const comparison: RerankerComparison = {
-    available: true,
-    withReranker: { passage_recall_at_k: metrics.passage_recall_at_k.value, mrr_at_k: metrics.mrr_at_k.value },
-    withoutReranker: options.withoutReranker ?? { passage_recall_at_k: metrics.passage_recall_at_k.value, mrr_at_k: metrics.mrr_at_k.value },
-  };
+  const hybridMetrics = documents ? null : computeMetrics(cases);
+  const documentMetrics = documents ? computeDocumentMetrics(cases) : null;
+  const comparison: RerankerComparison | null = hybridMetrics
+    ? {
+        available: true,
+        withReranker: { passage_recall_at_k: hybridMetrics.passage_recall_at_k.value, mrr_at_k: hybridMetrics.mrr_at_k.value },
+        withoutReranker: options.withoutReranker ?? { passage_recall_at_k: hybridMetrics.passage_recall_at_k.value, mrr_at_k: hybridMetrics.mrr_at_k.value },
+      }
+    : null;
   const violations = [...runViolations, ...cases.flatMap((entry) => entry.violations)];
   const hardGates = evaluateHardGates(violations);
-  const qualityGates = evaluateQualityGates(metrics, comparison, gates);
+  const qualityGates = isDocumentGateSet(gates) ? evaluateDocumentGates(documentMetrics!, gates) : evaluateQualityGates(hybridMetrics!, comparison!, gates);
   const minimums = checkTypeMinimums(cases);
-  const decision = decide(hardGates, qualityGates, minimums);
+  const decision = decide(hardGates, qualityGates, minimums, qualityGateIds(gates));
   const errors = cases.filter((entry) => entry.error !== null);
   const valid = decision.valid && errors.length === 0;
   const failures: Failure[] = [
     ...violations.map((violation) => ({ caseId: violation.caseId, gate: violation.gate, explanation: violation.explanation, rootCauseNote: null })),
-    ...caseQualityFailures(cases),
+    ...(documents ? documentQualityFailures(cases) : caseQualityFailures(cases)),
   ];
   const byType = Object.fromEntries(CASE_TYPES.map((type) => [type, cases.filter((entry) => entry.type === type).length])) as Record<CaseType, number>;
   const results = {
-    metrics,
+    metrics: (hybridMetrics ?? documentMetrics)!,
     rerankerComparison: comparison,
     hardGates,
     qualityGates,
@@ -141,9 +202,16 @@ export function buildReport(options: ReportOptions = {}): EvaluationReport {
       byType,
       bySplit: { dev: cases.length, holdout: 0 },
     },
-    gateSet: { id: gates.id, version: gates.version, decision: gates.decision, k: gates.k, checksum: gateSetChecksum(gates) },
+    gateSet: {
+      id: gates.id,
+      version: gates.version,
+      decision: gates.decision,
+      method: gateSetMethod(gates),
+      k: isDocumentGateSet(gates) ? null : gates.k,
+      checksum: gateSetChecksum(gates),
+    },
     configuration: {
-      label: options.label ?? "fixture-bedrock",
+      label: options.label ?? (documents ? "fixture-product-documents" : "fixture-bedrock"),
       adapter: "fixture-evaluation",
       environment,
       declared,
@@ -198,6 +266,26 @@ export function qualityRegressionReport(options: ReportOptions = {}): Evaluation
     runId: "f6000000-0000-4000-8000-0000000000ad",
     counts: UNCERTAIN_PILOT_COUNTS,
     observe: (cases) => cases.filter((c) => c.type === "direct").forEach((c) => Object.assign(c, { sourceRank: null, firstGrade3Rank: null, requiredCovered: 0 })),
+    ...options,
+  });
+}
+
+/**
+ * A product_documents report (B-036) that passes every hard gate and D1–D6 — the pilot minimum per
+ * type (36 questions). Document gates are invariants, so the verdict is "pass", never "uncertain".
+ */
+export function buildDocumentReport(options: ReportOptions = {}): EvaluationReport {
+  return buildReport({ gates: PRODUCT_DOCUMENTS_GATES_V1, counts: UNCERTAIN_PILOT_COUNTS, runId: "f6000000-0000-4000-8000-0000000000d1", ...options });
+}
+
+/**
+ * A product_documents run in which ONE question's basis misses a valid version (D4): every hard
+ * gate passes and the run is valid, but D4 — an invariant — fails, so the run fails.
+ */
+export function documentReportMissingVersion(options: ReportOptions = {}): EvaluationReport {
+  return buildDocumentReport({
+    runId: "f6000000-0000-4000-8000-0000000000d2",
+    observe: (cases) => Object.assign(cases[0]!.documents!, { missingVersions: 1, deliveredVersions: 1 }),
     ...options,
   });
 }

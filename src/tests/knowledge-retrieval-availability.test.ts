@@ -36,6 +36,7 @@ describe("retrieval availability is a readable state", () => {
   it("is available with the grade of the implementations it would use", () => {
     expect(assessRetrieval({ ...base, activeModel: testModel, environment: "test" })).toEqual({
       state: "available",
+      method: "hybrid",
       reranker: { id: "none", grade: "development" },
       embeddingModel: { label: "test:test-hash-embedder@1", grade: "development" },
       grade: "development",

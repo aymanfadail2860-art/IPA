@@ -6,7 +6,7 @@ import { evaluationEnvironmentFromEnv } from "../../evals/engine/evaluation-envi
 import { createReranker } from "@/lib/knowledge/core/registry";
 
 import { loadExample } from "./fixtures/eval-retrieval";
-import { FIXTURE_MODEL, FIXTURE_USER, fixtureContext, fixtureDb, fixtureRow, productionProviders } from "./fixtures/production-config";
+import { declaredProductionDoubles, FIXTURE_MODEL, FIXTURE_USER, fixtureContext, fixtureDb, fixtureRow } from "./fixtures/production-config";
 
 /**
  * 8B-I7 — the evaluation environment adapter (docs/08b §4.5) with a fake environment: the run
@@ -19,6 +19,8 @@ const snapshot = (checksum: string): CorpusSnapshot => ({
   binding: { products: {}, documents: {}, conflicts: {} },
   texts: new Map(),
   chunkerVersions: { [fixtureRow(1).chunk_id]: "structure/1" },
+  versionChunkCounts: {},
+  chunkDigests: {},
   checksum,
   versions: new Map(),
 });
@@ -41,7 +43,7 @@ function fakeEnvironment(authId: string, checksums: string[] = ["c1"]) {
 }
 
 function adapter(env: EvaluationEnvironment) {
-  const providers = productionProviders();
+  const providers = declaredProductionDoubles();
   return createDatabaseRetrieval({
     env, manifest: inputs.set.manifest, snapshot: snapshot("c1"), embedder: providers.embedder, embeddingModelId: FIXTURE_MODEL.id,
     reranker: providers.reranker, baselineReranker: createReranker("none"),
@@ -80,7 +82,7 @@ describe("the evaluation environment adapter", () => {
     const { env } = fakeEnvironment(FIXTURE_USER);
     const retrieval = adapter(env);
     expect(retrieval.environment).toBe("evaluation");
-    expect(retrieval.withoutReranker()?.configuration().reranker.id).toBe("none");
+    expect(retrieval.withoutReranker()?.configuration().reranker?.id).toBe("none");
   });
 });
 

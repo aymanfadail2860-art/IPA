@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { REVIEWED_INSTRUCTIONS } from "../ai/core/instructions.ts";
 import { isClassified, type ClassifiedText, type EgressCategory } from "./classification.ts";
 
 /**
@@ -22,6 +23,9 @@ import { isClassified, type ClassifiedText, type EgressCategory } from "./classi
  *   * A transport only transmits a body whose texts were authorized (assertTransmittable).
  *   * In-process implementations (the test embedder, "none", the stub model) send nothing and
  *     are outside this boundary.
+ *   * Generation is allowed per purpose (profile and action), never generally (beta L4,
+ *     docs/beta.md §16.5): GENERATE_PURPOSES lists exactly the purposes the beta sends to Claude.
+ *     A purpose that is not listed — Advise, Assessment, anything new — sends nothing.
  *
  * Denials are logged as technical metadata — never the text.
  */
@@ -29,7 +33,7 @@ import { isClassified, type ClassifiedText, type EgressCategory } from "./classi
 export const EGRESS_OPERATIONS = ["embed_document", "embed_query", "rerank", "generate"] as const;
 export type EgressOperation = (typeof EGRESS_OPERATIONS)[number];
 
-export type EgressRole = "document" | "query" | "question" | "context" | "evidence";
+export type EgressRole = "document" | "query" | "question" | "context" | "evidence" | "scenario";
 
 /** Never sent to an external provider — whatever the operation, provider, region or setting. */
 export const NEVER_EXTERNAL: readonly EgressCategory[] = Object.freeze(["customer_identifiable", "audit_access", "unknown"]);
@@ -47,11 +51,36 @@ export const EGRESS_ALLOWED: Readonly<Record<EgressOperation, Readonly<Partial<R
     query: Object.freeze(["user_question", "evaluation_synthetic"] as const),
     document: Object.freeze(["knowledge", "evaluation_synthetic"] as const),
   }),
-  generate: Object.freeze({
+  // Generation has no general row: what may be sent depends on the purpose (GENERATE_PURPOSES).
+  generate: Object.freeze({}),
+});
+
+const GROUNDED_QUESTION = Object.freeze({
+  question: Object.freeze(["user_question"] as const),
+  context: Object.freeze(["user_question"] as const),
+  evidence: Object.freeze(["knowledge"] as const),
+});
+
+/**
+ * What generation may send, per purpose (`<profile>.<action>`) and role — the beta's explicit
+ * rows (docs/beta.md §16.5). There is no general permission for a user's free text: the user's own
+ * text is only allowed redacted, as the question (and the page's label) of these four purposes, and
+ * never case-bound (checkPart). Advise (deferred) and Assessment (scoring is never left to a model)
+ * have no row and send nothing.
+ */
+export const GENERATE_PURPOSES: Readonly<Record<string, Readonly<Partial<Record<EgressRole, readonly EgressCategory[]>>>>> = Object.freeze({
+  // Copilot: a product question on the authorized, approved documents of one product.
+  "copilot.answer_question": GROUNDED_QUESTION,
+  // Learn: an explanation grounded in the authorized documents.
+  "learn.explain": GROUNDED_QUESTION,
+  // Practice roleplay: the advisor's line and FICTIONAL scenario content only — no documents, no
+  // label. The approved fictional scenarios come from the database (L7).
+  "practice.roleplay_turn": Object.freeze({
     question: Object.freeze(["user_question"] as const),
-    context: Object.freeze(["user_question"] as const),
-    evidence: Object.freeze(["knowledge"] as const),
+    scenario: Object.freeze(["training_fictional"] as const),
   }),
+  // Practice feedback: the advisor's text assessed against the authorized documents.
+  "practice.feedback": GROUNDED_QUESTION,
 });
 
 export type EgressDenialReason =
@@ -63,6 +92,7 @@ export type EgressDenialReason =
   | "not_redacted"
   | "category_not_allowed"
   | "unknown_operation"
+  | "purpose_not_allowed"
   | "no_parts"
   | "unauthorized_transmission";
 
@@ -76,6 +106,8 @@ export interface EgressRequest {
   operation: EgressOperation;
   /** The calling module, for the log (e.g. "knowledge.retrieval", "ai.gateway"). */
   module: string;
+  /** Generation only: `<profile>.<action>` (GENERATE_PURPOSES). Required for "generate". */
+  purpose?: string;
   correlationId?: string;
   parts: readonly EgressPart[];
 }
@@ -124,6 +156,8 @@ export interface AuthorizedEgress {
   readonly provider: string;
   readonly operation: EgressOperation;
   readonly module: string;
+  /** Generation only: the purpose the texts were authorized for. */
+  readonly purpose: string | null;
   readonly correlationId: string;
   /** The authorized texts, in part order. Exactly these may be transmitted. */
   readonly texts: readonly string[];
@@ -133,7 +167,14 @@ const authorized = new WeakSet<object>();
 
 type Check = { reason: EgressDenialReason; category: EgressCategory | null } | null;
 
-function checkPart(operation: EgressOperation, part: EgressPart | undefined): Check {
+function allowedFor(operation: EgressOperation, purpose: string | undefined, role: EgressRole): readonly EgressCategory[] | undefined {
+  if (operation !== "generate") return EGRESS_ALLOWED[operation][role];
+  if (typeof purpose !== "string" || !Object.hasOwn(GENERATE_PURPOSES, purpose)) return undefined;
+  const rows = GENERATE_PURPOSES[purpose]!;
+  return Object.hasOwn(rows, role) ? rows[role] : undefined;
+}
+
+function checkPart(operation: EgressOperation, purpose: string | undefined, part: EgressPart | undefined): Check {
   if (!part || typeof part !== "object") return { reason: "missing_provenance", category: null };
   const content: unknown = part.content;
   if (content === undefined || content === null || typeof content === "string") return { reason: "missing_provenance", category: null };
@@ -145,7 +186,7 @@ function checkPart(operation: EgressOperation, part: EgressPart | undefined): Ch
   if (provenance.caseBound) return { reason: "case_bound", category: provenance.category };
   if (NEVER_EXTERNAL.includes(provenance.category)) return { reason: "never_external", category: provenance.category };
   if (provenance.category === "user_question" && provenance.redacted !== true) return { reason: "not_redacted", category: provenance.category };
-  const allowed = EGRESS_ALLOWED[operation][part.role];
+  const allowed = allowedFor(operation, purpose, part.role);
   if (!allowed || !allowed.includes(provenance.category)) return { reason: "category_not_allowed", category: provenance.category };
   return null;
 }
@@ -175,9 +216,12 @@ export function authorizeEgress(request: EgressRequest, options: { log?: EgressL
   };
 
   if (!(EGRESS_OPERATIONS as readonly string[]).includes(request.operation)) deny("unknown_operation", null, null, null);
+  if (request.operation === "generate" && (typeof request.purpose !== "string" || !Object.hasOwn(GENERATE_PURPOSES, request.purpose))) {
+    deny("purpose_not_allowed", null, null, null);
+  }
   if (!Array.isArray(request.parts) || request.parts.length === 0) deny("no_parts", null, null, null);
   request.parts.forEach((part, i) => {
-    const failure = checkPart(request.operation, part);
+    const failure = checkPart(request.operation, request.purpose, part);
     if (failure) deny(failure.reason, failure.category, part && typeof part === "object" ? part.role : null, i);
   });
 
@@ -185,6 +229,7 @@ export function authorizeEgress(request: EgressRequest, options: { log?: EgressL
     provider: request.provider,
     operation: request.operation,
     module: request.module,
+    purpose: request.operation === "generate" ? request.purpose! : null,
     correlationId,
     texts: Object.freeze(request.parts.map((part) => part.content.text)),
   });
@@ -197,12 +242,21 @@ export function authorizeEgress(request: EgressRequest, options: { log?: EgressL
  * constants, not data. A new provider adds its constants here (a reviewed change), never in its
  * own adapter. Model and profile ids are checked separately as machine ids.
  */
-export const PROTOCOL_CONSTANTS: ReadonlySet<string> = new Set([
-  // Cohere Embed v4 on Bedrock
-  "search_document",
-  "search_query",
-  "float",
-  "NONE",
+export const PROTOCOL_CONSTANTS: ReadonlySet<string> = new Set<string>([
+  // The Cohere/Bedrock constants went with their adapters in the beta's L2 (docs/beta.md §14).
+  // Anthropic Messages API (beta L4, docs/beta.md §16): the message role, the content block and
+  // document source types, the cache-control type and the effort levels.
+  "user",
+  "text",
+  "document",
+  "content",
+  "ephemeral",
+  "low",
+  "medium",
+  "high",
+  // The platform's reviewed instruction texts: the profiles' system prompts, the output format
+  // instructions and the fixed document context (src/lib/ai/core/instructions.ts). Never data.
+  ...REVIEWED_INSTRUCTIONS,
 ]);
 
 const MACHINE_ID = /^[a-z0-9][a-z0-9_.:-]{0,127}$/;
@@ -217,8 +271,8 @@ function stringLeaves(value: unknown, out: string[]): string[] {
 /**
  * The check every external transport makes before transmission: the request carries a
  * genuine authorization for this provider, the model id is a machine id, and every string in
- * the body is one of the authorized texts or a reviewed protocol constant. Anything else is
- * refused — nothing is sent.
+ * the body is one of the authorized texts, a reviewed protocol constant or the (machine) model id
+ * itself. Anything else is refused — nothing is sent.
  */
 export function assertTransmittable(egress: AuthorizedEgress, expected: { provider: string; modelId: string; body: unknown; log?: EgressLog }): void {
   const fail = (): never => {
@@ -241,6 +295,6 @@ export function assertTransmittable(egress: AuthorizedEgress, expected: { provid
   if (typeof expected.modelId !== "string" || !MACHINE_ID.test(expected.modelId)) fail();
   const allowed = new Set(egress.texts);
   for (const leaf of stringLeaves(expected.body, [])) {
-    if (!allowed.has(leaf) && !PROTOCOL_CONSTANTS.has(leaf)) fail();
+    if (!allowed.has(leaf) && !PROTOCOL_CONSTANTS.has(leaf) && leaf !== expected.modelId) fail();
   }
 }

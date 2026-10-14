@@ -1,7 +1,7 @@
 import type { Embedder } from "./embedding.ts";
 import type { Grade } from "./grade.ts";
 import { assessProduction, PRODUCTION_CONDITIONS, PRODUCTION_SCHEMA_VERSION, type ProductionAssessment, type ProductionCondition } from "./production-conditions.ts";
-import type { RetrievalParams } from "./provider.ts";
+import { PRODUCT_DOCUMENTS, type DocumentRetrievalParams, type RetrievalMethod, type RetrievalParams } from "./provider.ts";
 import type { RetrievalContext } from "./retrieval-context.ts";
 import { NONE_RERANKER_ID, type RankReason, type Reranker } from "./reranker.ts";
 
@@ -23,7 +23,9 @@ import { NONE_RERANKER_ID, type RankReason, type Reranker } from "./reranker.ts"
  *     (B-012, enforced in src/lib/ai/core/invoke.ts).
  *
  * Schema version 2 (D-14, docs/07 §10 K-4): `retrieval.configuration = { id, fingerprint,
- * algorithmVersion }` and the chunker version of every item (P7).
+ * algorithmVersion }` and the chunker version of every item (P7). Schema version 3 (B-035):
+ * `retrieval.method` — the method that ran — and `retrieval.reranker` is null when no ranking
+ * step ran (product_documents).
  */
 
 export const EVIDENCE_SCHEMA_VERSION = PRODUCTION_SCHEMA_VERSION;
@@ -46,8 +48,11 @@ export interface EvidenceQuery {
 export interface EvidenceRetrieval {
   /** Derived from P1–P9 for this set. Never an input. */
   grade: Grade;
+  /** The retrieval method that ran (B-035): set by the code path, never by a request. */
+  method: RetrievalMethod;
   embeddingModel: { id: string; grade: Grade } | null;
-  reranker: { id: string; version: string; grade: Grade };
+  /** Null exactly when no ranking step ran (product_documents). */
+  reranker: { id: string; version: string; grade: Grade } | null;
   /** The retrieval configuration in service (P9), or null when there is none. */
   configuration: { id: string; fingerprint: string; algorithmVersion: string } | null;
   /** The conditions P1–P9 that were not met. Empty exactly when the grade is production. */
@@ -115,12 +120,15 @@ export interface IssueEvidenceInput {
   query: EvidenceQuery;
   /** The embedder that embedded the query and the active model's id, or null when no model is active. */
   embedding: { embedder: Embedder; modelId: string } | null;
-  reranker: Reranker;
+  /** The reranker that ran; null for product_documents. */
+  reranker: Reranker | null;
+  /** The method that ran (retrieval-core.ts). */
+  method: RetrievalMethod;
   /** knowledge.retrieval_context(), read with the client that searched. Null = unknown. */
   context: RetrievalContext | null;
   /** The algorithm version of the code that ran, and the parameters it actually used. */
   algorithmVersion: string;
-  params: RetrievalParams;
+  params: RetrievalParams | DocumentRetrievalParams;
   candidateCount: number;
   generatedAt: string;
   items: EvidenceItem[];
@@ -146,6 +154,7 @@ export function issueEvidenceSet(input: IssueEvidenceInput): EvidenceSet {
     context: input.context,
     embedding: input.embedding,
     reranker: input.reranker,
+    method: input.method,
     algorithmVersion: input.algorithmVersion,
     params: input.params,
     query,
@@ -160,9 +169,12 @@ export function issueEvidenceSet(input: IssueEvidenceInput): EvidenceSet {
     query,
     retrieval: {
       grade: assessment.grade,
+      method: input.method,
       embeddingModel: embedder ? { id: embedder.id, grade: embedder.grade } : null,
-      reranker: { id: input.reranker.id, version: input.reranker.version, grade: input.reranker.grade },
-      configuration: assessment.configuration ? { ...assessment.configuration } : null,
+      reranker: input.reranker ? { id: input.reranker.id, version: input.reranker.version, grade: input.reranker.grade } : null,
+      configuration: assessment.configuration
+        ? { id: assessment.configuration.id, fingerprint: assessment.configuration.fingerprint, algorithmVersion: assessment.configuration.algorithmVersion }
+        : null,
       unmet: [...assessment.unmet],
       candidateCount: input.candidateCount,
       generatedAt: input.generatedAt,
@@ -184,10 +196,11 @@ export function issueEvidenceSet(input: IssueEvidenceInput): EvidenceSet {
 /**
  * The only way to obtain a ProductionEvidenceSet (docs/07 §9.1 point 4, docs/08b §9). Throws
  * unless the set was issued by the retrieval layer with all of P1–P9 met, and checks P2, P7, P8
- * and P9 again on the set as it is now: a production reranker other than "none", every item's
- * chunker version within the configuration's evaluated set, no development override, and
+ * and P9 again on the set as it is now: for hybrid a production reranker other than "none", for
+ * product_documents the configuration's method with neither embedder nor reranker (B-035); every
+ * item's chunker version within the configuration's evaluated set, no development override, and
  * `retrieval.configuration` with the configuration's id, fingerprint and algorithm version
- * under schemaVersion 2.
+ * under the current schema version.
  */
 export function requireProductionEvidence(set: EvidenceSet): ProductionEvidenceSet {
   const assessment = issued.get(set);
@@ -197,9 +210,16 @@ export function requireProductionEvidence(set: EvidenceSet): ProductionEvidenceS
   if (assessment.grade !== "production" || !PRODUCTION_CONDITIONS.every((condition) => assessment.conditions[condition])) {
     throw new EvidenceGradeError("P1–P9 er ikke alle opfyldt.");
   }
-  // P2
-  if (set.retrieval.reranker.id === NONE_RERANKER_ID || set.retrieval.reranker.grade !== "production") {
-    throw new EvidenceGradeError(`rerankeren "${set.retrieval.reranker.id}" er ikke en produktionsreranker.`);
+  // P1/P2 again on the set as it is now. product_documents (B-035): exactly the method of the
+  // configuration it was assessed against, with neither embedder nor reranker. Hybrid: a
+  // production reranker other than "none" (unchanged).
+  const assessedMethod = assessment.configuration?.method ?? null;
+  if (set.retrieval.method === PRODUCT_DOCUMENTS || assessedMethod === PRODUCT_DOCUMENTS) {
+    if (set.retrieval.method !== PRODUCT_DOCUMENTS || assessedMethod !== PRODUCT_DOCUMENTS || set.retrieval.reranker !== null || set.retrieval.embeddingModel !== null) {
+      throw new EvidenceGradeError("metoden er ikke konfigurationens (produktdokumenter uden embedding og reranker).");
+    }
+  } else if (!set.retrieval.reranker || set.retrieval.reranker.id === NONE_RERANKER_ID || set.retrieval.reranker.grade !== "production") {
+    throw new EvidenceGradeError(`rerankeren "${set.retrieval.reranker?.id ?? "ingen"}" er ikke en produktionsreranker.`);
   }
   // P9
   const configuration = set.retrieval.configuration;

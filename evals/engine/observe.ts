@@ -1,10 +1,11 @@
 import { RESTRICTED_CONFLICT_MESSAGE, type EvidenceItem, type EvidenceSet } from "../../src/lib/knowledge/core/evidence.ts";
-import { embeddingLabel } from "../../src/lib/knowledge/core/provider.ts";
+import { embeddingLabel, isDocumentMaterial, retrievalMethodOf, sha256 } from "../../src/lib/knowledge/core/provider.ts";
 
 import type {
   CaseObservation,
   ConfigurationInput,
   CorpusBinding,
+  DocumentObservation,
   DocumentRef,
   EvalCase,
   ExpectedPassage,
@@ -182,6 +183,14 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
 
   // ------------------------------------------------------------------------- H4 — filters
   const filters = evalCase.filters;
+  // product_documents (B-036): the basis is exactly ONE product, and the retrieval must have been
+  // asked for exactly that product's stable id — never another or several.
+  const documentMethod = isDocumentMaterial(context.configuration);
+  if (documentMethod) {
+    const wanted = filters?.products?.length === 1 ? (binding.products[filters.products[0]!] ?? null) : null;
+    const asked = set.query.filters.productIds ?? [];
+    if (wanted === null || asked.length !== 1 || asked[0] !== wanted) breach("H4", `Retrieval blev ikke spurgt om netop spørgsmålets ene produkt (${asked.length === 0 ? "intet produkt" : asked.join(", ")}).`);
+  }
   if (filters) {
     for (const entry of resolved) {
       const product = lookup.products.get(entry.item.product.id) ?? null;
@@ -228,7 +237,7 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
   });
 
   const distractors = evalCase.expected.distractors ?? [];
-  return {
+  const observation: CaseObservation = {
     caseId: evalCase.id,
     type: evalCase.type,
     split: evalCase.split,
@@ -246,31 +255,133 @@ export function observeCase(evalCase: EvalCase, run: RetrievalRun, context: Obse
     violations,
     error: null,
   };
+  if (documentMethod) {
+    const documents = observeDocuments(evalCase, run, context, resolved, date, today);
+    observation.documents = documents;
+    // B-036: the whole basis is the method's contract. A valid version the actor may read that is
+    // missing altogether is a breach with zero tolerance (H6), not only a quality miss (D4, D6).
+    if (documents.missingVersions > 0) breach("H6", `Grundlaget mangler ${documents.missingVersions} gyldig(e) dokumentversion(er), som brugeren må læse.`);
+  }
+  return observation;
+}
+
+/** "document\u0000version" — a version as the manifest names it. */
+const versionKey = (document: string, version: string) => `${document}\u0000${version}`;
+
+/**
+ * The basis a product_documents retrieval MUST deliver for a case (B-036), from the manifest:
+ * every document of the case's product, in the case's language, document types and documents,
+ * that the actor may read, in the version valid on the date. A historical version needs the
+ * actor's historical grant. Nothing here comes from the retrieval under test.
+ */
+export function expectedBasis(evalCase: EvalCase, manifest: Manifest, date: string, today: string): Set<string> {
+  const product = evalCase.filters?.products?.length === 1 ? evalCase.filters.products[0]! : null;
+  const actor = manifest.actors.find((entry) => entry.id === evalCase.actor);
+  const basis = new Set<string>();
+  if (!product || !actor) return basis;
+  const grants = new Map(actor.grants.map((grant) => [grant.document, grant]));
+  for (const document of manifest.documents) {
+    if (document.product !== product || document.language !== evalCase.language) continue;
+    if (evalCase.filters?.documentTypes && !evalCase.filters.documentTypes.includes(document.type)) continue;
+    if (evalCase.filters?.documents && !evalCase.filters.documents.includes(document.key)) continue;
+    const grant = grants.get(document.key);
+    const valid = versionValidOn(document.versions, date);
+    if (!grant || !valid) continue;
+    const historical = versionValidOn(document.versions, today)?.label !== valid.label;
+    if (historical && !grant.historical) continue;
+    basis.add(versionKey(document.key, valid.label));
+  }
+  return basis;
+}
+
+/**
+ * What a product_documents basis held against what it must hold (B-036, D1–D6). The basis is the
+ * items of the case's product within the case's document types and documents; a conflict
+ * counterpart outside it is evidence because of the conflict and is judged by H4/H5, not here.
+ */
+function observeDocuments(evalCase: EvalCase, run: RetrievalRun, context: ObservationContext, resolved: ResolvedItem[], date: string, today: string): DocumentObservation {
+  const { manifest, binding } = context;
+  const productKey = evalCase.filters?.products?.length === 1 ? evalCase.filters.products[0]! : null;
+  const productId = productKey ? (binding.products[productKey] ?? null) : null;
+  const filters = evalCase.filters ?? {};
+  const inBasis = (entry: ResolvedItem) => {
+    if (entry.item.product.id !== productId) return false;
+    if (filters.documentTypes && !filters.documentTypes.includes(entry.item.document.type)) return false;
+    if (filters.documents && (!entry.document || !filters.documents.includes(entry.document))) return false;
+    return true;
+  };
+
+  const expected = expectedBasis(evalCase, manifest, date, today);
+  const basisItems = resolved.filter(inBasis);
+  const delivered = new Set(basisItems.map((entry) => (entry.document && entry.version ? versionKey(entry.document, entry.version) : `?\u0000${entry.item.documentVersionId}`)));
+  const documentOf = (key: string) => key.split("\u0000")[0]!;
+  const expectedDocuments = new Set([...expected].map(documentOf));
+  const deliveredDocuments = new Set([...delivered].map(documentOf));
+
+  const asked = run.set.query.filters.productIds ?? [];
+  const required = new Set(evalCase.expected.passages.map((passage) => versionKey(passage.document, passage.version)));
+  const anyItem = new Set(resolved.flatMap((entry) => (entry.document && entry.version ? [versionKey(entry.document, entry.version)] : [])));
+  const grade3 = evalCase.expected.passages.filter((passage) => passage.grade === 3);
+
+  return {
+    expectedVersions: expected.size,
+    deliveredVersions: delivered.size,
+    missingVersions: [...expected].filter((key) => !delivered.has(key)).length,
+    unexpectedVersions: [...delivered].filter((key) => !expected.has(key)).length,
+    missingDocuments: [...expectedDocuments].filter((key) => !deliveredDocuments.has(key)).length,
+    unexpectedDocuments: [...deliveredDocuments].filter((key) => !expectedDocuments.has(key)).length,
+    incompleteVersions: versionIntegrityProblems(run, productId, filters.documentTypes, filters.documents?.map((key) => binding.documents[key]?.documentId ?? "")).size,
+    productQueried: productId !== null && asked.length === 1 && asked[0] === productId,
+    foreignProductItems: resolved.filter((entry) => entry.item.product.id !== productId).length,
+    requiredDocuments: required.size,
+    requiredDocumentsCovered: [...required].filter((key) => anyItem.has(key)).length,
+    requiredPassages: grade3.length,
+    requiredPassagesCovered: grade3.filter((passage) => resolved.some((entry) => covers(entry, passage))).length,
+  };
 }
 
 /**
  * H6 (docs/08b §4.4): the evidence must come from exactly the configuration under evaluation,
  * with production implementations. Every reason is reported once per set.
+ *
+ * product_documents (B-035, adapted explicitly and only for that method): the evidence must come
+ * from that method — no embedder, no reranker — and every document version of the selected basis
+ * (the case's product, document types and documents) must be included IN FULL: exactly the
+ * version's chunks in the corpus, each once, contiguous and in chunk order, each chunk's text
+ * unabridged (B-036). The basis never exceeds the budget. The corpus counts and chunk digests come
+ * from the adapter (`versionChunkCounts`, `chunkDigests`); without them H6 fails.
  */
 export function developmentEvidence(caseId: string, run: RetrievalRun, configuration: ConfigurationInput): Violation[] {
   const reasons: string[] = [];
   const retrieval = run.set.retrieval;
-  // H6 judges the IMPLEMENTATIONS, not the set's P1–P9 grade (8B-I6): a configuration under
-  // evaluation is by definition not yet active, so its evidence can never meet P3 — the grade
-  // would make every evaluation fail. Development implementations, devOverride, another
-  // embedding model or reranker, the runtime fingerprint (runner.ts) and chunker versions are
-  // all checked here.
   if (retrieval.devOverride) reasons.push("Evidensen er fremtvunget af et udviklingsværktøj.");
-  if (retrieval.reranker.id === "none") reasons.push('Rerankeren er "none".');
-  if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);
-  if (!retrieval.embeddingModel) reasons.push("Forespørgslen er ikke embedded med en aktiv model.");
-  else if (retrieval.embeddingModel.grade !== "production") reasons.push(`Embedding-modellen har graden "${retrieval.embeddingModel.grade}".`);
-  const expectedModel = configuration.embedding ? embeddingLabel(configuration.embedding) : null;
-  if ((retrieval.embeddingModel?.id ?? null) !== expectedModel) {
-    reasons.push(`Embedding-modellen (${retrieval.embeddingModel?.id ?? "ingen"}) er ikke den evaluerede (${expectedModel ?? "ingen"}).`);
-  }
-  if (retrieval.reranker.id !== configuration.reranker.id || retrieval.reranker.version !== configuration.reranker.version) {
-    reasons.push(`Rerankeren (${retrieval.reranker.id}@${retrieval.reranker.version}) er ikke den evaluerede (${configuration.reranker.id}@${configuration.reranker.version}).`);
+  const declaredMethod = retrievalMethodOf(configuration);
+  if (retrieval.method !== declaredMethod) reasons.push(`Metoden (${retrieval.method}) er ikke den evaluerede (${declaredMethod}).`);
+  if (isDocumentMaterial(configuration)) {
+    if (retrieval.embeddingModel !== null) reasons.push(`Der blev brugt en embedding-model (${retrieval.embeddingModel.id}); metoden har ingen.`);
+    if (retrieval.reranker !== null) reasons.push(`Der blev brugt en reranker (${retrieval.reranker.id}); metoden har ingen.`);
+    reasons.push(...incompleteVersions(run, configuration));
+  } else {
+    // H6 judges the IMPLEMENTATIONS, not the set's P1–P9 grade (8B-I6): a configuration under
+    // evaluation is by definition not yet active, so its evidence can never meet P3 — the grade
+    // would make every evaluation fail. Development implementations, devOverride, another
+    // embedding model or reranker, the runtime fingerprint (runner.ts) and chunker versions are
+    // all checked here.
+    const declaredReranker = configuration.reranker;
+    if (!retrieval.reranker) reasons.push("Der kørte ingen reranker.");
+    else {
+      if (retrieval.reranker.id === "none") reasons.push('Rerankeren er "none".');
+      if (retrieval.reranker.grade !== "production") reasons.push(`Rerankeren har graden "${retrieval.reranker.grade}".`);
+    }
+    if (!retrieval.embeddingModel) reasons.push("Forespørgslen er ikke embedded med en aktiv model.");
+    else if (retrieval.embeddingModel.grade !== "production") reasons.push(`Embedding-modellen har graden "${retrieval.embeddingModel.grade}".`);
+    const expectedModel = configuration.embedding ? embeddingLabel(configuration.embedding) : null;
+    if ((retrieval.embeddingModel?.id ?? null) !== expectedModel) {
+      reasons.push(`Embedding-modellen (${retrieval.embeddingModel?.id ?? "ingen"}) er ikke den evaluerede (${expectedModel ?? "ingen"}).`);
+    }
+    if (retrieval.reranker && (retrieval.reranker.id !== declaredReranker.id || retrieval.reranker.version !== declaredReranker.version)) {
+      reasons.push(`Rerankeren (${retrieval.reranker.id}@${retrieval.reranker.version}) er ikke den evaluerede (${declaredReranker.id}@${declaredReranker.version}).`);
+    }
   }
   const allowed = new Set(configuration.chunkerVersions);
   const uncovered = new Set<string>();
@@ -282,4 +393,71 @@ export function developmentEvidence(caseId: string, run: RetrievalRun, configura
   }
   if (uncovered.size > 0) reasons.push(`Elementer fra chunker-versioner, konfigurationen ikke dækker: ${[...uncovered].sort().join(", ")}.`);
   return reasons.map((explanation) => ({ gate: "H6" as const, caseId, explanation }));
+}
+
+/**
+ * product_documents (B-035, B-036): every document version of the selected basis must be included
+ * in full — the version's chunks in the corpus, each once, as one contiguous run in chunk order,
+ * each chunk's text unabridged — and the basis must fit the configuration's budget. The basis is
+ * what the case asked for: its product, and its document types and documents when given. A
+ * conflict counterpart outside it is evidence because of the conflict (as in hybrid retrieval) and
+ * is not part of the basis.
+ *
+ * Returns the problems by version id; an empty map means the basis is whole.
+ */
+export function versionIntegrityProblems(run: RetrievalRun, productId: string | null, documentTypes?: readonly string[], documentIds?: readonly string[]): Map<string, string> {
+  const problems = new Map<string, string>();
+  const counts = run.versionChunkCounts;
+  const digests = run.chunkDigests;
+  const items = run.set.items;
+  const inBasis = basisPredicate(productId, documentTypes, documentIds);
+  const positions = new Map<string, number[]>();
+  items.forEach((item, i) => {
+    if (!inBasis(item)) return;
+    const list = positions.get(item.documentVersionId) ?? [];
+    list.push(i);
+    positions.set(item.documentVersionId, list);
+  });
+  for (const [versionId, at] of positions) {
+    const expected = counts?.[versionId];
+    const versionItems = at.map((i) => items[i]!);
+    const chunkIds = versionItems.flatMap((item) => item.chunkIds);
+    const problem = (() => {
+      if (expected === undefined) return `antallet af chunks i korpusset er ukendt`;
+      if (versionItems.some((item) => item.chunkIds.length !== 1)) return `et element samler flere chunks`;
+      if (new Set(chunkIds).size !== chunkIds.length || chunkIds.length !== expected) return `${new Set(chunkIds).size} af ${expected} chunks`;
+      if (at.some((position, i) => i > 0 && position !== at[i - 1]! + 1)) return `versionens chunks er spredt i resultatet`;
+      if (versionItems.some((item, i) => i > 0 && item.chunkIndex !== versionItems[i - 1]!.chunkIndex + 1)) return `chunks er ikke i dokumentets rækkefølge`;
+      if (!digests) return `chunkenes tekst kan ikke efterprøves`;
+      if (versionItems.some((item) => digests[item.chunkIds[0]!] !== sha256(item.excerpt.text))) return `en chunks tekst er ikke leveret uforkortet`;
+      return null;
+    })();
+    if (problem) problems.set(versionId, problem);
+  }
+  return problems;
+}
+
+/** The items of a product_documents basis: the product, within the document types and documents. */
+function basisPredicate(productId: string | null, documentTypes?: readonly string[], documentIds?: readonly string[]) {
+  return (item: EvidenceItem) =>
+    item.product.id === productId && (!documentTypes || documentTypes.includes(item.document.type)) && (!documentIds || documentIds.includes(item.documentId));
+}
+
+function incompleteVersions(run: RetrievalRun, configuration: ConfigurationInput): string[] {
+  if (!run.versionChunkCounts) return ["Fuldstændigheden kan ikke efterprøves: adapteren oplyser ikke versionernes antal chunks."];
+  if (!run.chunkDigests) return ["Fuldstændigheden kan ikke efterprøves: adapteren oplyser ikke chunkenes tekst."];
+  const filters = run.set.query.filters;
+  const product = filters.productIds?.length === 1 ? filters.productIds[0]! : null;
+  if (!product) return ["Metoden kræver netop ét produkt, men forespørgslen havde ikke ét."];
+  const reasons = [...versionIntegrityProblems(run, product, filters.documentTypes, filters.documentIds)].map(
+    ([versionId, problem]) => `Dokumentversionen ${versionId} er ikke medtaget i fuld længde (${problem}).`,
+  );
+  // The budget (B-036): the basis never exceeds maxChars. Over budget the retrieval must refuse;
+  // a basis that is delivered anyway has been neither refused nor kept within the limit.
+  if (isDocumentMaterial(configuration)) {
+    const inBasis = basisPredicate(product, filters.documentTypes, filters.documentIds);
+    const chars = run.set.items.filter(inBasis).reduce((sum, item) => sum + item.excerpt.text.length, 0);
+    if (chars > configuration.params.maxChars) reasons.push(`Grundlaget er ${chars} tegn og overskrider budgettet på ${configuration.params.maxChars}.`);
+  }
+  return reasons;
 }

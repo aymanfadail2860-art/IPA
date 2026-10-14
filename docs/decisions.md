@@ -10,6 +10,549 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-040 — L4 godkendt; L4b godkendt; regnskab ved HTTP-fejl uden automatiske gentagelser
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §16.18, §16.20, §17; `CLAUDE.md` §1; `docs/roadmap.md`;
+`src/lib/ai/providers/anthropic/`; `src/tests/live/`; `vitest.l4b.config.mts`
+
+**Beslutning:**
+- **L4 er godkendt** med grøn CI på commit `25fb1c5`.
+- **L4b er godkendt** som den første kontrollerede test med en rigtig Claude-model (`docs/beta.md`
+  §17). Rammerne er projektejerens:
+  - højst fire betalbare Messages-kald med syntetiske data: en rollespilsreplik og tre
+    Copilot-spørgsmål (klart dækket, tydelig undtagelse, kan ikke besvares);
+  - én gratis tokenoptælling til at afprøve inputloftet;
+  - ingen automatiske gentagelser;
+  - højst 3.000 output-tokens pr. kald;
+  - stop, hvis den samlede maksimale omkostning ville overstige 1,84 USD;
+  - stop ved en kritisk fejl.
+
+  Ingen migrationer mod hostet Supabase, ingen ændringer i Vercels produktionsmiljø og ingen
+  rigtige forsikringsdokumenter eller kundedata.
+- **Miljøet** er projektets cloud-udviklingsmiljø med lokal Supabase (projektejerens valg).
+  API-nøglen lægges af projektejeren som miljøvariabel i cloud-miljøets indstillinger og aldrig i
+  samtalen, Git eller en rapport.
+- **Regnskab ved HTTP-fejl** (projektejerens ordlyd):
+
+  > Godkend ikke som generel regel, at HTTP 429 og 5xx er gratis. En reservation må kun frigives,
+  > når den implementerede mekanisme sikkert kan fastslå, at der ikke er fakturerbart forbrug. Hvis
+  > det er usikkert, om en forespørgsel blev behandlet eller faktureret, skal reservationen forblive
+  > konservativt håndteret og markeres til afstemning. Ingen usynlige retries, der kan forbruge flere
+  > tokens end testplanen forudsætter.
+
+  Implementeret sådan:
+  - reservationen frigives kun, når udbyderen selv afviste forespørgslen før behandling: 400, 401,
+    402, 403, 404, 413 og 422;
+  - alt andet markeres usikkert og tæller fuldt, indtil det er afstemt: 429, 5xx, 529, enhver anden
+    HTTP-status, netværksfejl, timeout og afbrydelse;
+  - adapteren gentager aldrig et kald. Databasens `max_attempts` er et ekstra værn, og L4b sætter
+    den til 1;
+  - tokenoptællingen (`count_tokens`) er gratis efter Anthropics dokumentation. En fejl dér frigiver
+    fortsat.
+
+**Overvejede alternativer:**
+- *Frigive ved 429/5xx og gentage under samme reservation (L4's oprindelige adfærd).* Fravalgt af
+  projektejeren. Det byggede på en udledt antagelse om fakturering.
+- *Gentage med en ny reservation.* Fravalgt. En gentagelse er et nyt betalbart kald, som brugeren
+  ikke har bedt om.
+
+**Begrundelse:** Forbrugsgrænserne skal holde, også når udbyderen fejler. Kan det ikke fastslås,
+at et kald var gratis, må det ikke tælle som gratis.
+
+**Beslutninger i forberedelsen af L4b** (`docs/beta.md` §17):
+- **Et L4b-program uden for testsuiten** (`src/tests/live/l4b.live.ts`, `npm run l4b`). Det kører
+  ét trin ad gangen og bruger appens egen kæde: gatewayen, RLS som den rigtige rådgiver, ledgeren i
+  databasen, `product_documents`-retrieval og appens egen modelfabrik.
+- **Værnene læses fra databasen,** så en genkørsel aldrig kan overskride planen:
+  - højst fire sendte beskeder for modellen;
+  - summen af de sendte kalds maksimale omkostning er højst 1,84 USD;
+  - et tilfælde gentages aldrig;
+  - en kritisk fejl skriver en stopfil, som standser alle senere live-trin.
+- **Testkonfigurationerne tømmer API-nøglen.** Ingen almindelig testkørsel kan se den rigtige nøgle,
+  heller ikke i et miljø, der har den.
+
+**Udledt (til bekræftelse):**
+1. Statuskoderne 400, 401, 402, 403, 404, 413 og 422 betyder, at Anthropic afviste forespørgslen
+   før behandling og ikke fakturerer den.
+2. L4b's `product_documents`-konfiguration registreres med evalueringsmotorens fixture-rapport for
+   D1–D6. Den afprøver registrets mekanik, ikke metodens kvalitet (`docs/beta.md` §5.1, §17.4). Den
+   godkender hverken svarkvaliteten eller betaen.
+
+---
+
+## B-039 — L3 godkendt; egen Anthropic Console-organisation til betaen; L4 godkendt til implementering
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §2, §2.1, §5.3, §9, §11, §15, §16; `CLAUDE.md` §1; `docs/roadmap.md`;
+`src/lib/ai/`; `src/lib/egress/policy.ts`; `supabase/migrations/20261014000100_ai_usage_limits.sql`
+
+**Beslutning:**
+- **L3 er godkendt.** L3 er færdig med grøn CI på commit `628430e`.
+- **Betaens API-forbindelse** (projektejerens ordlyd):
+
+  > Betaversionen anvender projektejerens egen Anthropic Console-organisation med en dedikeret,
+  > server-side API-nøgle. Det er tilladt under udvikling og kontrolleret demo med syntetiske
+  > eller særskilt godkendte data. Når IPA overtager platformen, udskiftes API-konfigurationen
+  > med IPA's egen organisation. Den private Claude Code-session er ikke platformens
+  > produktionsidentitet. Ingen API-nøgle må skrives i dokumentation eller kildekode.
+
+  Nøglen er dedikeret og bruges kun af Insurance Partners. Det er hverken projektejerens Claude
+  Code-session eller Claude-abonnement. API-nøglen og den relevante model- og budgetkonfiguration
+  skal kunne udskiftes uden ændring af forretningslogik.
+- **Krav til forbindelsen:**
+  1. Forbindelsen er konfigurationsbaseret og ikke hardcoded til en bestemt konto.
+  2. Nøglen opbevares server-side som secret i det relevante miljø, aldrig i Git, browseren eller
+     almindelige databasetabeller.
+  3. Skift til IPA's nøgle sker uden kodeændringer eller ny arkitektur.
+  4. Budgetgrænser, rate limiting, logging og egress-kontroller bevares.
+  5. Betademonstrationer bruger kun syntetiske eller særskilt godkendte dokumenter og oplysninger,
+     indtil dokumentrettigheder og databehandling er afklaret.
+  6. Der bygges hverken selvbetjening af API-nøgler eller flere AI-leverandører i betaen.
+- **L4 er godkendt til implementering** efter specifikationen i `docs/beta.md` §16, herunder de
+  godkendte startgrænser (§16.7). Implementeringen kræver ikke en ny specifikationsgodkendelse,
+  så længe den holder sig inden for rammerne.
+- **Ingen rigtige betalbare Claude-kald før L4b**, som kræver særskilt godkendelse. Projektets
+  månedlige grænse sættes også uafhængigt i Anthropic Console før L4b.
+- Betaens øvrige scope er uændret: Copilot, Learn, Practice og Assessment er med; Advise er
+  udskudt. Master-roadmap 1–21 er uændret.
+
+**Overvejede alternativer:**
+- *Vente på IPA's egen Anthropic-organisation.* Fravalgt. Betaen skal demonstrere platformen med
+  rigtig AI, før den overdrages.
+- *Bruge projektejerens Claude Code-session eller abonnement.* Fravalgt. Den private konto må
+  aldrig blive platformens produktionsidentitet (B-035).
+- *Selvbetjening af nøgler eller flere leverandører.* Fravalgt for betaen som unødvendig
+  kompleksitet.
+
+**Beslutninger i implementeringen af L4** (`docs/beta.md` §16.14–§16.24):
+- **Officielt SDK, låst version.** `@anthropic-ai/sdk` 0.131.0 er den eneste nye dependency, og kun
+  transporten importerer den. Host, nøgle og auth er faste, og SDK'ets egne retries og logning er
+  slået fra.
+- **Modelvalg er konfiguration i to lag.** `IPA_AI_MODEL` vælger modellen. Databasens
+  `ai.model_prices` godkender den med verificerede priser, kilde og dato. Migrationen indsætter
+  ingen modeller, og intet model-id er skrevet i kode eller dokumentation. Ukendt model eller pris
+  afvises (fail-closed).
+- **Egress pr. formål** (`GENERATE_PURPOSES`): Copilot-spørgsmål, Learn-forklaring,
+  rollespilsreplik (kun brugerens replik og fiktivt scenarie) og Practice-feedback. Den generelle
+  regel for generering er fjernet. Advise og Assessment har intet formål og sender intet.
+- **Instruktioner er reviewede konstanter** (`instructions.ts`) og egress-politikkens
+  protokolkonstanter. Dokumenttekst er altid dokumentindhold og aldrig systemprompt.
+- **Citationer:** én dokumentblok pr. dokumentversion, ét uddrag pr. indholdsblok, native
+  citationer og almindelig tekst. Konverteringen til den eksisterende outputkontrakt er
+  deterministisk og foreløbig (L5).
+- **Forbrug:** én databasetransaktion under én global lås reserverer den maksimale omkostning før
+  afsendelse. Udbyderens tokenoptælling håndhæver inputloftet. Reservationen afstemmes med den
+  faktiske usage, frigives kun ved et HTTP-fejlsvar eller en afvisning før afsendelse, og markeres
+  usikker (tæller fuldt) ved netværksfejl og timeout. Forsøgene begrænses i databasen.
+- **Prompt caching** er forberedt, men ikke aktiv. Aktivering er en reviewet kodeændring.
+- **Struktureret log** uden indhold. Den låste indholdslog (docs/08 §11.1) er ikke ændret; se
+  "Udledt" punkt 1.
+
+**Overvejede alternativer i implementeringen:**
+- *Streng JSON-output (structured outputs) i stedet for native citationer.* Fravalgt.
+  Specifikationen beder om native citationer, og de to kan ikke kombineres.
+- *Godkendte model-id'er og priser i koden.* Fravalgt. Et modelskift ville kræve en kodeændring, og
+  model-id'er skrives ikke i repoet.
+- *Rå `fetch` mod API'et.* Fravalgt. Det officielle SDK giver typede fejl og det aktuelle format.
+- *Reservation efter tokenoptællingen.* Fravalgt. Optællingen sender indholdet til Anthropic, så
+  rate limits og budget kontrolleres før enhver netværkstrafik.
+- *Frigive reservationen efter en timeout.* Fravalgt. Udbyderen kan have behandlet kaldet.
+
+**Begrundelse:** Betaens formål er at demonstrere Insurance Partners med rigtig AI, før løsningen
+overdrages til IPA. En dedikeret nøgle i projektejerens egen organisation gør det muligt nu, og
+fordi forbindelsen kun er konfiguration, kan IPA overtage den uden at røre forretningslogikken.
+
+**Udledt (til bekræftelse):**
+1. **Konflikt med docs/08 §11.1 (B-014), ikke ændret.** Indholdsloggen gemmer det sendte indhold,
+   inkl. dokumentgrundlaget. L4 siger "log ikke dokumenttekst eller fulde prompts". Det skal
+   besluttes før rigtig betadrift (`docs/beta.md` §16.20).
+2. Rigtige brugeres fritekst sendes først til Claude efter en beslutning om restrisiko og
+   databehandling. L4b bruger syntetiske testprompter.
+3. Et HTTP-fejlsvar fra Anthropic faktureres ikke, så reservationen frigives og 429/5xx kan
+   gentages. *(Ikke bekræftet. Afgjort anderledes i B-040: 429, 5xx og 529 er usikre, og intet
+   kald gentages.)*
+4. Retentionsperioder for AI-logs og forbrugsrækker er ikke besluttet, og ingen er opfundet.
+
+---
+
+## B-038 — L1.1 og L2 godkendt; sikker dokumentimport uden AWS (beta L3)
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §6, §9, §11, §15; `docs/import-runbook.md`; `workers/import/`;
+`deploy/import/`; `deploy/ingestion-worker/Dockerfile`; `deploy/clamav/clamd.conf`; CI-jobbet
+`import-scanner`
+
+**Beslutning:**
+- **L1.1 og L2 er godkendt** på grundlag af statusrapporten for commit `717cc98`. Godkendt er
+  betaens dokumentmetode, den AWS-frie runtime, server-side skjulning af ufærdige moduler,
+  midlertidige udviklingsdata indtil L5–L8 og bevarelse af sikkerhed og testdækning. De øvrige
+  selvstændige beslutninger i B-036 og B-037 er opregnet i L3-rapporten og afventer fortsat deres
+  egne bekræftelser (`docs/beta.md` §11).
+- **Dokumentimporten er en administratorimport i Docker** (L3, `docs/beta.md` §15). Den genbruger
+  Admin-uploadens vej:
+  - karantæne og `knowledge.register_upload`;
+  - Admin-uploadens validering;
+  - den uændrede sikkerhedskæde i workeren.
+
+  Importen logger ind som operatørens egen konto og aldrig som service_role. Den læser ikke
+  dokumenternes tekst, godkender og publicerer intet. Ingen migration.
+- **Importlisten** er en CSV med danske kolonnenavne, én række pr. PDF. `version` og `gyldig_fra`
+  er påkrævede. Den valgfri kolonne `sider` giver et uafhængigt tjek af sideantallet. Ukendte
+  kolonner afvises.
+- **Selskab/udgiver understøttes ikke.** Datamodellen har intet felt til det. Importen afviser en
+  kolonne for det **[AFKLARES]**.
+- **En fil importeres højst én gang.** Findes dens SHA-256 som version, sendes den ikke igen.
+  Journalen gør en afbrudt import genoptagelig med samme id'er.
+- **Bevis for fuldstændighed** er en del af status (`docs/beta.md` §15.4):
+  - den gemte original har filens SHA-256;
+  - siderne er 1..N med tekstlag;
+  - tekstsegmenterne følger dokumentets rækkefølge og dækker hver side med tekst;
+  - identiteten svarer til importlisten.
+
+  En version, der fejler, vises som ufuldstændig.
+- **Scannerkontrollen kører i workerens tjeneste** før hver import. Kun workeren når scanneren,
+  som i L2.
+- **Scanneren bygges uden cache før hver import.** `clamd.conf` får `TCPAddr 0.0.0.0`, så
+  sundhedskontrollen virker uden IPv6.
+- **Workerens base-image er låst efter digest.**
+- **CI-jobbet `import-scanner`** bygger den rigtige scanner med friske officielle signaturer og
+  kører scannerkontrollen. Jobbet bruger ingen dokumenter, ingen database og ingen credentials.
+
+**Overvejede alternativer:**
+- *Importen som databasefunktion eller med service-rollen.* Fravalgt. Service-rollen omgår RLS og
+  auditloggens operatør. Den er ikke tilladt som genvej.
+- *En separat scannerkontrol-tjeneste uden credentials på det interne net.* Fravalgt. Den ville
+  ændre reglen fra L2 om, at kun workeren når scanneren.
+- *Parse PDF'en i importen for at tælle sider før upload.* Fravalgt. En PDF parses først efter
+  frigivelsen. Sideantallet kontrolleres efter udtrækket.
+- *Et nyt felt til selskab/udgiver eller brug af `external_ref`.* Fravalgt uden beslutning. Det ville
+  være et opfundet krav eller en ændret betydning af et eksisterende felt.
+- *Tillade dubletter som Admin-uploaden med en advarsel.* Fravalgt for importen. En gentaget kørsel
+  må ikke skabe en ny version.
+
+**Begrundelse:** Importen skal være så enkel som muligt og må ikke svække sikkerhedskæden. Ved at
+bruge Admin-uploadens egen vej som operatøren selv gælder alle eksisterende regler uændret. Det
+gælder adgang, karantæne, sikkerhedsvurdering, frigivelse, godkendelse og audit. Det eneste nye er
+en klient, der kan genoptages, og et bevis for, at hele versionen er gemt.
+
+**Udledt (til bekræftelse):**
+1. `version` og `gyldig_fra` er påkrævede i importlisten, fordi godkendelsen kræver dem.
+2. En fil, der findes som version, importeres ikke igen, heller ikke som et andet dokument.
+3. `sider` er valgfri, men anbefalet.
+4. Der køres én import ad gangen og fra én maskine.
+
+**Præcisering (14. oktober 2026, projektejerens beslutning efter L4's CI):** CI-jobbet
+`import-scanner` kører scannerkontrollen med `--max-age-hours 24`.
+- **Hvorfor:** jobbet fejlede to gange på rad med signaturer, der var 12 og 15 timer gamle. ClamAV
+  havde ikke udgivet nye officielle signaturer i det tidsrum. Jobbet skal bevise, at den rigtige
+  scanner kan bygges, starte, scanne en ren fil ren og finde EICAR. Det skal ikke afhænge af, hvor
+  ofte ClamAV udgiver.
+- **Ren testkonfiguration.** Grænsen på 24 timer står kun i CI-trinnet i
+  `.github/workflows/ci.yml`. Den når hverken importen, workeren eller nogen runtime-konfiguration.
+- **Den faktiske import kræver fortsat højst 8 timer gamle signaturer.** `deploy/import/ipa-import.sh`
+  angiver ingen grænse, så scannerkontrollens standard på 8 timer gælder. Det er uændret.
+- **Uændret:** workerens egen regel (den aktive sikkerhedspolitik i databasen, 24 timer, ellers
+  `stale_signatures`), arbejdsgangen for motorkandidater (8 timer) og alle øvrige
+  sikkerhedskontroller.
+- **Bevis:** `src/tests/import-signature-age.test.ts` er deterministisk. Den kører importens egen
+  kontrol mod en falsk scanner med en fast signaturalder: 8 timer og 10 minutter afvises, 7 timer og
+  50 minutter godkendes. Grænsen prøves præcist med et fast ur. Testen fastslår også, at 24 timer
+  kun findes i CI-trinnet. Fem mutationer af grænsen er fanget.
+- **Grænsen hæves ikke yderligere** uden en ny beslutning. Fejler CI fortsat på grund af
+  signaturernes alder, rapporteres det.
+
+Den oprindelige tekst ovenfor er ikke ændret.
+
+---
+
+## B-037 — AWS fjernet fra den aktive beta; skjulte områder (beta L2)
+
+**Dato:** 13. oktober 2026
+**Område:** `docs/beta.md` §2, §9, §14; `deploy/import/compose.yaml`;
+`deploy/monitoring/aggregate-alarms.*` (version 2); `src/config/beta-surface.ts`, `src/proxy.ts`
+
+**Beslutning:**
+- **AWS er fjernet fra den aktive kode og konfiguration** (B-035, `docs/beta.md` §14.1). Det
+  omfatter Bedrock-adaptere og -transport, credential-vejene, kataloget, provider-runtime og
+  provider-metrikker. Fjernet er også ECS-, ECR-, IAM-, security group-, Cloud Map- og
+  CloudWatch-filer, de AWS-baserede workflows og AWS-dependencies. Intet er slettet fra historikken.
+  Rollback-punktet er uændret (§10).
+- **Den hybride metode kan ikke længere give production-evidens.** Der findes ingen
+  production-embedder eller -reranker. En hybrid konfiguration med en production-udbyder afvises af
+  registret (fail-closed), og en hybrid evidensmængde opfylder aldrig P1/P2. Betaens
+  production-vej er `product_documents` (B-035).
+- **Leverandøruafhængige sikkerhedskrav er flyttet før sletning.** Hvert fjernet AWS-afhængigt
+  testkrav er ført over i en ny eller ændret test (`docs/beta.md` §14.3). Scannerens og workerens
+  isolation gælder nu containerspecifikationen `deploy/import/compose.yaml`.
+- **Kontrolsættet af embedding-vektorer (C6) bliver**, som B-035 fastslår (§2.1). Koden er
+  leverandøruafhængig. Betaen har ingen embedding-model, så kontrollen har intet at måle.
+- **Undtagelsen `createEvaluationBaselineReranker` er fjernet.** Den lod "none" konstruere i enhver
+  runtime, og kun Bedrock-evalueringen i CI brugte den. "None" kan nu kun konstrueres gennem
+  registrets kontrol af grade.
+- **De aggregerede alarmer er version 2.** Kilden `provider_call` og alarmerne A2 og A6 havde kun
+  Bedrock som kilde og er fjernet. CloudWatch-alarmerne er også fjernet. Numrene genbruges ikke.
+  A1 og A3–A5, minimum 20 forsøg og enkelthændelserne er uændrede.
+- **Betaen skjuler Advise, Analytics og Min profil server-side.**
+  - Det gælder for alle roller, uanset permissions.
+  - Proxyen og siderne svarer 404, og server-actions afviser. Områderne optræder ikke i navigation,
+    søgning, brugermenu eller på Home.
+  - Kundecases indlæses ikke.
+  - Copilot, Learn, Practice, Assessment, Home og Admin er uændrede.
+  - Demoen uden login (B-003) er ikke betaen og beholder alle områder.
+
+**Overvejede alternativer:**
+- *Bevare Bedrock-koden inaktiv.* Fravalgt. B-035 kræver, at AWS ikke indgår i den aktive runtime
+  og ikke i afhængighederne. Koden kan gendannes fra historikken.
+- *En testdobbelt, der registreres som production-implementering, så de hybride positive tests
+  kunne blive.* Fravalgt. Det ville åbne for præcis det, mekanismen skal forhindre: at noget, der
+  ikke er en rigtig production-adapter, bliver det. I stedet er P3–P9 vist med doubler, der kun
+  erklærer production og derfor fejler netop P1 og P2. Den positive vej er vist med
+  `product_documents`.
+- *Skjule områderne kun i menuen.* Fravalgt. En URL eller en server-action ville stadig nå dem.
+- *Skjule også Learn, Practice og Assessment, fordi de endnu viser udviklingsdata.* Fravalgt. De er
+  betaens kernemoduler og bygges i L6–L8.
+
+**Begrundelse:** betaen skal være så lille og så kontrolleret som muligt. Det, der ikke indgår i den,
+må hverken kunne kaldes eller ses. De sikkerhedskrav, AWS-koden testede, er ikke knyttet til AWS.
+De er ført over, så de stadig håndhæves af det, der findes.
+
+**Udledt (til bekræftelse):**
+1. **Betaen er enhver session med database.** Kun demoen uden login er ikke betaen.
+2. **Min profil skjules sammen med Advise og Analytics.** Siden viser kun udviklingsdata (fase 13)
+   og indgår ikke i betaens scope (`docs/beta.md` §1).
+3. **De rutetests, der viste sagsadgang og lederscope gennem siderne, viser nu 404.** Selve reglerne
+   testes uændret i databasen (`rls.integration.test.ts`).
+
+---
+
+## B-036 — Gate-sæt for product_documents, tre adskilte godkendelser og L2 (beta L1.1)
+
+**Dato:** 13. oktober 2026
+**Område:** `docs/beta.md` §5, §8, §13; `evals/retrieval/gates/product-documents-gates-v1.json`;
+`evals/acceptance/`; migrations `20261013000100` og `20261013000200`
+
+**Beslutning:**
+- **L0 og L1 er godkendt.** `product_documents` er betaens primære retrieval-strategi.
+- **Publiceringsreglen er bekræftet** (B-035, udledt 1):
+  - uden aktiv embedding-model kan en version publiceres uden embeddings, når alle øvrige
+    sikkerheds-, review-, versions- og adgangskrav er opfyldt;
+  - med en aktiv model gælder embedding-kontrollen;
+  - intet godkendes eller publiceres automatisk.
+- **Permission-modellen er godkendt principielt.** `docs/beta.md` §8 er efterprøvet mod principperne,
+  og afvigelserne er rapporteret dér (§8.1).
+- **Gate-sættet `product-documents-gates` v1 (D1–D6)** måler metodens faktiske opgave: at levere
+  korrekte, fuldstændige, autoriserede og relevante produktdokumenter.
+  - Hver gate er en invariant med tærsklen 1. Metrik, retning og tærskel er låst i koden og i
+    databasen.
+  - De hårde gates H1–H7 gælder. H4 og H6 er tilpasset eksplicit for metoden:
+    - netop spørgsmålets ene produkt;
+    - hele grundlaget, hver version komplet, i rækkefølge og uforkortet;
+    - inden for budgettet.
+  - Et gate-sæt gælder netop én metode. D1–D6 kan aldrig godkende en hybrid konfiguration, og
+    Q1–Q7 kan aldrig godkende `product_documents`.
+  - Q1–Q7 (`gates-v1`) er uændrede for den hybride metode.
+- **E2E-svarkvalitet er en separat kontrol** (`beta-answer-acceptance` v1), med disse krav:
+  - mindst 40 spørgsmål i alle ni kategorier;
+  - mindst 95 % fuldt korrekte;
+  - 0 kritiske fejl og 0 opdigtede kilder;
+  - korrekt håndtering af undtagelser og afvisninger;
+  - en rigtig Claude-model;
+  - eksplicit faglig, menneskelig validering.
+- **Tre adskilte godkendelser i databasen:**
+  - godkendt retrieval-konfiguration;
+  - valideret AI-svarkvalitet;
+  - betaversion godkendt til rådgivere.
+
+  Ingen af dem medfører automatisk en anden.
+- **Dokumentbudgettet på 360.000 tegn er et midlertidigt udviklingsloft.** Det er ikke dokumenteret
+  API-kapacitet. Før rigtige Claude-kald kontrolleres disse punkter (`docs/beta.md` §5.3):
+  - tokenantal;
+  - kontekstgrænse;
+  - reserverede outputtokens;
+  - systemprompt;
+  - antal dokumenter;
+  - pris og svartid.
+
+  Kan hele grundlaget ikke være med, afvises kaldet. Der afkortes eller udelades aldrig noget.
+- **Dokumentindhold er kildedata**, aldrig systeminstruktioner.
+- **Rollback:** commit `5461546` er den dokumenterede reference. Et manglende remote-tag blokerer ikke.
+- **L2 må gennemføres**, når L1.1 består. Derefter stoppes der før L3.
+
+**Overvejede alternativer:**
+- *Q1–Q7 med K = hele sættet* (forslaget i L1, `docs/beta.md` §5.1). Fravalgt:
+  - MRR og rerankerens løft har ingen mening uden rangering;
+  - afvisning af ubesvarbare spørgsmål er en egenskab ved det færdige svar, ikke ved
+    dokumentudvælgelsen.
+- *Tærskler under 1 med statistisk usikkerhed.* Fravalgt. Fuldstændighed og autorisation er ikke
+  estimater, og én udeladt eller fremmed version er en fejl.
+- *Én samlet godkendelse af retrieval, svar og beta.* Fravalgt. Den ville lade en godkendt
+  dokumentudvælgelse fremstå som valideret svarkvalitet.
+
+**Begrundelse:** metoden leverer et deterministisk grundlag pr. produkt og dato. Det, der kan gå
+galt, er udeladelse, afkortning, forkert version, forkert produkt og manglende adgangskontrol. Det
+måles direkte og uden tolerance. Svarkvaliteten afhænger af modellen og afgøres først med den
+rigtige model og et menneskes faglige validering.
+
+**Udledt (til bekræftelse):**
+1. **En dokumentgate gør aldrig en kørsel "uncertain".** Wilson-intervallet rapporteres, men
+   pilot-reglen om accept af usikkerhed (B-030) gælder ikke en invariant. Tier pilot afgrænser
+   stadig godkendelsen til det evaluerede område.
+2. **En gyldig version, brugeren må læse, som mangler helt, er også et H6-brud.** Den er altså ikke
+   kun en D4/D6-mangel. I regression suspenderer den straks.
+3. **Undtagelser og afvisninger har nul tolerance.** Fejl i håndteringen af undtagelser og
+   begrænsninger og manglende eller uberettigede afvisninger tolereres ikke. Det kommer oven i kravet
+   om 95 % fuldt korrekte svar.
+4. **Hvem må hvad i E2E-kontrollen:**
+   - en person med `knowledge.version.publish` validerer svarkvaliteten (faglig godkendelse);
+   - registrering af bedømmelser og godkendelse af betaen kræver `system.settings.manage`.
+5. **En betagodkendelse gælder kun, mens dens retrieval-konfiguration er den aktive og klar til
+   drift.** Svarvalideringen skal gælde netop den konfiguration.
+6. **Minimum pr. type i retrieval-sættet er det samme som i 8B** (mindst 36 spørgsmål), og hvert
+   spørgsmål skal angive netop ét produkt.
+
+---
+
+## B-035 — Fast beta uden AWS med fire kernemoduler
+
+**Dato:** 12. oktober 2026
+**Område:** `docs/beta.md` (betaens scope, arkitektur og leverancer), `CLAUDE.md` §1–§4,
+`docs/roadmap.md`, `docs/07-knowledge-engine.md` (publicering og retrieval),
+`docs/08b-production-foundation.md` (§21.16)
+
+**Beslutning:**
+- **Ny udviklingsstrategi.** Målet er en professionel, fungerende beta med fire obligatoriske
+  moduler: Copilot, Learn, Practice og Assessment. Alle fire bygger på den samme autoritative,
+  versionsstyrede forsikringsviden. Prioriteten er hurtig levering, lav kompleksitet, høj
+  forsikringsfaglig kvalitet og sikkerhed. Der gås ikke på kompromis med:
+  - kundedatabeskyttelse;
+  - adgangskontrol;
+  - dokumentversioner;
+  - kildekorrekthed;
+  - prøvesikkerhed.
+- **Advise udskydes.** Kundepolice-analyse, sammenligning af kundens dækning, AI på identificerbare
+  sagsdata og sagsbaseret AI-dialog er uden for betaen. Koden bevares. Modulet skjules i betaens
+  brugerflade, og spærren mod kundesagsdata bevares.
+- **K1 — embedding-fri retrieval-konfiguration.** Godkendt. Betaen får en retrieval-konfiguration
+  uden embedding-model og reranker, som kan blive beta-godkendt efter reel evaluering.
+  - Ingen generel fjernelse af sikkerhedsgates.
+  - Ingen automatisk production-evidens.
+  - Ingen adgang til ikke-godkendte dokumenter.
+  - RLS og dokumentrettigheder tilsidesættes aldrig.
+  - P1/P2 og H6 tilpasses kun eksplicit for den nye retrieval-type. P3–P9 og de øvrige relevante
+    hårde gates gælder uændret.
+  - Evalueringen verificerer den faktiske metode og det autoriserede produktscope.
+  - Versionsstyring, konfliktmarkering, historiske betingelser og kildeproveniens bevares.
+- **Copilot-retrieval: strategi B, "produktdokumenter i fuld længde"** (`product_documents`).
+  Sammenligningen med produktfiltreret leksikalsk retrieval står i `docs/beta.md` §4. Brugeren
+  vælger produkt. Databasen udvælger de adgangsgodkendte, publicerede og gyldige dokumentversioner
+  for produktet inden for profilens dokumenttyper, og modellen modtager dem i fuld længde. Et
+  grundlag over budgettet (`maxChars`, del af fingeraftrykket) afvises og afkortes aldrig.
+- **K2 — publicering uden embeddings.** Godkendt, når den godkendte beta-retrievaltype ikke kræver
+  dem. Dokumenter skal fortsat igennem:
+  - kontrolleret import;
+  - karantæne;
+  - PDF-validering;
+  - malwarekontrol og godkendt scan-verdict;
+  - tekstudtræk og versionsregistrering;
+  - faglig menneskelig godkendelse;
+  - rettighedstildeling.
+
+  Ingen automatisk publicering.
+- **K3 — AWS fjernes fra betaen.** Den aktive beta må ikke afhænge af:
+  - Bedrock og Cohere;
+  - Fargate/ECS og ECR;
+  - NAT/VPC;
+  - AWS IAM/OIDC;
+  - Secrets Manager;
+  - CloudWatch.
+
+  AWS-kode og dependencies fjernes, når den nye vej er bygget og testet (L2). Historiske
+  migrations og Git-historik bevares. Ingen destruktive databaseændringer.
+- **K4 — faserækkefølge.** Godkendt som eksplicit undtagelse til den hidtidige
+  implementeringsrækkefølge. Betaen må implementere de nødvendige dele af 8C, 9, 10 og 12 tidligere
+  end den oprindelige masterrækkefølge. Master-roadmap 1–21 ændres ikke. CLAUDE.md §2 ændres kun i
+  det omfang, der dokumenterer undtagelsen.
+- **K5 — demo og beta adskilt.** Den offentlige demo må ikke forveksles med betaen og bevares om
+  nødvendigt kun som beskyttet development/preview uden rigtige kundedata. Betaen:
+  - kræver login;
+  - bruger Supabase;
+  - viser ikke mock-data som virkelige resultater;
+  - tillader kun inviterede, autoriserede brugere.
+- **K6 — permissions.** Separate, mindst mulige permissions:
+  - `learning.content.manage`;
+  - `practice.scenarios.manage`;
+  - `assessment.content.manage`;
+  - `assessment.content.approve`.
+
+  Eksisterende permissions genbruges til brugeradgang og Knowledge Engine-administration. Ret til
+  at redigere læringsmateriale giver aldrig ret til at godkende prøvespørgsmål. Roller, scope, RLS
+  og audit står i `docs/beta.md` §8. Permissions implementeres i den leverance, der først bruger dem.
+- **K7 — Claude API direkte.** Godkendt som teknisk beta-retning. Det er **ikke** en påstand om
+  behandling udelukkende i EU.
+  - Før rigtige fortrolige dokumenter eller personoplysninger sendes til modellen, skal DPA,
+    dokumentlicenser, behandlingsgrundlag, sikkerhed og datatransfers være vurderet og godkendt.
+  - Udvikling bruger syntetiske eller særskilt godkendte testdata.
+  - Den private Claude Code-konto må aldrig blive platformens produktionskonto.
+- **Dokumentimport:** kontrolleret administratorimport som engangskørsel i Docker på en betroet
+  maskine. Den genbruger den eksisterende worker og ClamAV-kæde. Dokumenter uploades ikke til
+  GitHub Actions som standard.
+- **E2E-svarevaluering** (exit-krav for den første begrænsede beta):
+  - mindst 40 repræsentative spørgsmål;
+  - mindst 95 % fuldt korrekte;
+  - 0 kritiske fejl om dækning, undtagelser, gyldighed eller dokumentrettigheder;
+  - ingen opdigtede kilder;
+  - alle væsentlige konklusioner dokumenteret;
+  - tydelig afvisning ved utilstrækkeligt grundlag.
+
+  Kategorierne står i `docs/beta.md` §5.2. Evalueringen erstatter ikke automatisk retrieval-gates
+  Q1–Q7. Usikkerheden ved et lille sæt rapporteres og accepteres eksplicit.
+- **Databeskyttelse for fritekst:** proveniens og egress-autorisation pr. profil og handling, aldrig
+  en generel tilladelse til at sende brugertekst til Anthropic. Ukendt eller kundebundet indhold
+  fejler lukket. Der er ingen administratoroverstyring (`docs/beta.md` §7).
+- **Supabase:** det eksisterende projekt "IPA" (EU) er udpeget som beta-staging og må kun inspiceres
+  read-only. Migrations, tabeller, Auth/RLS, uploads og betalbare ressourcer kræver særskilt
+  godkendelse. En separat production-database oprettes senere.
+- **Git og rollback:**
+  - arbejdet sker på `beta/fast-beta-without-aws` og ændrer `main` via pull requests med grøn CI;
+  - rollback-punktet er `5461546` (`docs/beta.md` §10);
+  - ingen force-push og ingen sletning af historik.
+- **Udførelse:** L0–L9 i `docs/beta.md` §9. Hver leverance godkendes særskilt.
+
+**Overvejede alternativer:**
+- *Strategi A, produktfiltreret leksikalsk retrieval.* Fravalgt som production-metode. Uden
+  embeddings og reranker findes undtagelser og fravær af dækning ikke pålideligt, og exit-kravet om 0
+  kritiske fejl kan ikke forventes nået.
+- *En kombination af A og B i runtime.* Fravalgt: den giver ikke en klar fordel, der opvejer den
+  ekstra kompleksitet. Et for stort grundlag afgrænses af brugeren til de relevante dokumenter.
+- *Behandling af dokumenter på GitHub-hostede runners.* Fravalgt som standard: forsikringsdokumenter
+  må ikke nødvendigvis behandles der.
+- *Bevare AWS-stakken i betaen.* Fravalgt: den kræver deployment og drift, som betaen ikke har
+  brug for. Den mulige EU-regionsvej, Bedrock gav, opgives bevidst. Det skal oplyses sandfærdigt.
+
+**Begrundelse:** den hurtigste vej til fire fungerende moduler er den eksisterende platform med
+Supabase, Vercel og Claude API. Den genbruger Knowledge Engine, AI Gateway, egress-grænsen,
+upload-sikkerheden og registret over konfigurationer uden AWS. De låste sikkerhedsgrænser bevares.
+Kun de valg, der binder løsningen til embeddings og AWS, tilpasses eksplicit.
+
+**Fund under L0, til afgørelse:** kvalitetsgates Q1–Q7 passer ikke til en ikke-rangerende metode
+(`docs/beta.md` §5.1). Q1–Q7 er ikke ændret. Indtil et gate-sæt for `product_documents` er besluttet,
+kan betaens konfiguration ikke godkendes (fail-closed).
+
+**Udledt (til bekræftelse):**
+1. Publicering kræver embeddings, netop når en embedding-model er aktiv (implementeret i L1).
+   - Uden aktiv model kan ingen søgning bruge vektorer, så kravet bortfalder.
+   - Ellers kunne betaens dokumenter ikke publiceres og evalueres, før en konfiguration var
+     godkendt.
+   - Med en aktiv model kræves embeddings som hidtil, også når konfigurationen i drift er
+     embedding-fri. Det er strengere end K2 tillader, men enklere og uden huller.
+   - En hybrid konfiguration kan kun aktiveres, når dens model dækker alle chunks.
+2. Administratorrollen får de fire nye permissions som standard. Firøjneprincippet i databasen
+   adskiller redigering og godkendelse af prøvespørgsmål.
+3. At tage en prøve kræver en aktiv bruger og en tildelt prøve, ikke en ny permission.
+
+---
+
 ## B-034 — 8B-I8: Final Implementation Closure (C1–C7)
 
 **Dato:** 12. oktober 2026

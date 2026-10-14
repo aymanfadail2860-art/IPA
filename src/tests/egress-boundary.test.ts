@@ -27,20 +27,26 @@ import {
   type EgressRole,
 } from "@/lib/egress/policy";
 import { syntheticText } from "@/lib/egress/synthetic";
+import type { Embedder, EmbedOptions } from "@/lib/knowledge/core/embedding";
 import { requireProductionEvidence } from "@/lib/knowledge/core/evidence";
+import type { Reranker, RerankInput } from "@/lib/knowledge/core/reranker";
 import { runRetrieval, type KnowledgeRpcClient, type SearchRow } from "@/lib/knowledge/retrieval-core";
-import { createCohereEmbedV4, EMBED_V4_EU_1024_DESCRIPTOR } from "@/lib/knowledge/providers/bedrock/cohere-embed-v4";
-import { COHERE_RERANK_35_ID } from "@/lib/knowledge/providers/bedrock/cohere-rerank-3-5";
-import { createProductionEmbedder, createProductionReranker, embeddingModelRow, type ProviderRuntime } from "@/lib/knowledge/providers/catalog";
 
 import { evidenceItem, issueEvidence } from "./fixtures/ai-evidence";
-import { embedResponse, fakeBedrock, noSleep, type FakeCall } from "./fixtures/bedrock-fake";
+import { memoryLedger } from "./fixtures/memory-ledger";
 
 /**
  * 8B-I2.5 — the external-AI data boundary. Customer-identifiable data may not leave the
  * platform's approved trust boundary to an external AI provider — for model generation, query
  * embedding, document embedding and reranking alike. Every test that denies also proves that
- * ZERO external calls were made. Everything is fictional; no AWS account, no network.
+ * ZERO external calls were made. Everything is fictional; no network.
+ *
+ * Beta L2 (docs/beta.md §14): the Bedrock adapters that used this boundary for embedding and
+ * reranking are removed. The boundary itself (classification, authorizeEgress,
+ * assertTransmittable, invokeModel) is unchanged and vendor-neutral; the embedding and reranking
+ * tests now use an external provider that follows the same adapter contract (`external()`), so
+ * what they prove — retrieval carries provenance to every provider, and a denied text means zero
+ * calls — still holds for the next external adapter (Claude, L4).
  */
 
 const CASE_TEXT = "Kunden Fiktiv Tømrer ApS vil vide, om deres lift er dækket";
@@ -48,21 +54,49 @@ const PUBLIC_QUESTION = "Dækker erhvervsansvar skade på ting under reparation?
 const publicQuery = () => userText(PUBLIC_QUESTION, { caseBound: false, redacted: true });
 const caseQuery = (redacted = true) => userText(CASE_TEXT, { caseBound: true, redacted });
 
-function bedrockHandler(call: FakeCall): unknown {
-  if (Array.isArray(call.body.texts)) return embedResponse(call.body.texts as string[]);
-  return { results: (call.body.documents as string[]).map((_, index) => ({ index, relevance_score: 1 / (index + 1) })) };
-}
+const EXTERNAL = "external-provider";
 
-function bedrock() {
-  const fake = fakeBedrock(bedrockHandler);
+/**
+ * An external embedder and reranker that follow the adapter contract of 8B-I2.5: every text is
+ * authorized first (authorizeEgress — all or nothing), and the transport sends only a body whose
+ * every string was authorized (assertTransmittable). `calls` is what would have left the
+ * platform. A test double: no network, no vendor.
+ */
+function external() {
+  const calls: { operation: string; body: Record<string, unknown> }[] = [];
   const denials: EgressDenialLogEntry[] = [];
-  const runtime: ProviderRuntime = { bedrock: fake.transport, retryDeps: noSleep, egressLog: (entry) => denials.push(entry) };
-  return {
-    calls: fake.calls,
-    denials,
-    embedder: createProductionEmbedder(embeddingModelRow(EMBED_V4_EU_1024_DESCRIPTOR), runtime),
-    reranker: createProductionReranker(COHERE_RERANK_35_ID, runtime),
+  const log = (entry: EgressDenialLogEntry) => void denials.push(entry);
+  const transmit = (egress: ReturnType<typeof authorizeEgress>, operation: string, body: Record<string, unknown>) => {
+    assertTransmittable(egress, { provider: EXTERNAL, modelId: "external-model-1", body, log });
+    calls.push({ operation, body: structuredClone(body) });
   };
+  const embedder: Embedder = Object.freeze({
+    id: `${EXTERNAL}:embed@1`,
+    grade: "development" as const,
+    dimensions: 3,
+    async embed(texts: readonly ClassifiedText[], options: EmbedOptions) {
+      const operation = options.inputType === "document" ? "embed_document" : "embed_query";
+      const egress = authorizeEgress({ provider: EXTERNAL, operation, module: "external.embed", parts: texts.map((content) => ({ role: options.inputType, content })) }, { log });
+      transmit(egress, operation, { texts: [...egress.texts] });
+      return texts.map(() => [1, 0, 0]);
+    },
+  });
+  const reranker: Reranker = Object.freeze({
+    id: `${EXTERNAL}:rerank`,
+    version: "1",
+    grade: "development" as const,
+    async rerank(input: RerankInput) {
+      const parts = [{ role: "query" as const, content: input.query }, ...input.candidates.map((candidate) => ({ role: "document" as const, content: candidate.document }))];
+      const egress = authorizeEgress({ provider: EXTERNAL, operation: "rerank", module: "external.rerank", parts }, { log });
+      const [query, ...documents] = egress.texts;
+      transmit(egress, "rerank", { query, documents });
+      return {
+        ranked: input.candidates.slice(0, input.topN).map((candidate, index) => ({ chunkId: candidate.chunkId, score: 1 / (index + 1), rank: index + 1, reasons: [] })),
+        reranker: { id: `${EXTERNAL}:rerank`, version: "1" },
+      };
+    },
+  });
+  return { calls, denials, embedder, reranker };
 }
 
 const ROW: SearchRow = {
@@ -117,8 +151,9 @@ describe("classification and provenance", () => {
 });
 
 describe("the central egress policy", () => {
-  const request = (operation: EgressOperation, parts: { role: EgressRole; content: unknown }[]) =>
-    ({ provider: "aws-bedrock", operation, module: "test", parts }) as Parameters<typeof authorizeEgress>[0];
+  // Generation is authorized per purpose since L4 (GENERATE_PURPOSES); the Copilot purpose here.
+  const request = (operation: EgressOperation, parts: { role: EgressRole; content: unknown }[], purpose = "copilot.answer_question") =>
+    ({ provider: EXTERNAL, operation, module: "test", parts, ...(operation === "generate" ? { purpose } : {}) }) as Parameters<typeof authorizeEgress>[0];
 
   it.each([
     ["customer-case text", () => customerCaseText(CASE_TEXT), "case_bound"],
@@ -192,9 +227,9 @@ describe("the central egress policy", () => {
 
   it("logs a denial as technical metadata only — never the text, PII or the raw query", () => {
     const log: EgressDenialLogEntry[] = [];
-    expect(() => authorizeEgress({ provider: "aws-bedrock", operation: "embed_query", module: "knowledge.retrieval", correlationId: "corr-1", parts: [{ role: "query", content: caseQuery() }] }, { log: (entry) => log.push(entry) })).toThrow();
+    expect(() => authorizeEgress({ provider: EXTERNAL, operation: "embed_query", module: "knowledge.retrieval", correlationId: "corr-1", parts: [{ role: "query", content: caseQuery() }] }, { log: (entry) => log.push(entry) })).toThrow();
     expect(log).toHaveLength(1);
-    expect(log[0]).toMatchObject({ event: "external_ai_egress_denied", correlationId: "corr-1", module: "knowledge.retrieval", provider: "aws-bedrock", operation: "embed_query", reason: "case_bound", category: "customer_identifiable", role: "query", partIndex: 0 });
+    expect(log[0]).toMatchObject({ event: "external_ai_egress_denied", correlationId: "corr-1", module: "knowledge.retrieval", provider: EXTERNAL, operation: "embed_query", reason: "case_bound", category: "customer_identifiable", role: "query", partIndex: 0 });
     const serialized = JSON.stringify(log);
     for (const fragment of ["Fiktiv Tømrer", "Kunden", "lift"]) expect(serialized).not.toContain(fragment);
     expect(Object.keys(log[0]!).sort()).toEqual(["at", "category", "correlationId", "event", "module", "operation", "partIndex", "provider", "reason", "role"]);
@@ -214,28 +249,28 @@ describe("the central egress policy", () => {
 
 describe("query and document embedding: zero external calls on deny", () => {
   it("a customer-identifiable query is never embedded", async () => {
-    const { embedder, calls, denials } = bedrock();
+    const { embedder, calls, denials } = external();
     expect(await denialOf(embedder.embed([caseQuery()], { inputType: "query" }))).toBe("case_bound");
     expect(calls).toHaveLength(0);
-    expect(denials[0]).toMatchObject({ module: "bedrock.embed-v4", operation: "embed_query" });
+    expect(denials[0]).toMatchObject({ module: "external.embed", operation: "embed_query" });
   });
 
   it("unknown and missing provenance are never embedded", async () => {
-    const { embedder, calls } = bedrock();
+    const { embedder, calls } = external();
     expect(await denialOf(embedder.embed([unknownText(PUBLIC_QUESTION)], { inputType: "query" }))).toBe("never_external");
     expect(await denialOf(embedder.embed([PUBLIC_QUESTION] as never, { inputType: "query" }))).toBe("missing_provenance");
     expect(calls).toHaveLength(0);
   });
 
   it("an allowed public query is embedded", async () => {
-    const { embedder, calls } = bedrock();
+    const { embedder, calls } = external();
     await embedder.embed([publicQuery()], { inputType: "query" });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.body.texts).toEqual([PUBLIC_QUESTION]);
   });
 
   it("customer documents never get the rights of Knowledge Engine documents", async () => {
-    const { embedder, calls } = bedrock();
+    const { embedder, calls } = external();
     expect(await denialOf(embedder.embed([knowledgeText("§ 1 godkendt viden"), customerCaseText("Kundens police nr. 123")], { inputType: "document" }))).toBe("case_bound");
     expect(await denialOf(embedder.embed([publicQuery()], { inputType: "document" }))).toBe("category_not_allowed");
     expect(calls).toHaveLength(0);
@@ -244,7 +279,7 @@ describe("query and document embedding: zero external calls on deny", () => {
   });
 
   it("synthetic evaluation material can be used (evaluation flow)", async () => {
-    const { embedder, calls } = bedrock();
+    const { embedder, calls } = external();
     await embedder.embed([syntheticText("Fiktivt evalueringsspørgsmål")], { inputType: "query" });
     await embedder.embed([syntheticText("Fiktivt evalueringsdokument")], { inputType: "document" });
     expect(calls).toHaveLength(2);
@@ -255,13 +290,13 @@ describe("reranking: zero external calls on deny", () => {
   const candidate = (i: number, document: ClassifiedText) => ({ chunkId: `c${i}`, document, retrieval: { fusedScore: 1 / (i + 1) } });
 
   it("a customer-identifiable query is never reranked", async () => {
-    const { reranker, calls } = bedrock();
+    const { reranker, calls } = external();
     expect(await denialOf(reranker.rerank({ query: caseQuery(), topN: 2, candidates: [candidate(0, knowledgeText("§ 1")), candidate(1, knowledgeText("§ 2"))] }))).toBe("case_bound");
     expect(calls).toHaveLength(0);
   });
 
   it("one illegal passage denies the whole rerank — nothing is sent, not even the allowed passages", async () => {
-    const { reranker, calls } = bedrock();
+    const { reranker, calls } = external();
     const candidates = [candidate(0, knowledgeText("§ 1 godkendt")), candidate(1, customerCaseText("Kundens skadesbeskrivelse")), candidate(2, knowledgeText("§ 3 godkendt"))];
     expect(await denialOf(reranker.rerank({ query: publicQuery(), topN: 3, candidates }))).toBe("case_bound");
     expect(await denialOf(reranker.rerank({ query: publicQuery(), topN: 1, candidates: [candidate(0, unknownText("ukendt passage"))] }))).toBe("never_external");
@@ -269,7 +304,7 @@ describe("reranking: zero external calls on deny", () => {
   });
 
   it("an allowed query with Knowledge Engine passages is reranked", async () => {
-    const { reranker, calls } = bedrock();
+    const { reranker, calls } = external();
     await reranker.rerank({ query: publicQuery(), topN: 2, candidates: [candidate(0, knowledgeText("§ 1")), candidate(1, knowledgeText("§ 2"))] });
     expect(calls).toHaveLength(1);
   });
@@ -277,28 +312,28 @@ describe("reranking: zero external calls on deny", () => {
 
 describe("retrieval carries provenance from the entry to embedding and reranking", () => {
   it("a case-bound query: no embedding request and no rerank request — the retrieval fails closed", async () => {
-    const { embedder, reranker, calls } = bedrock();
+    const { embedder, reranker, calls } = external();
     const failing = runRetrieval({ query: caseQuery() }, { db, embedding: { embedder, modelId: "m" }, reranker });
     expect(await denialOf(failing)).toBe("case_bound");
     expect(calls).toHaveLength(0);
   });
 
   it("without an embedding model the case-bound query still never reaches the reranker", async () => {
-    const { reranker, calls } = bedrock();
+    const { reranker, calls } = external();
     expect(await denialOf(runRetrieval({ query: caseQuery() }, { db, embedding: null, reranker }))).toBe("case_bound");
     expect(calls).toHaveLength(0);
   });
 
   it("a query without provenance (a plain string) never reaches an external provider", async () => {
-    const { embedder, reranker, calls } = bedrock();
+    const { embedder, reranker, calls } = external();
     expect(await denialOf(runRetrieval({ query: PUBLIC_QUESTION }, { db, embedding: { embedder, modelId: "m" }, reranker }))).toBe("missing_provenance");
     expect(calls).toHaveLength(0);
   });
 
   it("an allowed public query: the trimmed query keeps its provenance to embedding and reranking", async () => {
-    const { embedder, reranker, calls } = bedrock();
+    const { embedder, reranker, calls } = external();
     const set = await runRetrieval({ query: userText(`  ${PUBLIC_QUESTION}  `, { caseBound: false, redacted: true }) }, { db, embedding: { embedder, modelId: "m" }, reranker });
-    expect(calls.map((call) => call.body.input_type ?? "rerank")).toEqual(["search_query", "rerank"]);
+    expect(calls.map((call) => call.operation)).toEqual(["embed_query", "rerank"]);
     expect(calls[0]!.body.texts).toEqual([PUBLIC_QUESTION]);
     expect(calls[1]!.body.query).toBe(PUBLIC_QUESTION);
     expect(set.items).toHaveLength(1);
@@ -409,6 +444,8 @@ describe("the gateway end to end: customer data cannot be allowed by configurati
       retrieve: options.retrieve ?? (async () => issueEvidence([evidenceItem(1)], { embedder: "production", reranker: "production" })),
       model: () => options.model,
       record: async (entry) => void records.push(structuredClone(entry)),
+      // An external model spends only through a usage ledger (beta L4).
+      usage: memoryLedger().ledger,
       environment: "test",
     };
     return { value, records };
@@ -432,8 +469,8 @@ describe("the gateway end to end: customer data cannot be allowed by configurati
     expect(calls).toHaveLength(1);
   });
 
-  it("case-bound retrieval with external providers: zero Bedrock calls, blocked_policy for the user", async () => {
-    const providers = bedrock();
+  it("case-bound retrieval with external providers: zero external calls, blocked_policy for the user", async () => {
+    const providers = external();
     const stub = createModel("stub", "test");
     const { value } = deps({
       model: stub,
@@ -446,7 +483,7 @@ describe("the gateway end to end: customer data cannot be allowed by configurati
   });
 
   it("the gateway's own query reaches the external providers when no case is involved", async () => {
-    const providers = bedrock();
+    const providers = external();
     const { value } = deps({
       model: createModel("stub", "test"),
       retrieve: (request) => runRetrieval(request, { db, embedding: { embedder: providers.embedder, modelId: "m" }, reranker: providers.reranker }),
@@ -459,51 +496,23 @@ describe("the gateway end to end: customer data cannot be allowed by configurati
 // ---------------------------------------------------------------------------------------------
 
 describe("no way around the boundary", () => {
-  it("customer data cannot be allowed through a provider descriptor", async () => {
-    const fake = fakeBedrock(bedrockHandler);
-    const descriptor = { ...EMBED_V4_EU_1024_DESCRIPTOR, settings: { ...EMBED_V4_EU_1024_DESCRIPTOR.settings, allowCustomerData: true, euOnly: true } };
-    const embedder = createCohereEmbedV4({ transport: fake.transport, descriptor, retryDeps: noSleep, egressLog: () => {} });
-    expect(await denialOf(embedder.embed([caseQuery()], { inputType: "query" }))).toBe("case_bound");
-    expect(fake.calls).toHaveLength(0);
+  it("customer data cannot be allowed through a request field: the policy reads no setting", () => {
+    const request = { provider: EXTERNAL, operation: "embed_query", module: "test", parts: [{ role: "query", content: caseQuery() }], allowCustomerData: true, euOnly: true, settings: { allowCustomerData: true } };
+    expect(() => authorizeEgress(request as never, silent)).toThrow(EgressPolicyError);
   });
 
   it("a transport refuses a body without a genuine authorization, or with text that was not authorized", () => {
-    const egress = authorizeEgress({ provider: "aws-bedrock", operation: "embed_query", module: "test", parts: [{ role: "query", content: publicQuery() }] }, silent);
-    const send = (token: unknown, body: unknown, provider = "aws-bedrock", modelId = "eu.cohere.embed-v4:0") =>
+    const egress = authorizeEgress({ provider: EXTERNAL, operation: "embed_query", module: "test", parts: [{ role: "query", content: publicQuery() }] }, silent);
+    const send = (token: unknown, body: unknown, provider = EXTERNAL, modelId = "external-model-1") =>
       () => assertTransmittable(token as never, { provider, modelId, body, log: () => {} });
-    expect(send(egress, { texts: [PUBLIC_QUESTION], input_type: "search_query" })).not.toThrow();
+    expect(send(egress, { texts: [PUBLIC_QUESTION], dimensions: 3 })).not.toThrow();
+    // L2: the Cohere protocol constants went with their adapter — an unlisted string is refused.
+    expect(send(egress, { texts: [PUBLIC_QUESTION], input_type: "search_query" })).toThrow(EgressPolicyError);
     expect(send(undefined, { texts: [PUBLIC_QUESTION] })).toThrow(EgressPolicyError);
     expect(send({ ...egress }, { texts: [PUBLIC_QUESTION] })).toThrow(EgressPolicyError); // A copy is not an authorization.
     expect(send(egress, { texts: [PUBLIC_QUESTION, CASE_TEXT] })).toThrow(EgressPolicyError);
     expect(send(egress, { texts: [PUBLIC_QUESTION], note: "Kunden" })).toThrow(EgressPolicyError);
     expect(send(egress, { texts: [PUBLIC_QUESTION] }, "other-provider")).toThrow(EgressPolicyError);
-    expect(send(egress, { texts: [PUBLIC_QUESTION] }, "aws-bedrock", "Kunden Fiktiv")).toThrow(EgressPolicyError);
-  });
-
-  it("calling the real SDK transport directly with customer text sends nothing", async () => {
-    vi.resetModules();
-    const send = vi.fn();
-    vi.doMock("@aws-sdk/client-bedrock-runtime", () => ({
-      BedrockRuntimeClient: class {
-        send = send;
-      },
-      InvokeModelCommand: class {},
-    }));
-    const { createSdkBedrockTransport } = await import("@/lib/knowledge/providers/bedrock/sdk-transport");
-    const policy = await import("@/lib/egress/policy");
-    const classification = await import("@/lib/egress/classification");
-    const transport = createSdkBedrockTransport({ region: "eu-central-1", env: { IPA_RUNTIME_ENV: "test" } });
-    const signal = new AbortController().signal;
-    const allowed = policy.authorizeEgress({ provider: "aws-bedrock", operation: "embed_query", module: "test", parts: [{ role: "query", content: classification.userText(PUBLIC_QUESTION, { caseBound: false, redacted: true }) }] }, silent);
-    const attempts = [
-      () => transport.invoke({ modelId: "eu.cohere.embed-v4:0", egress: undefined as never, body: { texts: [CASE_TEXT] }, signal }),
-      () => transport.invoke({ modelId: "eu.cohere.embed-v4:0", egress: { ...allowed } as never, body: { texts: [CASE_TEXT] }, signal }),
-      () => transport.invoke({ modelId: "eu.cohere.embed-v4:0", egress: allowed, body: { texts: [CASE_TEXT] }, signal }),
-    ];
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const attempt of attempts) await expect(attempt()).rejects.toMatchObject({ name: "EgressPolicyError", reason: "unauthorized_transmission" });
-    warn.mockRestore();
-    expect(send).not.toHaveBeenCalled();
-    vi.doUnmock("@aws-sdk/client-bedrock-runtime");
+    expect(send(egress, { texts: [PUBLIC_QUESTION] }, EXTERNAL, "Kunden Fiktiv")).toThrow(EgressPolicyError);
   });
 });

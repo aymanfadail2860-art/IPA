@@ -1,4 +1,4 @@
-import type { CaseObservation, Interval, Metrics, MetricValue } from "./types.ts";
+import type { CaseObservation, DocumentMetrics, DocumentObservation, Interval, Metrics, MetricValue } from "./types.ts";
 
 /**
  * The locked metrics (docs/08b §4.2–§4.3, D-5), computed from case observations only — so the
@@ -80,4 +80,29 @@ export function computeMetrics(observations: readonly CaseObservation[]): Metric
       ),
     },
   };
+}
+
+/**
+ * The metrics of product_documents (B-036, D1–D6): the share of cases whose basis meets each
+ * requirement. A case whose retrieval failed (no document observation) meets none. D1 and D2 are
+ * measured on answerable cases, the rest on every case: whatever the question, the method must
+ * deliver the whole, valid, authorized basis of the one product.
+ */
+export const DOCUMENT_CASE_CHECKS: Record<keyof DocumentMetrics, { answerableOnly: boolean; met: (documents: DocumentObservation) => boolean }> = {
+  required_document_coverage: { answerableOnly: true, met: (d) => d.requiredDocuments > 0 && d.requiredDocumentsCovered === d.requiredDocuments },
+  required_passage_coverage: { answerableOnly: true, met: (d) => d.requiredPassages > 0 && d.requiredPassagesCovered === d.requiredPassages },
+  full_document_integrity: { answerableOnly: false, met: (d) => d.incompleteVersions === 0 },
+  valid_version_coverage: { answerableOnly: false, met: (d) => d.missingVersions === 0 && d.unexpectedVersions === 0 },
+  correct_product_scope: { answerableOnly: false, met: (d) => d.productQueried && d.foreignProductItems === 0 },
+  authorized_document_coverage: { answerableOnly: false, met: (d) => d.missingDocuments === 0 && d.unexpectedDocuments === 0 },
+};
+
+export function computeDocumentMetrics(observations: readonly CaseObservation[]): DocumentMetrics {
+  const result = {} as DocumentMetrics;
+  for (const [id, check] of Object.entries(DOCUMENT_CASE_CHECKS) as [keyof DocumentMetrics, (typeof DOCUMENT_CASE_CHECKS)[keyof DocumentMetrics]][]) {
+    const population = check.answerableOnly ? observations.filter((observation) => observation.outcome === "evidence") : observations;
+    const met = population.filter((observation) => observation.documents != null && check.met(observation.documents)).length;
+    result[id] = proportion(met, population.length);
+  }
+  return result;
 }

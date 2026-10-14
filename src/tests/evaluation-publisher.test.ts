@@ -15,9 +15,20 @@ import {
 import { buildPerformanceMeasurement } from "../../evals/engine/performance.ts";
 import { parseRunEvent } from "../../evals/engine/regression.ts";
 import { REPORT_SCHEMA_VERSION, type EvaluationReport } from "../../evals/engine/runner.ts";
+import type { Metrics } from "../../evals/engine/types.ts";
 
 import { FIXTURE_PERFORMANCE } from "./fixtures/evaluation-performance";
-import { buildReport, GATES_V1, qualityRegressionReport, reseal, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "./fixtures/evaluation-report";
+import {
+  buildDocumentReport,
+  buildReport,
+  documentReportMissingVersion,
+  GATES_V1,
+  PRODUCT_DOCUMENTS_GATES_V1,
+  qualityRegressionReport,
+  reseal,
+  UNCERTAIN_PILOT_COUNTS,
+  UNCERTAIN_STANDARD_COUNTS,
+} from "./fixtures/evaluation-report";
 import { fixtureMaterial } from "./fixtures/production-config";
 
 /**
@@ -83,13 +94,13 @@ describe("a passing report for a production-grade configuration", () => {
 describe("the publisher refuses before anything is sent", () => {
   it("a report changed after the run (checksum)", async () => {
     const report = buildReport();
-    report.metrics.mrr_at_k.value = 0.5;
+    (report.metrics as Metrics).mrr_at_k.value = 0.5;
     expect(await refusal(report)).toMatch(/checksum stemmer ikke/);
   });
 
   it("a forged report with recomputed checksums (metrics, verdict)", async () => {
     const forgedMetric = buildReport();
-    forgedMetric.metrics.source_recall_at_k.value = 0.99;
+    (forgedMetric.metrics as Metrics).source_recall_at_k.value = 0.99;
     expect(await refusal(reseal(forgedMetric))).toMatch(/Metrikkerne kan ikke genberegnes/);
     const forgedVerdict = buildReport({ counts: { direct: 20, historical: 3, conflict: 2, distractor: 3, unanswerable: 5, permission: 3 } });
     expect(forgedVerdict.verdict).toBe("uncertain");
@@ -224,5 +235,11 @@ describe("the pgTAP fixture is the generated report (no drift between TypeScript
     expect(literal("uncertainstandard")).toEqual(JSON.parse(JSON.stringify(buildReport({ counts: UNCERTAIN_STANDARD_COUNTS, runId: "f6000000-0000-4000-8000-0000000000ac" }))));
     expect(literal("qualityregression")).toEqual(JSON.parse(JSON.stringify(qualityRegressionReport())));
     expect(literal("performance")).toEqual(JSON.parse(JSON.stringify(buildPerformanceMeasurement(FIXTURE_PERFORMANCE))));
+  });
+
+  it("the product_documents report, the failing one and the document gate set equal the generated ones (B-036)", () => {
+    expect(literal("docreport")).toEqual(JSON.parse(JSON.stringify(buildDocumentReport())));
+    expect(literal("docmissing")).toEqual(JSON.parse(JSON.stringify(documentReportMissingVersion())));
+    expect(literal("docgates")).toEqual(JSON.parse(JSON.stringify(PRODUCT_DOCUMENTS_GATES_V1)));
   });
 });

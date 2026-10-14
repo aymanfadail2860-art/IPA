@@ -1,7 +1,12 @@
 import type {
   CaseObservation,
   CaseType,
+  DocumentGateId,
+  DocumentGateSet,
+  DocumentMetricId,
+  DocumentMetrics,
   GateSet,
+  HybridGateSet,
   HardGateId,
   HardGateResult,
   Metrics,
@@ -12,7 +17,7 @@ import type {
   Verdict,
   Violation,
 } from "./types.ts";
-import { HARD_GATE_IDS, QUALITY_GATE_IDS } from "./types.ts";
+import { DOCUMENT_GATE_IDS, HARD_GATE_IDS, QUALITY_GATE_IDS, isDocumentGateSet } from "./types.ts";
 
 /**
  * The gate engine (docs/08b §4.4, D-6). Deterministic and fail-closed.
@@ -23,6 +28,9 @@ import { HARD_GATE_IDS, QUALITY_GATE_IDS } from "./types.ts";
  *   * Quality gates Q1–Q7 read their thresholds from the versioned gate set (gates-v1.json).
  *     A value that cannot be computed fails its gate.
  *   * The pilot rules (minimum per type, Wilson intervals, tier) are locked in code.
+ *   * product_documents (B-036) has its own gate set, D1–D6. Each is an invariant: the share of
+ *     cases that meet it must be 1. Its Wilson interval is reported, but an invariant is not an
+ *     estimate — one miss fails the gate, and a document gate never makes a run "uncertain".
  */
 
 /** Hard gates tolerate nothing. Deliberately a constant, not a parameter. */
@@ -59,7 +67,7 @@ function metricOf(metrics: Metrics, id: string): MetricValue | null {
   return value ?? null;
 }
 
-export function evaluateQualityGates(metrics: Metrics, comparison: RerankerComparison, gates: GateSet): QualityGateResult[] {
+export function evaluateQualityGates(metrics: Metrics, comparison: RerankerComparison, gates: HybridGateSet): QualityGateResult[] {
   return QUALITY_GATE_IDS.map((id): QualityGateResult => {
     const spec = gates.quality[id];
     if (spec.comparator === "not_lower") {
@@ -106,6 +114,46 @@ export function evaluateQualityGates(metrics: Metrics, comparison: RerankerCompa
   });
 }
 
+/**
+ * What each document gate measures (B-036). Locked in code like Q1–Q7: a gate set can neither
+ * change the metric, the direction nor the threshold — an invariant cannot be loosened.
+ */
+export const LOCKED_DOCUMENT_GATES: Readonly<Record<DocumentGateId, { metric: DocumentMetricId; comparator: ">="; threshold: 1 }>> = Object.freeze({
+  D1: { metric: "required_document_coverage", comparator: ">=", threshold: 1 },
+  D2: { metric: "required_passage_coverage", comparator: ">=", threshold: 1 },
+  D3: { metric: "full_document_integrity", comparator: ">=", threshold: 1 },
+  D4: { metric: "valid_version_coverage", comparator: ">=", threshold: 1 },
+  D5: { metric: "correct_product_scope", comparator: ">=", threshold: 1 },
+  D6: { metric: "authorized_document_coverage", comparator: ">=", threshold: 1 },
+});
+
+/** D1–D6 (B-036): every case must meet the requirement. A share that cannot be computed fails. */
+export function evaluateDocumentGates(metrics: DocumentMetrics, gates: DocumentGateSet): QualityGateResult[] {
+  return DOCUMENT_GATE_IDS.map((id): QualityGateResult => {
+    const spec = gates.quality[id];
+    const metric = (metrics as Record<string, DocumentMetrics[keyof DocumentMetrics] | undefined>)[spec.metric] ?? null;
+    if (!metric || metric.value === null || !Number.isFinite(metric.value)) {
+      return { id, metric: spec.metric, comparator: spec.comparator, threshold: spec.threshold, value: null, status: "fail", uncertain: false, explanation: "Metrikken kunne ikke beregnes (ingen spørgsmål at måle på)." };
+    }
+    const ok = metric.value >= spec.threshold - EPSILON;
+    return {
+      id,
+      metric: spec.metric,
+      comparator: spec.comparator,
+      threshold: spec.threshold,
+      value: metric.value,
+      status: ok ? "pass" : "fail",
+      uncertain: false,
+      explanation: `${format(metric.value)} ≥ ${format(spec.threshold)} (${metric.numerator}/${metric.denominator}). Invariant: ingen spørgsmål må mangle.`,
+    };
+  });
+}
+
+/** The quality gates of a gate set, in order. */
+export function qualityGateIds(gates: GateSet): readonly string[] {
+  return isDocumentGateSet(gates) ? DOCUMENT_GATE_IDS : QUALITY_GATE_IDS;
+}
+
 export function format(value: number | null): string {
   return value === null ? "—" : value.toFixed(3);
 }
@@ -138,7 +186,12 @@ export interface Decision {
  * The overall decision. Order matters and is fixed: hard gates first, then validity, then
  * quality. A run with a failed hard gate is "fail" whatever its quality numbers are.
  */
-export function decide(hard: readonly HardGateResult[], quality: readonly QualityGateResult[], minimums: readonly MinimumResult[]): Decision {
+export function decide(
+  hard: readonly HardGateResult[],
+  quality: readonly QualityGateResult[],
+  minimums: readonly MinimumResult[],
+  qualityIds: readonly string[] = QUALITY_GATE_IDS,
+): Decision {
   const invalidReasons: string[] = [];
   for (const id of INVALIDATING_HARD_GATES) {
     if (hard.find((result) => result.id === id)?.status !== "pass") invalidReasons.push(`Hårdt gate ${id} er ikke bestået.`);
@@ -149,7 +202,8 @@ export function decide(hard: readonly HardGateResult[], quality: readonly Qualit
   const valid = invalidReasons.length === 0;
   // Every hard gate must be present and pass — a missing result is a failure, not a pass.
   const hardPassed = HARD_GATE_IDS.every((id) => hard.find((result) => result.id === id)?.status === "pass");
-  const qualityPassed = QUALITY_GATE_IDS.every((id) => quality.find((result) => result.id === id)?.status === "pass");
+  // Every quality gate of the gate set must be present and pass — and nothing else may be there.
+  const qualityPassed = quality.length === qualityIds.length && qualityIds.every((id) => quality.find((result) => result.id === id)?.status === "pass");
   if (!hardPassed || !valid || !qualityPassed) return { verdict: "fail", valid, invalidReasons };
   return { verdict: quality.some((result) => result.uncertain) ? "uncertain" : "pass", valid, invalidReasons };
 }

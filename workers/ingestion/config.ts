@@ -9,16 +9,17 @@ import { AlertConfigError, createAlertSink } from "../../src/lib/observability/a
  *   * Production (IPA_RUNTIME_ENV missing or anything but local/test): the worker connects
  *     directly to Postgres through Supavisor in TRANSACTION mode (port 6543) with TLS
  *     (verify-full against the Supabase CA) as the active blue/green login role. The credential
- *     is injected by ECS from AWS Secrets Manager (IPA_WORKER_DB_USER/IPA_WORKER_DB_PASSWORD).
- *     The service-role key must NOT be present.
+ *     comes from the operator's environment at run time (IPA_WORKER_DB_USER/IPA_WORKER_DB_PASSWORD;
+ *     deploy/import/compose.yaml) — never from the repository or an image. The service-role key
+ *     must NOT be present.
  *   * Local/test: either the same Postgres path (TLS optional) or the development-only
  *     service-role path of phase 7 (B-16).
  *
- * Malware scanning (8B-I5, 8B-I5.5): production scans with ClamAV's clamd in its OWN ECS
- * service, reached over the private network at the deployment-controlled endpoint
- * PRODUCTION_SCANNER (clamav.ipa-worker.internal:3310, Cloud Map). Production refuses any other
- * host or port — the endpoint is part of the code and the task definition, not a setting a user
- * or an administrator can change. Local/test use clamd when IPA_CLAMD_HOST is set, otherwise the
+ * Malware scanning (8B-I5, 8B-I5.5): production scans with ClamAV's clamd in its OWN container,
+ * reached over the import's internal network at the fixed endpoint PRODUCTION_SCANNER
+ * (clamav:3310, deploy/import/compose.yaml; B-035 L2). Production refuses any other host or port
+ * — the endpoint is part of the code and the container specification, not a setting a user or an
+ * administrator can change. Local/test use clamd when IPA_CLAMD_HOST is set, otherwise the
  * development-only fixture scanner, whose verdicts the database accepts only where the local
  * seed allows it.
  *
@@ -57,8 +58,8 @@ export interface ServiceRoleDevConfig {
   key: string;
 }
 
-/** The production scanner: the ipa-clamav ECS service, by private DNS (deploy/clamav/). Fixed. */
-export const PRODUCTION_SCANNER = Object.freeze({ host: "clamav.ipa-worker.internal", port: 3310 });
+/** The production scanner: the ClamAV container on the import's internal network (deploy/import/). Fixed. */
+export const PRODUCTION_SCANNER = Object.freeze({ host: "clamav", port: 3310 });
 
 export type ScannerConfig = { kind: "clamd"; host: string; port: number } | { kind: "development-fixture" };
 
@@ -85,12 +86,6 @@ export interface WorkerConfig {
   controlCheckMs: number;
   /** The alarm channel (D-15): "log" always, plus the webhook when configured (Å-5). */
   alerts: { sink: "log" | "webhook" };
-  /**
-   * Where production embedding providers run (8B-I8 C7): "aws" = the real Bedrock transport with
-   * the runtime's credential path (the ECS task role in production); "development-fake" = a
-   * deterministic fake Bedrock transport, ONLY in local/test (IPA_DEV_FAKE_BEDROCK=1).
-   */
-  providers: "aws" | "development-fake";
 }
 
 /** blue/green login role, with the Supavisor tenant suffix (<role>.<project-ref>) in production. */
@@ -149,7 +144,7 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
       );
     }
     const password = env.IPA_WORKER_DB_PASSWORD ?? "";
-    if (password.length < 16) problems.push("IPA_WORKER_DB_PASSWORD mangler eller er for kort (injiceres fra Secrets Manager).");
+    if (password.length < 16) problems.push("IPA_WORKER_DB_PASSWORD mangler eller er for kort (sættes i operatørens miljø ved kørslen).");
 
     db = {
       kind: "postgres",
@@ -207,9 +202,6 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
   } catch (error) {
     problems.push(error instanceof AlertConfigError ? error.message : "Alarmkanalen kunne ikke konfigureres.");
   }
-  const fakeBedrock = env.IPA_DEV_FAKE_BEDROCK === "1";
-  if (fakeBedrock && production) problems.push("IPA_DEV_FAKE_BEDROCK må kun bruges lokalt og i test (IPA_RUNTIME_ENV=local/test).");
-  if (env.IPA_DEV_FAKE_BEDROCK !== undefined && env.IPA_DEV_FAKE_BEDROCK !== "" && env.IPA_DEV_FAKE_BEDROCK !== "1") problems.push("IPA_DEV_FAKE_BEDROCK skal være 1 eller ikke sat.");
   const config: WorkerConfig = {
     runtimeEnv: environment,
     workerLabel,
@@ -228,7 +220,6 @@ export function loadConfig(env: Record<string, string | undefined>, argv: readon
     healthCheckMs,
     controlCheckMs,
     alerts: { sink: alertSink },
-    providers: fakeBedrock && !production ? "development-fake" : "aws",
   };
   if (config.idle.maxMs < config.idle.initialMs) problems.push("IPA_WORKER_POLL_MAX_MS må ikke være mindre end IPA_WORKER_POLL_MS.");
   if (problems.length > 0) throw new ConfigError(problems);
@@ -260,6 +251,5 @@ export function describeConfig(config: WorkerConfig): Record<string, unknown> {
     health_check_ms: config.healthCheckMs,
     control_check_ms: config.controlCheckMs,
     alert_sink: config.alerts.sink,
-    providers: config.providers,
   };
 }

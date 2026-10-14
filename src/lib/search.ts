@@ -1,3 +1,4 @@
+import { isHrefAvailable, type Surface } from "@/config/navigation";
 import type { CaseSummary } from "@/types/domain";
 
 export interface SearchEntry {
@@ -22,16 +23,19 @@ const STATUS_LABEL: Record<CaseSummary["status"], string> = {
 /**
  * Entries the global search may show this user (docs/04 §21). Customer cases come only
  * from `cases`, which the server loads under RLS (own and assigned cases, every role).
- * Static entries never contain customer cases.
+ * Static entries never contain customer cases. An area the surface hides (the beta, B-035) is
+ * never offered — not even through a case.
  */
 export function searchEntriesForUser({
   entries,
   cases,
   isAdmin,
+  surface,
 }: {
   entries: readonly SearchEntry[];
   cases: readonly CaseSummary[];
   isAdmin: boolean;
+  surface: Surface;
 }): SearchEntry[] {
   const caseEntries: SearchEntry[] = cases.map((entry) => ({
     id: `case-${entry.id}`,
@@ -41,5 +45,5 @@ export function searchEntriesForUser({
     href: `/advise/${entry.id}`,
   }));
   const staticEntries = entries.filter((entry) => entry.group !== OWN_CASES_GROUP && (!entry.adminOnly || isAdmin));
-  return [...staticEntries, ...caseEntries];
+  return [...staticEntries, ...caseEntries].filter((entry) => isHrefAvailable(entry.href, surface));
 }

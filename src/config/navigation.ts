@@ -13,6 +13,8 @@ import {
 
 import { meetsRequirement, type PermissionGrant, type PermissionRequirement } from "@/lib/auth/permissions";
 
+import { isAreaAvailable, type Surface } from "./beta-surface";
+
 /** Admin is shown to — and served to — users with at least one administrative permission. */
 export const ADMIN_REQUIREMENT: PermissionRequirement = {
   anyOf: ["knowledge.document.write", "knowledge.version.publish", "identity.user.manage", "system.settings.manage"],
@@ -62,6 +64,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
 ];
 
+export { BETA_HIDDEN_AREAS, isAreaAvailable, surfaceOf, type Surface } from "./beta-surface";
+
+/** Whether a link target leads into an area this surface hides (for search entries and links). */
+export function isHrefAvailable(href: string, surface: Surface): boolean {
+  const item = navItemForPath(href.split(/[?#]/)[0]!);
+  return item ? isAreaAvailable(item.id, surface) : true;
+}
+
 export const NAV_GROUP_ORDER: readonly NavGroupId[] = ["work", "insight", "personal"];
 
 export const NAV_GROUP_LABELS: Record<NavGroupId, string> = {
@@ -70,12 +80,12 @@ export const NAV_GROUP_LABELS: Record<NavGroupId, string> = {
   personal: "Personligt og forvaltning",
 };
 
-export function visibleNavItems(grants: readonly PermissionGrant[]): NavItem[] {
-  return NAV_ITEMS.filter((item) => meetsRequirement(grants, item.requires));
+export function visibleNavItems(grants: readonly PermissionGrant[], surface: Surface): NavItem[] {
+  return NAV_ITEMS.filter((item) => isAreaAvailable(item.id, surface) && meetsRequirement(grants, item.requires));
 }
 
-export function groupedNavItems(grants: readonly PermissionGrant[]) {
-  const visible = visibleNavItems(grants);
+export function groupedNavItems(grants: readonly PermissionGrant[], surface: Surface) {
+  const visible = visibleNavItems(grants, surface);
   return NAV_GROUP_ORDER.map((group) => ({
     group,
     label: NAV_GROUP_LABELS[group],
@@ -87,7 +97,7 @@ export function navItemForPath(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 }
 
-export function canAccessPath(pathname: string, grants: readonly PermissionGrant[]): boolean {
+export function canAccessPath(pathname: string, grants: readonly PermissionGrant[], surface: Surface): boolean {
   const item = navItemForPath(pathname);
-  return item ? meetsRequirement(grants, item.requires) : true;
+  return item ? isAreaAvailable(item.id, surface) && meetsRequirement(grants, item.requires) : true;
 }

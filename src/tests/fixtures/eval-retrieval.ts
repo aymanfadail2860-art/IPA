@@ -6,7 +6,8 @@ import { configurationFingerprint } from "../../../evals/engine/checksum.ts";
 import { createFixtureRetrieval, fixtureUuid } from "../../../evals/engine/fixture-retrieval.ts";
 import { loadInputs, type LoadedInputs } from "../../../evals/engine/loader.ts";
 import { runEvaluation, type RunOptions } from "../../../evals/engine/runner.ts";
-import type { ConfigurationInput, EvalCase, EvalSet, RetrievalRun, RetrievalUnderTest } from "../../../evals/engine/types.ts";
+import type { HybridRetrievalMaterial } from "../../lib/knowledge/core/provider.ts";
+import type { EvalCase, EvalSet, RetrievalRun, RetrievalUnderTest } from "../../../evals/engine/types.ts";
 
 /**
  * Test helpers for the retrieval evaluation (8B-I1). Everything here is fictional.
@@ -36,7 +37,7 @@ export function fixtureRetrieval(inputs: LoadedInputs = loadExample()): Retrieva
   });
 }
 
-export const PRODUCTION_DOUBLE_CONFIGURATION: ConfigurationInput = {
+export const PRODUCTION_DOUBLE_CONFIGURATION: HybridRetrievalMaterial = {
   embedding: {
     provider: "test-double",
     model: "embed-double",
@@ -57,7 +58,7 @@ export interface DoubleOptions {
   /** Simulates a good retrieval: abstains where the facit says so and drops distractors. */
   ideal?: boolean;
   environment?: "evaluation" | "fixture";
-  configuration?: ConfigurationInput;
+  configuration?: HybridRetrievalMaterial;
   actor?: (evalCase: EvalCase) => string;
   chunkerVersion?: string;
   corpusChecksum?: () => string;

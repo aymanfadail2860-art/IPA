@@ -10,6 +10,12 @@ import { env, integrationConfigured, seedUser, type SeedUserKey } from "./helper
  * against the local Supabase). Signs in with real Supabase sessions and requests pages
  * directly — including URLs the user "should not know". Frontend hiding is not tested
  * here; what the server returns is.
+ *
+ * Beta L2 (B-035, docs/beta.md §14): the running app with a database IS the beta, which does not
+ * serve Advise, Analytics or Min profil — for anyone, whatever the permissions or the URL (404).
+ * What those pages enforced underneath stays tested where it is decided, in the database
+ * (rls.integration.test.ts: own and assigned cases only, no team cases for leaders, no "admin
+ * sees everything", leader scopes incl. child teams, individual access logged inside the scope).
  */
 const configured = integrationConfigured && Boolean(env.appUrl);
 
@@ -38,12 +44,24 @@ async function get(path: string, key?: SeedUserKey) {
   const headers: Record<string, string> = {};
   if (key) headers.cookie = await sessionCookie(key);
   const response = await fetch(`${env.appUrl}${path}`, { headers, redirect: "manual" });
-  const body = response.status === 200 ? await response.text() : "";
+  const body = await response.text();
   return { status: response.status, location: response.headers.get("location") ?? "", body };
 }
 
 const DENIED = "Du har ikke adgang til dette område";
-const CASE_DENIED = "Du har ikke adgang til denne sag";
+const NOT_FOUND = "Siden findes ikke";
+/** Customer and employee data the hidden areas would show. */
+const HIDDEN_DATA = ["Testvirksomhed Alfa ApS", "Testvirksomhed Beta ApS", "Testvirksomhed Gamma A/S", "Medarbejdere i dit scope", "Test Rådgiver C"];
+const HIDDEN_PATHS = ["/advise", `/advise/${SEED_CASE_IDS.alfa}`, `/advise/${SEED_CASE_IDS.beta}`, `/advise/${SEED_CASE_IDS.gamma}`, "/analytics", "/profile"];
+
+async function expectHidden(key: SeedUserKey) {
+  for (const path of HIDDEN_PATHS) {
+    const response = await get(path, key);
+    expect(response.status, `${key} ${path}`).toBe(404);
+    expect(response.body, `${key} ${path}`).toContain(NOT_FOUND);
+    for (const data of HIDDEN_DATA) expect(response.body, `${key} ${path}`).not.toContain(data);
+  }
+}
 
 describe.skipIf(!configured)("server-side route protection in the running app", () => {
   describe("1. unauthenticated user", () => {
@@ -80,54 +98,38 @@ describe.skipIf(!configured)("server-side route protection in the running app", 
       }
     });
 
-    it("does not get Analytics or leader data by URL", async () => {
-      const response = await get("/analytics", "advisorA");
-      expect(response.body).toContain(DENIED);
-      expect(response.body).not.toContain("Medarbejdere i dit scope");
-    });
-
-    it("does not see Admin or Analytics in the navigation", async () => {
+    it("does not see Admin, Analytics, Advise or Min profil in the navigation", async () => {
       const response = await get("/home", "advisorA");
       expect(response.body).not.toContain('href="/admin"');
       expect(response.body).not.toContain('href="/analytics"');
+      expect(response.body).not.toContain('href="/advise');
+      expect(response.body).not.toContain('href="/profile"');
+      // The four core modules stay.
+      for (const core of ["/learn", "/copilot", "/practice", "/assessment"]) expect(response.body, core).toContain(`href="${core}"`);
     });
 
-    it("opens own and assigned cases, never others'", async () => {
-      expect((await get(`/advise/${SEED_CASE_IDS.alfa}`, "advisorA")).body).toContain("Testvirksomhed Alfa ApS");
-      expect((await get(`/advise/${SEED_CASE_IDS.gamma}`, "advisorA")).body).toContain("Testvirksomhed Gamma A/S");
-      const beta = await get(`/advise/${SEED_CASE_IDS.beta}`, "advisorA");
-      expect(beta.body).toContain(CASE_DENIED);
-      expect(beta.body).not.toContain("Testvirksomhed Beta ApS");
+    it("beta: Advise, Analytics and Min profil are not served — not even their own cases (404, no data)", async () => {
+      await expectHidden("advisorA");
     });
 
-    it("lists only own and assigned cases in Advise", async () => {
-      const body = (await get("/advise", "advisorA")).body;
-      expect(body).toContain("Testvirksomhed Alfa ApS");
-      expect(body).not.toContain("Testvirksomhed Beta ApS");
+    it("the four core modules are served", async () => {
+      for (const path of ["/learn", "/copilot", "/practice", "/assessment"]) expect((await get(path, "advisorA")).status, path).toBe(200);
     });
   });
 
   describe("3. leder", () => {
-    it("Leder Nord sees exactly the employees in the scope incl. child teams", async () => {
-      const response = await get("/analytics", "leaderNord");
-      expect(response.status).toBe(200);
-      expect(response.body).toContain("Test Rådgiver A");
-      expect(response.body).toContain("Test Rådgiver C");
-      expect(response.body).not.toContain("Test Rådgiver B");
+    it("beta: Analytics is not served even with analytics.team.read — the leader scope stays tested in the database", async () => {
+      await expectHidden("leaderNord");
+      await expectHidden("leaderSyd");
     });
 
-    it("Leder Syd (limited scope) does not see the child team's employee", async () => {
-      const body = (await get("/analytics", "leaderSyd")).body;
-      expect(body).toContain("Test Rådgiver A");
-      expect(body).toContain("Test Rådgiver B");
-      expect(body).not.toContain("Test Rådgiver C");
-    });
-
-    it("does not get Admin and does not get the team's cases", async () => {
+    it("does not get Admin", async () => {
       expect((await get("/admin", "leaderNord")).body).toContain(DENIED);
-      const alfa = await get(`/advise/${SEED_CASE_IDS.alfa}`, "leaderNord");
-      expect(alfa.body).toContain(CASE_DENIED);
-      expect(alfa.body).not.toContain("Testvirksomhed Alfa ApS");
+    });
+
+    it("beta: Home offers no way into Analytics, Advise or Min profil — also for a leader with team scope", async () => {
+      const body = (await get("/home", "leaderNord")).body;
+      for (const href of ['href="/analytics', 'href="/advise', 'href="/profile']) expect(body, href).not.toContain(href);
     });
   });
 
@@ -141,13 +143,8 @@ describe.skipIf(!configured)("server-side route protection in the running app", 
       expect((await get("/admin/permissions", "admin")).body).toContain("identity.user.manage");
     });
 
-    it("does not get Analytics through the role ('efter rettigheder')", async () => {
-      expect((await get("/analytics", "admin")).body).toContain(DENIED);
-    });
-
-    it("sees only own and assigned cases — no 'admin sees everything'", async () => {
-      expect((await get(`/advise/${SEED_CASE_IDS.gamma}`, "admin")).body).toContain("Testvirksomhed Gamma A/S");
-      expect((await get(`/advise/${SEED_CASE_IDS.alfa}`, "admin")).body).toContain(CASE_DENIED);
+    it("beta: no hidden area through the role either (404)", async () => {
+      await expectHidden("admin");
     });
   });
 

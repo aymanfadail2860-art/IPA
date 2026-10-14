@@ -26,6 +26,18 @@ C1–C7. 8B-I8 (Final Implementation Closure, B-034) har lukket dem: **8B IMPLEM
 PHASE NOT YET COMPLETE** (`docs/08b` §21.15). I8 afventer godkendelse. 8B er ikke afsluttet:
 deployment, validering, compliance og indhold udestår. 8C er ikke påbegyndt.
 
+**Fast beta uden AWS (B-035, 2026-10-12):** en professionel beta med Copilot, Learn, Practice og
+Assessment på Vercel, Supabase og Claude API — uden AWS i den aktive runtime. Advise er udskudt.
+Scope, arkitektur og leverancerne L0–L9 står i `docs/beta.md`. Arbejdet sker på branchen
+`beta/fast-beta-without-aws`; hver leverance godkendes særskilt. L0 og L1 er godkendt (B-036); L1.1
+og L2 er godkendt (B-038). L3 (sikker dokumentimport uden AWS, runbook `docs/import-runbook.md`)
+er godkendt (B-039). L4 (Claude-adapter, egress pr. profil, budget og forbrugsgrænser,
+`docs/beta.md` §16) er godkendt (B-040). L4b (den første kontrollerede test med en rigtig
+Claude-model: højst fire betalbare kald med syntetiske data, lokal Supabase i cloud-miljøet,
+`docs/beta.md` §17) er godkendt og forberedt; kaldene er ikke foretaget. Betaen bruger
+projektejerens egen Anthropic Console-organisation med en dedikeret server-side API-nøgle (B-039).
+Ingen betalbare Claude-kald ud over L4b-planen. L5 påbegyndes ikke uden godkendelse.
+
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
 B-003).
@@ -54,6 +66,8 @@ fase, der ophæver dem, er nået.
    8B er kun låst som specifikation. Implementeringen af 8B er ikke gennemført, er derfor ikke
    låst som implementering og påbegyndes først efter særskilt, eksplicit godkendelse. Hver fase
    implementerer kun det, fasen omfatter; senere fasers funktionalitet bygges ikke forud.
+   **Undtagelse (B-035):** betaen må implementere de nødvendige dele af 8C, 9, 10 og 12 før den
+   oprindelige rækkefølge (`docs/beta.md`). Master-roadmap 1–21 er uændret.
 3. **Ingen opfundne krav.** Er en produktdetalje ikke oplyst, er den ukendt. Marker den,
    udfyld den ikke.
 4. **Teknologineutral formulering i fase 1 og 2.** Produktdefinitionen og
@@ -100,11 +114,11 @@ fase, der ophæver dem, er nået.
 | 8 | AI Copilot | **I gang** — opdelt i underfaser |
 | 8A | AI Gateway | **Gennemført og låst** |
 | 8B | Produktionsgrundlag | **Specifikation godkendt og låst** — 8B-I1, 8B-I2, 8B-I2.5, 8B-I3, 8B-I4, 8B-I5, 8B-I5.5, 8B-I5.6, 8B-I6 (inkl. I6.1 og I6.2) og 8B-I7 (inkl. I7.1) gennemført; 8B-I8 har lukket C1–C7 (afventer godkendelse); ikke afsluttet (eksterne forudsætninger, §21.15) |
-| 8C | Copilot klar til brug | Ikke påbegyndt |
-| 9 | Learn | Ikke påbegyndt |
-| 10 | Practice | Ikke påbegyndt |
-| 11 | Advise | Ikke påbegyndt |
-| 12 | Assessment | Ikke påbegyndt |
+| 8C | Copilot klar til brug | Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) |
+| 9 | Learn | Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) |
+| 10 | Practice | Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) |
+| 11 | Advise | Ikke påbegyndt — udskudt i betaen (B-035) |
+| 12 | Assessment | Ikke påbegyndt — nødvendige dele bygges i betaen (B-035) |
 | 13 | Personlig AI og læringsprofil | Ikke påbegyndt |
 | 14 | Admin | Ikke påbegyndt |
 | 15 | Analytics | Ikke påbegyndt |
@@ -139,6 +153,8 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/07-knowledge-engine.md` | 7 | Oprettet — gennemført og låst |
 | `docs/08-ai-gateway.md` | 8A | Oprettet — gennemført og låst |
 | `docs/08b-production-foundation.md` | 8B | Oprettet — specifikation godkendt og låst |
+| `docs/beta.md` | Beta (B-035) | Oprettet — fast beta uden AWS |
+| `docs/import-runbook.md` | Beta (L3) | Oprettet — runbook for dokumentimport |
 | `docs/decisions.md` | Løbende | Oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i

@@ -1,8 +1,20 @@
 import { randomUUID } from "node:crypto";
 
+import { retrievalMethodOf } from "../../src/lib/knowledge/core/provider.ts";
+
 import { checksumOf, configurationFingerprint, evalSetChecksum, gateSetChecksum } from "./checksum.ts";
-import { checkTypeMinimums, decide, evaluateHardGates, evaluateQualityGates, tierFor, type MinimumResult } from "./gates.ts";
-import { computeMetrics, coversAllRequired } from "./metrics.ts";
+import {
+  checkTypeMinimums,
+  decide,
+  evaluateDocumentGates,
+  evaluateHardGates,
+  evaluateQualityGates,
+  LOCKED_DOCUMENT_GATES,
+  qualityGateIds,
+  tierFor,
+  type MinimumResult,
+} from "./gates.ts";
+import { computeDocumentMetrics, computeMetrics, coversAllRequired, DOCUMENT_CASE_CHECKS } from "./metrics.ts";
 import { normalizeText, observeCase, type ObservationContext } from "./observe.ts";
 import { EvalSetError, type SchemaError } from "./schema.ts";
 import type {
@@ -10,6 +22,7 @@ import type {
   CaseType,
   ConfigurationInput,
   CorpusBinding,
+  DocumentMetrics,
   EvalCase,
   EvalSet,
   GateSet,
@@ -22,7 +35,7 @@ import type {
   Verdict,
   Violation,
 } from "./types.ts";
-import { CASE_TYPES } from "./types.ts";
+import { CASE_TYPES, DOCUMENT_GATE_IDS, gateSetMethod, isDocumentGateSet } from "./types.ts";
 
 /**
  * The evaluation run (docs/08b §4.5, 8B-I1). Takes a validated set, a validated gate set, the
@@ -42,9 +55,12 @@ import { CASE_TYPES } from "./types.ts";
  *    A pilot approval is valid only for them (8B-I6.1, B-030).
  * 5: a scope entry identifies the product by its stable id; the name is a snapshot for people
  *    (8B-I6.2).
+ * 6: the gate set names its retrieval method (gateSet.method; k is null for product_documents).
+ *    A product_documents run is judged by D1–D6 on document metrics, every observation carries
+ *    its document observation, and there is no reranker comparison (B-036).
  */
-export const REPORT_SCHEMA_VERSION = 5;
-export const ENGINE_VERSION = "8B-I6.2/5";
+export const REPORT_SCHEMA_VERSION = 6;
+export const ENGINE_VERSION = "beta-L1.1/6";
 
 export interface Failure {
   caseId: string | null;
@@ -71,7 +87,7 @@ export interface EvaluationReport {
     byType: Record<CaseType, number>;
     bySplit: { dev: number; holdout: number };
   };
-  gateSet: { id: string; version: number; decision: string; k: number; checksum: string };
+  gateSet: { id: string; version: number; decision: string; method: "hybrid" | "product_documents"; k: number | null; checksum: string };
   configuration: {
     label: string;
     adapter: string;
@@ -84,8 +100,10 @@ export interface EvaluationReport {
   };
   /** The evaluated corpus: its checksum before and after the run, and its document types (sorted). */
   corpus: { checksumBefore: string; checksumAfter: string; documentTypes: string[]; scope: ScopeEntry[] };
-  metrics: Metrics;
-  rerankerComparison: RerankerComparison;
+  /** Q-metrics for the hybrid method, D-metrics for product_documents. */
+  metrics: Metrics | DocumentMetrics;
+  /** Null for product_documents: there is no reranker to compare with. */
+  rerankerComparison: RerankerComparison | null;
   hardGates: HardGateResult[];
   qualityGates: QualityGateResult[];
   minimums: MinimumResult[];
@@ -147,10 +165,10 @@ export function validateAnchors(set: EvalSet, retrieval: RetrievalUnderTest): vo
   if (errors.length > 0) throw new EvalSetError(errors);
 }
 
-function errorObservation(evalCase: EvalCase, error: string): CaseObservation {
+function errorObservation(evalCase: EvalCase, error: string, documents: boolean): CaseObservation {
   // Worst case for every metric: an answerable question found nothing, an unanswerable one did
   // not abstain. A failing retrieval can never improve a number.
-  return {
+  const observation: CaseObservation = {
     caseId: evalCase.id,
     type: evalCase.type,
     split: evalCase.split,
@@ -168,6 +186,9 @@ function errorObservation(evalCase: EvalCase, error: string): CaseObservation {
     violations: [],
     error,
   };
+  // product_documents: a failed retrieval delivered no basis — it meets no document requirement.
+  if (documents) observation.documents = null;
+  return observation;
 }
 
 function contextFor(retrieval: RetrievalUnderTest, set: EvalSet, gates: GateSet, configuration: ConfigurationInput): ObservationContext {
@@ -176,7 +197,8 @@ function contextFor(retrieval: RetrievalUnderTest, set: EvalSet, gates: GateSet,
     manifest: set.manifest,
     binding: retrieval.binding(),
     configuration,
-    k: gates.k,
+    // product_documents ranks nothing: K is the whole set (B-036).
+    k: isDocumentGateSet(gates) ? Number.MAX_SAFE_INTEGER : gates.k,
     versionText(document, version) {
       const key = `${document}\u0000${version}`;
       if (!texts.has(key)) {
@@ -188,7 +210,7 @@ function contextFor(retrieval: RetrievalUnderTest, set: EvalSet, gates: GateSet,
   };
 }
 
-async function observeAll(cases: readonly EvalCase[], retrieval: RetrievalUnderTest, context: ObservationContext): Promise<CaseObservation[]> {
+async function observeAll(cases: readonly EvalCase[], retrieval: RetrievalUnderTest, context: ObservationContext, documents = false): Promise<CaseObservation[]> {
   const observations: CaseObservation[] = [];
   for (const evalCase of cases) {
     try {
@@ -199,15 +221,39 @@ async function observeAll(cases: readonly EvalCase[], retrieval: RetrievalUnderT
       }
       observations.push(observation);
     } catch (error) {
-      observations.push(errorObservation(evalCase, error instanceof Error ? error.message : String(error)));
+      observations.push(errorObservation(evalCase, error instanceof Error ? error.message : String(error), documents));
     }
   }
   return observations;
 }
 
+/**
+ * A gate set evaluates exactly one retrieval method (B-036): the Q-gates of 8B only the hybrid
+ * method, D1–D6 only product_documents. A product_documents set needs exactly one product per
+ * active case — the method's whole basis is that product. Refuses before anything runs.
+ */
+export function assertGateSetFits(set: EvalSet, gates: GateSet, configuration: ConfigurationInput): void {
+  const gateMethod = gateSetMethod(gates);
+  const configurationMethod = retrievalMethodOf(configuration);
+  if (gateMethod !== configurationMethod) {
+    throw new Error(`Gate-sættet ${gates.id} v${gates.version} gælder retrieval-metoden "${gateMethod}", men konfigurationen bruger "${configurationMethod}".`);
+  }
+  if (!isDocumentGateSet(gates)) return;
+  const errors: SchemaError[] = [];
+  const products = new Set(set.manifest.products.map((product) => product.key));
+  for (const evalCase of set.cases) {
+    if (evalCase.retired) continue;
+    const named = evalCase.filters?.products ?? [];
+    if (named.length !== 1 || !products.has(named[0]!)) errors.push({ path: `${evalCase.id}.filters.products`, message: "skal angive netop ét produkt fra manifestet (product_documents)" });
+  }
+  if (errors.length > 0) throw new EvalSetError(errors);
+}
+
 export async function runEvaluation(options: RunOptions): Promise<EvaluationReport> {
   const now = options.now ?? (() => new Date());
   const { set, gates, retrieval } = options;
+  assertGateSetFits(set, gates, options.declared.configuration);
+  const documentGates = isDocumentGateSet(gates);
   const startedAt = now().toISOString();
 
   const setChecksum = evalSetChecksum(set);
@@ -231,25 +277,29 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
 
   const active = set.cases.filter((evalCase) => !evalCase.retired);
   const context = contextFor(retrieval, set, gates, options.declared.configuration);
-  const observations = await observeAll(active, retrieval, context);
+  const observations = await observeAll(active, retrieval, context, documentGates);
 
-  // Q7: the same answerable questions without the reranker.
+  // Q7: the same answerable questions without the reranker. product_documents has none (B-036).
   const answerable = active.filter((evalCase) => evalCase.expected.outcome === "evidence");
-  const baseline = retrieval.withoutReranker();
-  let comparison: RerankerComparison;
-  const metrics = computeMetrics(observations);
-  if (baseline) {
+  const baseline = documentGates ? null : retrieval.withoutReranker();
+  let comparison: RerankerComparison | null;
+  const metrics: Metrics | DocumentMetrics = documentGates ? computeDocumentMetrics(observations) : computeMetrics(observations);
+  if (documentGates) {
+    comparison = null;
+  } else if (baseline) {
     const baselineObservations = await observeAll(answerable, baseline, { ...context, configuration: baseline.configuration() });
     const baselineMetrics = computeMetrics(baselineObservations);
+    const own = metrics as Metrics;
     comparison = {
       available: baselineObservations.every((observation) => observation.error === null),
-      withReranker: { passage_recall_at_k: metrics.passage_recall_at_k.value, mrr_at_k: metrics.mrr_at_k.value },
+      withReranker: { passage_recall_at_k: own.passage_recall_at_k.value, mrr_at_k: own.mrr_at_k.value },
       withoutReranker: { passage_recall_at_k: baselineMetrics.passage_recall_at_k.value, mrr_at_k: baselineMetrics.mrr_at_k.value },
     };
   } else {
+    const own = metrics as Metrics;
     comparison = {
       available: false,
-      withReranker: { passage_recall_at_k: metrics.passage_recall_at_k.value, mrr_at_k: metrics.mrr_at_k.value },
+      withReranker: { passage_recall_at_k: own.passage_recall_at_k.value, mrr_at_k: own.mrr_at_k.value },
       withoutReranker: { passage_recall_at_k: null, mrr_at_k: null },
     };
   }
@@ -264,9 +314,11 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
 
   const violations = [...runViolations, ...observations.flatMap((observation) => observation.violations)];
   const hardGates = evaluateHardGates(violations);
-  const qualityGates = evaluateQualityGates(metrics, comparison, gates);
+  const qualityGates = isDocumentGateSet(gates)
+    ? evaluateDocumentGates(metrics as DocumentMetrics, gates)
+    : evaluateQualityGates(metrics as Metrics, comparison!, gates);
   const minimums = checkTypeMinimums(observations);
-  const decision = decide(hardGates, qualityGates, minimums);
+  const decision = decide(hardGates, qualityGates, minimums, qualityGateIds(gates));
   const errors = observations.filter((observation) => observation.error !== null);
   const invalidReasons = [...decision.invalidReasons];
   if (errors.length > 0) invalidReasons.push(`Retrieval fejlede for ${errors.length} spørgsmål.`);
@@ -276,7 +328,7 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
   const failures: Failure[] = [
     ...violations.map((violation) => ({ caseId: violation.caseId, gate: violation.gate, explanation: violation.explanation, rootCauseNote: null })),
     ...errors.map((observation) => ({ caseId: observation.caseId, gate: "retrieval", explanation: `Retrieval fejlede: ${observation.error}`, rootCauseNote: null })),
-    ...caseQualityFailures(observations),
+    ...(documentGates ? documentQualityFailures(observations) : caseQualityFailures(observations)),
   ];
 
   const byType = Object.fromEntries(CASE_TYPES.map((type) => [type, active.filter((evalCase) => evalCase.type === type).length])) as Record<CaseType, number>;
@@ -311,7 +363,14 @@ export async function runEvaluation(options: RunOptions): Promise<EvaluationRepo
       byType,
       bySplit: { dev: active.filter((evalCase) => evalCase.split === "dev").length, holdout: active.filter((evalCase) => evalCase.split === "holdout").length },
     },
-    gateSet: { id: gates.id, version: gates.version, decision: gates.decision, k: gates.k, checksum: gatesChecksum },
+    gateSet: {
+      id: gates.id,
+      version: gates.version,
+      decision: gates.decision,
+      method: gateSetMethod(gates),
+      k: isDocumentGateSet(gates) ? null : gates.k,
+      checksum: gatesChecksum,
+    },
     configuration: {
       label: options.declared.label,
       adapter: retrieval.name,
@@ -383,4 +442,40 @@ export function caseQualityFailures(observations: readonly CaseObservation[]): F
     if (observation.distractorItems > 0) add("Q6", `${observation.distractorItems} af ${observation.itemsWithinK} elementer kommer fra en distraktor.`);
   }
   return failures;
+}
+
+/** The document gates a case misses, by gate (B-036), so every miss can be read one by one. */
+const DOCUMENT_GATE_BY_METRIC = Object.fromEntries(
+  DOCUMENT_GATE_IDS.map((id) => [LOCKED_DOCUMENT_GATES[id].metric, id]),
+) as Record<keyof typeof DOCUMENT_CASE_CHECKS, (typeof DOCUMENT_GATE_IDS)[number]>;
+
+export function documentQualityFailures(observations: readonly CaseObservation[]): Failure[] {
+  const failures: Failure[] = [];
+  for (const observation of observations) {
+    if (observation.error !== null || !observation.documents) continue;
+    const documents = observation.documents;
+    for (const [metric, check] of Object.entries(DOCUMENT_CASE_CHECKS) as [keyof typeof DOCUMENT_CASE_CHECKS, (typeof DOCUMENT_CASE_CHECKS)[keyof typeof DOCUMENT_CASE_CHECKS]][]) {
+      if (check.answerableOnly && observation.outcome !== "evidence") continue;
+      if (check.met(documents)) continue;
+      failures.push({ caseId: observation.caseId, gate: DOCUMENT_GATE_BY_METRIC[metric], explanation: documentMiss(metric, documents), rootCauseNote: null });
+    }
+  }
+  return failures;
+}
+
+function documentMiss(metric: keyof typeof DOCUMENT_CASE_CHECKS, d: NonNullable<CaseObservation["documents"]>): string {
+  switch (metric) {
+    case "required_document_coverage":
+      return `${d.requiredDocumentsCovered} af ${d.requiredDocuments} kildeversioner fra facit er leveret.`;
+    case "required_passage_coverage":
+      return `${d.requiredPassagesCovered} af ${d.requiredPassages} påkrævede passager (grad 3) er leveret.`;
+    case "full_document_integrity":
+      return `${d.incompleteVersions} dokumentversion(er) er ikke leveret hele, i rækkefølge og uforkortet.`;
+    case "valid_version_coverage":
+      return `${d.missingVersions} gyldig(e) version(er) mangler, ${d.unexpectedVersions} uventet(e) er leveret.`;
+    case "correct_product_scope":
+      return `${d.productQueried ? "Produktet var rigtigt" : "Retrieval blev ikke spurgt om netop spørgsmålets produkt"}; ${d.foreignProductItems} element(er) fra et andet produkt.`;
+    case "authorized_document_coverage":
+      return `${d.missingDocuments} dokument(er), brugeren må læse, mangler; ${d.unexpectedDocuments} andre er leveret.`;
+  }
 }

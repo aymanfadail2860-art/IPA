@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "label": "product-documents-structure-1",
+  "description": "Betaens kandidatkonfiguration (B-035, docs/beta.md §4): retrieval-metoden product_documents uden embedding og reranker over korpus, som den rigtige worker har chunket (structure/1). Budgettet på 360.000 tegn er et midlertidigt udviklingsloft, ikke dokumenteret API-kapacitet; det fastlægges ud fra de rigtige dokumenter og tokentælling (docs/beta.md §5.3). En kandidat — ikke godkendt og ikke aktiv. Evalueres med gate-sættet product-documents-gates-v1 (D1–D6, B-036).",
+  "configuration": {
+    "method": "product_documents",
+    "embedding": null,
+    "reranker": null,
+    "algorithmVersion": "product-documents-1",
+    "params": {
+      "maxChars": 360000
+    },
+    "chunkerVersions": [
+      "structure/1"
+    ]
+  }
+}

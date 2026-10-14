@@ -27,6 +27,15 @@ deployment, validering, compliance og indhold udestår (`docs/08b` §21.15). 8C 
 udviklingsdata. Vercel-demoen kører uden database (B-003) og viser derfor ikke Knowledge
 Engine-administrationen.
 
+**Fast beta uden AWS (B-035, `docs/beta.md`):** på branchen `beta/fast-beta-without-aws` er AWS
+fjernet fra den aktive kode og konfiguration (L2, B-037). Bedrock-adapterne, credential-vejene,
+ECS/IAM/CloudWatch-specifikationerne og de AWS-baserede workflows findes kun i historikken. Betaen
+skjuler Advise, Analytics og Min profil server-side.
+
+**Dokumentimport (L3):** administratoren importerer PDF'er med `deploy/import/ipa-import.sh`.
+Scanner, worker og import kører i Docker efter `deploy/import/compose.yaml`. Runbooken er
+`docs/import-runbook.md`, og detaljerne står i `docs/beta.md` §15.
+
 ## Kom i gang
 
 Kræver Node.js 22+ (workeren kører TypeScript direkte) og Docker (til den lokale Supabase).
@@ -72,6 +81,20 @@ fremtvinge "kan ikke dokumenteres" og "utilstrækkeligt grundlag". Kør migratio
 `20261002000100_ai_gateway.sql`. Skemaerne `ai`, `assessment` og `practice` er eksponeret i
 `supabase/config.toml`.
 
+### Claude API (beta L4)
+
+AI Gateway kan bruge en Claude-model gennem Anthropics Messages API (`docs/beta.md` §16, B-039).
+Det kræver tre ting, og ingen af dem er sat i repoet:
+
+- `IPA_AI_MODEL` sat til et Claude-model-id i servermiljøet;
+- API-nøglen `IPA_ANTHROPIC_API_KEY` som server-side secret (aldrig `NEXT_PUBLIC_`);
+- modellen godkendt med verificerede priser i databasen (`ai.set_model_price`) og regler i
+  datakategori-matricen.
+
+Hvert kald reserverer sin maksimale omkostning i databasen før afsendelse og afstemmes bagefter
+(`ai.usage_limits`, `ai.usage_reservations`). Alle tests bruger en falsk transport, og testmiljøet
+afviser rigtige kald. Det første rigtige kald sker først i L4b efter særskilt godkendelse.
+
 | Script | Formål |
 |--------|--------|
 | `npm run lint` | ESLint |
@@ -81,8 +104,8 @@ fremtvinge "kan ikke dokumenteres" og "utilstrækkeligt grundlag". Kør migratio
 | `npm run test:integration` | RLS- og rutetests mod lokal Supabase + seed |
 | `npm run build` | Produktionsbuild |
 | `npm run check` | Lint, typecheck, enhedstests og build |
-| `IPA_RUNTIME_ENV=test npm run eval:retrieval` | Retrieval-evaluering mod det fiktive fixture-korpus (8B-I1, `evals/retrieval/README.md`). Med `-- --providers bedrock` evalueres Bedrock-adapterne (kræver AWS-credentials). Kan aldrig give production-grad |
-| `npm run eval:retrieval -- --adapter evaluation --provision …` | Evaluering i evalueringsmiljøet (8B-I7): provisionering og den rigtige retrieval som evalueringsbrugerne. Kræver `IPA_EVAL_*` og en database med arten `evaluation`. Køres af `.github/workflows/retrieval-evaluation.yml` |
-| `npm run eval:publish -- --report …` | Registrerer en kørsel i produktion som `evaluation_publisher` (8B-I7, `deploy/evaluation/README.md`). Kun i CI's publiceringsjob |
+| `IPA_RUNTIME_ENV=test npm run eval:retrieval` | Retrieval-evaluering mod det fiktive fixture-korpus (8B-I1, `evals/retrieval/README.md`). Kan aldrig give production-grad |
+| `npm run eval:retrieval -- --adapter evaluation --provision …` | Evaluering i evalueringsmiljøet (8B-I7): provisionering og den rigtige retrieval som evalueringsbrugerne. Kræver `IPA_EVAL_*` og en database med arten `evaluation` |
+| `npm run eval:publish -- --report …` | Registrerer en kørsel som `evaluation_publisher` (8B-I7). Publisher-credentials ligger i kørselsmiljøets secret-håndtering, aldrig i repoet |
 
 Testbrugere og teamstruktur er beskrevet i `docs/06` §11.

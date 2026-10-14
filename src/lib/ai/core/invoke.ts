@@ -1,7 +1,7 @@
 import { authorizeEgress, EgressPolicyError, type EgressLog } from "@/lib/egress/policy";
 import { requireProductionEvidence, type EvidenceSet, type ProductionEvidenceSet } from "@/lib/knowledge/core/evidence";
 
-import type { Model } from "./model";
+import type { Model, ModelCallContext } from "./model";
 import type { ModelInput, ModelOutput } from "./types";
 
 /**
@@ -23,6 +23,9 @@ import type { ModelInput, ModelOutput } from "./types";
  *     authorized through the central egress policy before the model is called. Customer-case
  *     text, unknown or missing provenance and unredacted user text deny the whole call — the
  *     model is not called. Nothing here can be switched off by a parameter or setting.
+ *   * Generation is authorized for its PURPOSE — the profile and action (beta L4,
+ *     GENERATE_PURPOSES). A document's title travels as its own knowledge part, so the transport
+ *     can send it only because it was authorized with the call.
  */
 
 export class EvidencePairingError extends Error {
@@ -35,6 +38,8 @@ export class EvidencePairingError extends Error {
 export interface InvokeOptions {
   /** The log for egress denials (technical metadata only). Tests inject it. */
   egressLog?: EgressLog;
+  /** External models: the request id and the user's usage ledger (beta L4). */
+  call?: ModelCallContext;
 }
 
 export function invokeModel(model: Model<"production">, evidence: ProductionEvidenceSet | null, input: ModelInput, options?: InvokeOptions): Promise<ModelOutput>;
@@ -57,7 +62,7 @@ export async function invokeModel(model: Model, evidence: EvidenceSet | null, in
 
   // An external model: the egress boundary decides, before anything is sent.
   input.parts.forEach((part, i) => {
-    if (!part.content || part.content.text !== part.text) {
+    if (!part.content || part.content.text !== part.text || (part.sourceTitle !== undefined && part.kind !== "evidence")) {
       throw new EgressPolicyError({
         correlationId: "none",
         module: "ai.invoke",
@@ -70,9 +75,16 @@ export async function invokeModel(model: Model, evidence: EvidenceSet | null, in
       });
     }
   });
+  const titles = input.parts.flatMap((part) => (part.sourceTitle ? [{ role: "evidence" as const, content: part.sourceTitle }] : []));
   const egress = authorizeEgress(
-    { provider: model.id, operation: "generate", module: "ai.invoke", parts: input.parts.map((part) => ({ role: part.kind, content: part.content })) },
+    {
+      provider: model.id,
+      operation: "generate",
+      purpose: `${input.profile.id}.${input.action}`,
+      module: "ai.invoke",
+      parts: [...input.parts.map((part) => ({ role: part.kind, content: part.content })), ...titles],
+    },
     { log: options.egressLog },
   );
-  return model.generate(input, egress);
+  return model.generate(input, egress, options.call);
 }

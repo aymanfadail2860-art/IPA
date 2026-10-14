@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { writeVersionedReport } from "../../../evals/engine/operations.ts";
 import { buildPerformanceMeasurement, type PerformanceMeasurement } from "../../../evals/engine/performance.ts";
 import { createEvaluationPublisher, sqlPublisherConnection, type SqlClient } from "../../../evals/engine/publication.ts";
+import type { Metrics } from "../../../evals/engine/types.ts";
 import { publishEvaluation } from "../../../workers/evaluation/publish-run.ts";
 import type { Alert, AlertSink } from "@/lib/observability/alerts";
 import { evaluateHealth, INITIAL_HEALTH_STATE, parseSystemHealth } from "@/lib/observability/health";
@@ -20,7 +21,7 @@ import { DEFAULT_RETRIEVAL_CONFIG, runRetrieval, type RetrievalRequest } from "@
 
 import { buildReport, GATES_V1, UNCERTAIN_PILOT_COUNTS, UNCERTAIN_STANDARD_COUNTS } from "../fixtures/evaluation-report";
 import { buildPdf } from "../fixtures/knowledge-pdfs";
-import { fixtureMaterial, productionProviders, type FixtureScopeEntry } from "../fixtures/production-config";
+import { declaredProductionDoubles, fixtureMaterial, type FixtureScopeEntry } from "../fixtures/production-config";
 
 import { env, integrationConfigured, signedInClient } from "./helpers";
 import { RUN, runProduct, runWorkerOnce, uploadVersion, workerConfigured } from "./knowledge-helpers";
@@ -32,14 +33,20 @@ import { RUN, runProduct, runWorkerOnce, uploadVersion, workerConfigured } from 
  *     a report built by the real engine; ordinary users, administrators and service_role cannot;
  *   * a human with system.settings.manage approves and activates — concurrently, too — and the
  *     database keeps exactly one configuration in service;
- *   * retrieval as a signed-in user, with the production adapters over a fake transport and the
- *     configuration's model, issues a ProductionEvidenceSet (P1–P9) — and falls to development
- *     with a changed parameter, as service_role, or once the configuration is suspended;
+ *   * retrieval as a signed-in user with the configuration's model meets every condition the
+ *     database decides (P3–P9) — and fails P4 with a changed parameter, P6 as service_role and P3
+ *     once the configuration is suspended or outside the evaluated area;
  *   * a regression run with a failed hard gate suspends; there is no fallback.
  *
- * No AWS and no production database: the Bedrock model row and its vectors are fixtures, and the
+ * Beta L2 (docs/beta.md §14): the Bedrock adapters are removed, so the hybrid retrieval here runs
+ * with doubles that only DECLARE production (declaredProductionDoubles): P1 and P2 always fail,
+ * and a hybrid set is never production evidence. The end-to-end production path of the beta is
+ * product_documents (beta-document-retrieval.integration.test.ts).
+ *
+ * No production database: the removed adapter's model row and its vectors are fixtures, and the
  * local test model is restored afterwards. Needs IPA_TEST_DB_ADMIN_URL (a LOCAL admin URL).
  */
+const P3_TO_P9_HOLD = ["P1", "P2"];
 
 const adminUrl = process.env.IPA_TEST_DB_ADMIN_URL ?? "";
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -82,7 +89,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     rpc(adminClient, "approve_retrieval_configuration", { p_configuration_id: configurationId, p_run_id: runId, p_root_cause_notes: notes });
   const activate = (client: SupabaseClient, configurationId: string) => rpc(client, "activate_retrieval_configuration", { p_configuration_id: configurationId });
   const retrieve = (client: SupabaseClient, request: Partial<RetrievalRequest> = {}) => {
-    const providers = productionProviders();
+    const providers = declaredProductionDoubles();
     return runRetrieval(
       // The evaluated product only — the corpus of other suites is outside the approved scope.
       { query: userText(`Dækker forsikringen ${marker}?`, { caseBound: false, redacted: true }), productIds: [registerProductId], ...request },
@@ -151,7 +158,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     testModelId = (await admin<{ id: string }[]>`select id from knowledge.embedding_models where provider = 'test' order by activated_at desc nulls last limit 1`)[0]?.id ?? null;
     startedAt = new Date();
 
-    // The Bedrock model row (a fixture — models normally come with a migration) and its vectors
+    // The removed adapter's model row (a fixture — data only since L2) and its vectors
     // for every relevant chunk (100 % coverage, docs/08b §2.5). Local only.
     const [model] = await admin<{ id: string }[]>`
       insert into knowledge.embedding_models (provider, model_name, model_version, dimensions, status)
@@ -218,7 +225,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
 
   it("refuses a report the publisher would refuse, even over the publisher's own connection", async () => {
     const tampered = report("it-tampered", { configuration: material() });
-    tampered.metrics.mrr_at_k.value = 0.4;
+    (tampered.metrics as Metrics).mrr_at_k.value = 0.4;
     await expect(publisherSql`select knowledge.record_evaluation_run(${publisherSql.json(JSON.parse(JSON.stringify(tampered)))})`).rejects.toThrow(/report_checksum/);
   });
 
@@ -286,14 +293,14 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(state).toEqual({ active: 1, model: "active" });
   });
 
-  it("P1–P9 end to end: retrieval as the signed-in user issues a ProductionEvidenceSet", async () => {
+  it("P3–P9 end to end: retrieval as the signed-in user meets every condition the database decides; hybrid is never production (L2)", async () => {
     const set = await retrieve(adminClient);
-    expect(set.retrieval.unmet).toEqual([]);
-    expect(set.retrieval.grade).toBe("production");
+    expect(set.retrieval.unmet).toEqual(P3_TO_P9_HOLD);
+    expect(set.retrieval.grade).toBe("development");
     expect(set.retrieval.configuration?.id).toBe(configurations.a);
     expect(set.items.some((item) => item.excerpt.text.includes(marker))).toBe(true);
     expect(set.items.every((item) => item.chunkerVersion === "structure/1")).toBe(true);
-    expect(requireProductionEvidence(set)).toBe(set);
+    expect(() => requireProductionEvidence(set)).toThrow(EvidenceGradeError);
   });
 
   it("pilot scope: a never-evaluated product with the same document type does not inherit production grade (P3)", async () => {
@@ -301,14 +308,14 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(outside.items.length).toBeGreaterThan(0);
     expect(outside.items.every((item) => item.document.type === "terms")).toBe(true);
     expect(outside.retrieval.grade).toBe("development");
-    expect(outside.retrieval.unmet).toEqual(["P3"]);
+    expect(outside.retrieval.unmet).toEqual([...P3_TO_P9_HOLD, "P3"]);
     expect(() => requireProductionEvidence(outside)).toThrow(EvidenceGradeError);
     // Both products together: one item outside the scope makes the whole set development.
     const mixed = await retrieve(adminClient, { productIds: [registerProductId, otherProductId] });
     expect(new Set(mixed.items.map((item) => item.product.id)).size).toBe(2);
-    expect(mixed.retrieval.unmet).toEqual(["P3"]);
-    // The evaluated product stays production.
-    expect((await retrieve(adminClient)).retrieval.grade).toBe("production");
+    expect(mixed.retrieval.unmet).toEqual([...P3_TO_P9_HOLD, "P3"]);
+    // The evaluated product stays inside the scope.
+    expect((await retrieve(adminClient)).retrieval.unmet).toEqual(P3_TO_P9_HOLD);
   });
 
   it("stable identity: a renamed product stays in scope, a new product with its old name does not; history keeps the old name (8B-I6.2)", async () => {
@@ -319,19 +326,18 @@ describe.skipIf(!configured)("retrieval configuration register against the local
       if (error) throw error;
     };
     await rename(registerProductId, newName);
-    // The evaluated product keeps its id: still production, under its new name.
+    // The evaluated product keeps its id: still inside the scope, under its new name.
     const renamed = await retrieve(adminClient);
     expect(renamed.items.length).toBeGreaterThan(0);
     expect(renamed.items.every((item) => item.product.id === registerProductId && item.product.name === newName)).toBe(true);
-    expect(renamed.retrieval.unmet).toEqual([]);
-    expect(renamed.retrieval.grade).toBe("production");
+    expect(renamed.retrieval.unmet).toEqual(P3_TO_P9_HOLD);
 
     // Another product takes over the old name: another id, so it never inherits the approval.
     await rename(namesakeProductId, oldName);
     const namesake = await retrieve(adminClient, { productIds: [namesakeProductId] });
     expect(namesake.items.length).toBeGreaterThan(0);
     expect(namesake.items.every((item) => item.product.name === oldName && item.document.type === "terms")).toBe(true);
-    expect(namesake.retrieval.unmet).toEqual(["P3"]);
+    expect(namesake.retrieval.unmet).toEqual([...P3_TO_P9_HOLD, "P3"]);
     expect(() => requireProductionEvidence(namesake)).toThrow(EvidenceGradeError);
 
     // History is never rewritten: the approving run and the acceptance keep id AND the old name.
@@ -352,13 +358,13 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect((context as { configuration: { scopeGaps: string[] } }).configuration.scopeGaps).not.toContain(`${newName} / terms`);
   });
 
-  it("falls to development with a changed parameter (P4) and is never production as service_role (P6)", async () => {
+  it("fails P4 with a changed parameter and is never production as service_role (P6)", async () => {
     const changed = await retrieve(adminClient, { topK: 3 });
-    expect(changed.retrieval.unmet).toEqual(["P4"]);
+    expect(changed.retrieval.unmet).toEqual([...P3_TO_P9_HOLD, "P4"]);
     expect(() => requireProductionEvidence(changed)).toThrow(EvidenceGradeError);
     const asService = await retrieve(serviceClient).catch((error: unknown) => error);
     if (asService instanceof Error) expect(asService.name).toBe("RetrievalError");
-    else expect((asService as Awaited<ReturnType<typeof retrieve>>).retrieval.grade).toBe("development");
+    else expect((asService as Awaited<ReturnType<typeof retrieve>>).retrieval.unmet).toContain("P6");
   });
 
   it("concurrent activations never leave two configurations active", async () => {
@@ -566,7 +572,7 @@ describe.skipIf(!configured)("retrieval configuration register against the local
     expect(alerts[0]!.details).toMatchObject({ replayed: "true" });
     const [counts] = await admin<{ runs: number; suspensions: number; audits: number }[]>`
       select (select count(*)::int from knowledge.evaluation_runs where run_id = ${h6.runId}) as runs,
-             (select count(*)::int from knowledge.retrieval_configuration_transitions where configuration_id = ${configurations.d} and to_status = 'suspended') as suspensions,
+             (select count(*)::int from knowledge.retrieval_configuration_transitions where configuration_id = ${configurations.d} and to_status = 'suspended' and run_id = ${row!.suspension_run_id}) as suspensions,
              (select count(*)::int from audit.audit_log where action = 'knowledge.evaluation_run.published' and entity_id = ${row!.suspension_run_id}) as audits`;
     expect(counts).toEqual({ runs: 1, suspensions: 1, audits: 1 });
   });

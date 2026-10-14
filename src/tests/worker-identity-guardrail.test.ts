@@ -113,9 +113,15 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/eval-retrieval-data.test.ts",
       "src/tests/evaluation-database-retrieval.test.ts",
       "src/tests/evaluation-operations.test.ts",
+      // Beta L3: asserts that the operator script refuses a settings file holding the key (test only).
+      "src/tests/import-script.test.ts",
       "src/tests/integration/ai-gateway.integration.test.ts",
+      // Beta L3: tampers with Storage objects in the local stack to test the import's proof (test only).
+      "src/tests/integration/document-import.integration.test.ts",
       // 8B-I7: the local stack plays the evaluation environment; its key is that project's own (test only).
       "src/tests/integration/evaluation-operations.integration.test.ts",
+      // Beta L3: serves the worker-storage function locally for the containers, as Supabase does (test only).
+      "src/tests/integration/import-docker.integration.test.ts",
       "src/tests/integration/ingestion-worker-lease.integration.test.ts",
       "src/tests/integration/knowledge-helpers.ts",
       // 8B-I6: proves that service_role can neither publish, approve nor obtain production evidence (test only).
@@ -124,8 +130,6 @@ describe("worker identity guardrails (8B-I3)", () => {
       "src/tests/integration/upload-security.integration.test.ts",
       "src/tests/integration/worker-runtime.integration.test.ts",
       "src/tests/worker-identity-guardrail.test.ts",
-      // 8B-I8: builds a local/test worker configuration to show the fake Bedrock transport is accepted only there (test only).
-      "src/tests/worker-production-embedder.test.ts",
       "src/tests/worker-runtime-architecture.test.ts",
       "src/tests/worker-runtime.test.ts",
       // 8B-I7: the publication step names the key only to refuse it (D-18).

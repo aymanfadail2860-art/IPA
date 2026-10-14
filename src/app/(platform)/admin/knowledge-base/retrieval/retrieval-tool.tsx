@@ -162,10 +162,20 @@ function Result({ set }: { set: EvidenceSet }) {
           <span className="text-fg-secondary">Evidensgrad:</span> {retrieval.grade}
         </p>
         <p>
-          <span className="text-fg-secondary">Embedding-model:</span> {retrieval.embeddingModel ? `${retrieval.embeddingModel.id} (${retrieval.embeddingModel.grade})` : "ingen aktiv model — kun leksikalsk"}
+          <span className="text-fg-secondary">Metode:</span>{" "}
+          {retrieval.method === "product_documents" ? "produktdokumenter i fuld længde" : "hybrid søgning"}
         </p>
         <p>
-          <span className="text-fg-secondary">Reranker:</span> {retrieval.reranker.id} {retrieval.reranker.version} ({retrieval.reranker.grade})
+          <span className="text-fg-secondary">Embedding-model:</span>{" "}
+          {retrieval.embeddingModel
+            ? `${retrieval.embeddingModel.id} (${retrieval.embeddingModel.grade})`
+            : retrieval.method === "product_documents"
+              ? "ingen (metoden bruger ikke embedding)"
+              : "ingen aktiv model — kun leksikalsk"}
+        </p>
+        <p>
+          <span className="text-fg-secondary">Reranker:</span>{" "}
+          {retrieval.reranker ? `${retrieval.reranker.id} ${retrieval.reranker.version} (${retrieval.reranker.grade})` : "ingen (metoden rangerer ikke)"}
         </p>
         <p>
           <span className="text-fg-secondary">Konfiguration:</span>{" "}

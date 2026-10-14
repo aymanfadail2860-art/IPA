@@ -1,6 +1,6 @@
 import { format } from "./gates.ts";
 import type { EvaluationReport } from "./runner.ts";
-import type { MetricValue } from "./types.ts";
+import type { DocumentMetrics, Metrics, MetricValue } from "./types.ts";
 
 /** The human-readable report (Markdown, Danish). The JSON report is the record; this is a view of it. */
 
@@ -24,7 +24,39 @@ const QUALITY_GATE_NAMES: Record<string, string> = {
   Q5: "Falsk afvisning",
   Q6: "Distraktor-indtrængen",
   Q7: "Rerankerens bidrag",
+  D1: "Påkrævede dokumenter",
+  D2: "Påkrævede passager",
+  D3: "Hele dokumenter",
+  D4: "Gyldige versioner",
+  D5: "Korrekt produkt",
+  D6: "Autoriserede dokumenter",
 };
+
+function hybridMetricRows(m: Metrics): string[] {
+  return [
+    metricRow("Source Recall@K", m.source_recall_at_k),
+    metricRow("Passage Recall@K", m.passage_recall_at_k),
+    metricRow("MRR@K", m.mrr_at_k),
+    metricRow("Korrekt afvisning", m.correct_abstention),
+    metricRow("Falsk afvisning", m.false_abstention),
+    metricRow("Distraktor-indtrængen", m.distractor_intrusion),
+    metricRow("Source Recall@1 (rapporteres)", m.informational.source_recall_at_1),
+    metricRow("Source Recall@3 (rapporteres)", m.informational.source_recall_at_3),
+    metricRow("Full Coverage@K (rapporteres)", m.informational.full_coverage_at_k),
+    metricRow("nDCG@K (rapporteres)", m.informational.ndcg_at_k),
+  ];
+}
+
+function documentMetricRows(m: DocumentMetrics): string[] {
+  return [
+    metricRow("Required Document Coverage", m.required_document_coverage),
+    metricRow("Required Passage Coverage", m.required_passage_coverage),
+    metricRow("Full Document Integrity", m.full_document_integrity),
+    metricRow("Valid Version Coverage", m.valid_version_coverage),
+    metricRow("Correct Product Scope", m.correct_product_scope),
+    metricRow("Authorized Document Coverage", m.authorized_document_coverage),
+  ];
+}
 
 function metricRow(name: string, metric: MetricValue): string {
   const count = metric.numerator !== null ? `${metric.numerator}/${metric.denominator}` : `n = ${metric.denominator}`;
@@ -35,7 +67,7 @@ function metricRow(name: string, metric: MetricValue): string {
 const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\n/g, " ");
 
 export function renderMarkdown(report: EvaluationReport): string {
-  const m = report.metrics;
+  const documents = report.gateSet.method === "product_documents";
   const lines = [
     `# Retrieval-evaluering — ${VERDICT[report.verdict]}`,
     "",
@@ -49,7 +81,7 @@ export function renderMarkdown(report: EvaluationReport): string {
     `| Tidspunkt | ${report.startedAt} – ${report.finishedAt} |`,
     `| Motor / rapportskema | ${report.engine} / ${report.reportSchema} |`,
     `| Sæt | ${report.evalSet.setId} v${report.evalSet.version} (skema ${report.evalSet.caseSchema}), checksum \`${report.evalSet.checksum}\` |`,
-    `| Gate-sæt | ${report.gateSet.id} v${report.gateSet.version} (${report.gateSet.decision}), K = ${report.gateSet.k}, checksum \`${report.gateSet.checksum}\` |`,
+    `| Gate-sæt | ${report.gateSet.id} v${report.gateSet.version} (${report.gateSet.decision}), metode ${report.gateSet.method}, K = ${report.gateSet.k ?? "hele sættet"}, checksum \`${report.gateSet.checksum}\` |`,
     `| Konfiguration | ${report.configuration.label} — adapter "${report.configuration.adapter}", miljø "${report.configuration.environment}" |`,
     `| Fingeraftryk | erklæret \`${report.configuration.declaredFingerprint}\`, runtime \`${report.configuration.runtimeFingerprint}\` (${report.configuration.matches ? "matcher" : "MATCHER IKKE"}) |`,
     `| Korpus | før \`${report.corpus.checksumBefore}\`, efter \`${report.corpus.checksumAfter}\` |`,
@@ -85,18 +117,11 @@ export function renderMarkdown(report: EvaluationReport): string {
     "",
     "| Metrik | Værdi | Antal | Wilson 95 % |",
     "|---|---|---|---|",
-    metricRow("Source Recall@K", m.source_recall_at_k),
-    metricRow("Passage Recall@K", m.passage_recall_at_k),
-    metricRow("MRR@K", m.mrr_at_k),
-    metricRow("Korrekt afvisning", m.correct_abstention),
-    metricRow("Falsk afvisning", m.false_abstention),
-    metricRow("Distraktor-indtrængen", m.distractor_intrusion),
-    metricRow("Source Recall@1 (rapporteres)", m.informational.source_recall_at_1),
-    metricRow("Source Recall@3 (rapporteres)", m.informational.source_recall_at_3),
-    metricRow("Full Coverage@K (rapporteres)", m.informational.full_coverage_at_k),
-    metricRow("nDCG@K (rapporteres)", m.informational.ndcg_at_k),
+    ...(documents ? documentMetricRows(report.metrics as DocumentMetrics) : hybridMetricRows(report.metrics as Metrics)),
     "",
-    `**Uden reranker:** Passage Recall ${format(report.rerankerComparison.withoutReranker.passage_recall_at_k)}, MRR ${format(report.rerankerComparison.withoutReranker.mrr_at_k)}${report.rerankerComparison.available ? "" : " (ikke tilgængelig)"}.`,
+    report.rerankerComparison
+      ? `**Uden reranker:** Passage Recall ${format(report.rerankerComparison.withoutReranker.passage_recall_at_k)}, MRR ${format(report.rerankerComparison.withoutReranker.mrr_at_k)}${report.rerankerComparison.available ? "" : " (ikke tilgængelig)"}.`
+      : "**Metoden rangerer ikke** og har ingen reranker: hele produktets grundlag leveres (B-036). Afvisning af ubesvarbare spørgsmål måles på de færdige svar (E2E), ikke her.",
     "",
     "## Minimum pr. type",
     "",

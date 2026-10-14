@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import type { PermissionGrant, PermissionKey } from "@/lib/auth/permissions";
-import { requireSession } from "@/lib/auth/server-session";
+import { requireArea } from "@/lib/auth/server-session";
 import { getMyVisibility } from "@/lib/data/identity";
 // Learning, competencies and history are later phases: development mock data.
 import {
@@ -18,7 +18,8 @@ import { ProfileView, type LeaderVisibility } from "./profile-view";
 export const metadata: Metadata = { title: "Min profil" };
 
 export default async function ProfilePage() {
-  await requireSession();
+  // Min profil shows only mock data in the beta's phase: not served there (B-035, L2).
+  await requireArea("profile");
   // Synlighed: derived from the leaders' actual scopes and permissions in the database.
   const rows = await getMyVisibility();
   const leaders = new Map<string, LeaderVisibility>();

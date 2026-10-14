@@ -1,10 +1,11 @@
 import type { EmbeddingModelSpec } from "./core/embedding";
 import type { Grade, RuntimeEnv } from "./core/grade";
 import { runtimeEnv } from "./core/grade";
-import { assessProduction, type ProductionCondition } from "./core/production-conditions";
+import { assessProduction, PRODUCTION_SCHEMA_VERSION, type ProductionCondition } from "./core/production-conditions";
 import { createEmbedder, createReranker } from "./core/registry";
+import type { RetrievalMethod } from "./core/provider";
 import type { RetrievalContext } from "./core/retrieval-context";
-import { providersForContext, type ProviderRuntime } from "./providers/configured";
+import { providersForContext } from "./providers/configured";
 
 /**
  * Whether retrieval can run at all — a state the rest of the system can read, not only a log
@@ -24,7 +25,10 @@ import { providersForContext, type ProviderRuntime } from "./providers/configure
 export type RetrievalAvailability =
   | {
       state: "available";
-      reranker: { id: string; grade: Grade };
+      /** The retrieval method of the configuration in service (B-035); hybrid without one. */
+      method: RetrievalMethod;
+      /** Null for product_documents: no ranking step runs. */
+      reranker: { id: string; grade: Grade } | null;
       embeddingModel: { label: string; grade: Grade } | null;
       /** Production only when P1–P4, P6 and P9 hold for the runtime (docs/08b §9). */
       grade: Grade;
@@ -50,14 +54,9 @@ export interface AvailabilityInput {
   activeModel: EmbeddingModelSpec | null | undefined;
   /** knowledge.retrieval_context(); undefined = not read (startup check), null = unreadable. */
   context?: RetrievalContext | null;
-  runtime?: () => ProviderRuntime;
   rerankerId?: string;
   environment?: RuntimeEnv;
 }
-
-const RUNTIME_MISSING = (): ProviderRuntime => {
-  throw new Error("Der er ingen forbindelse til Bedrock.");
-};
 
 /** The conditions that can be assessed without a query. */
 const STATIC_CONDITIONS: readonly ProductionCondition[] = ["P1", "P2", "P3", "P4", "P6", "P9"];
@@ -77,6 +76,15 @@ export function productionUnavailableReason(unmet: readonly ProductionCondition[
   return `Production-evidens er utilgængelig (ikke opfyldt: ${relevant.join(", ")}).`;
 }
 
+/**
+ * The active embedding model as assessRetrieval needs it: null = none active (lexical search, or
+ * no embedding at all for product_documents, B-035), undefined = the context could not be read.
+ * A context that was read but has no active model is null — never "could not be read".
+ */
+export function activeModelFromContext(context: RetrievalContext | null): EmbeddingModelSpec | null | undefined {
+  return context ? context.activeModel : undefined;
+}
+
 export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability {
   if (input.demo) return { state: "unavailable", reason: "Retrieval kræver en database og er ikke tilgængelig i demoen." };
   if (!input.databaseConfigured) return { state: "unavailable", reason: "Der er ingen forbindelse til vidensgrundlaget (databasen er ikke konfigureret)." };
@@ -87,7 +95,7 @@ export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability
   if (input.context) {
     let providers;
     try {
-      providers = providersForContext(input.context, input.runtime ?? RUNTIME_MISSING, environment);
+      providers = providersForContext(input.context, environment);
     } catch (error) {
       return { state: "unavailable", reason: (error as Error).message };
     }
@@ -97,17 +105,19 @@ export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability
       context: input.context,
       embedding: providers.embedding,
       reranker: providers.reranker,
+      method: providers.method,
       algorithmVersion: configuration?.algorithmVersion ?? "",
       params,
       query: { text: "", mode: "current", asOf: "", language: "da", filters: {} },
       items: [],
       devOverride: false,
-      schemaVersion: 2,
+      schemaVersion: PRODUCTION_SCHEMA_VERSION,
     });
     const reason = productionUnavailableReason(assessment.unmet, input.context);
     return {
       state: "available",
-      reranker: { id: providers.reranker.id, grade: providers.reranker.grade },
+      method: providers.method,
+      reranker: providers.reranker ? { id: providers.reranker.id, grade: providers.reranker.grade } : null,
       embeddingModel: providers.embedding ? { label: providers.embedding.embedder.id, grade: providers.embedding.embedder.grade } : null,
       grade: reason === null ? "production" : "development",
       configuration: configuration
@@ -143,6 +153,7 @@ export function assessRetrieval(input: AvailabilityInput): RetrievalAvailability
   }
   return {
     state: "available",
+    method: "hybrid",
     reranker: { id: reranker.id, grade: reranker.grade },
     embeddingModel: embedder ? { label: embedder.id, grade: embedder.grade } : null,
     grade: "development",

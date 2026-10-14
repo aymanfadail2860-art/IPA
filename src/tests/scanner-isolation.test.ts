@@ -9,134 +9,96 @@ import { PRODUCTION_SCANNER } from "../../workers/ingestion/config.ts";
 import { examineOriginal, type ScanContext } from "../../workers/ingestion/security/scan.ts";
 import { clamdScanner } from "../../workers/ingestion/security/scanner.ts";
 
+import { parseComposeYaml, type YamlValue } from "./fixtures/compose-yaml";
 import { sha256, simplePdf } from "./fixtures/knowledge-pdfs";
 
 /**
  * 8B-I5.5 — scanner isolation and signature supply (docs/08b §21.7, B-027). Static checks of the
- * deployment specification (no AWS account needed) and the behaviour of the worker against a
- * scanner service over TCP: unreachable, stale, ageing past 24 hours during a failed refresh,
- * and replaced by a fresh revision.
+ * deployment specification and the behaviour of the worker against a scanner service over TCP:
+ * unreachable, stale, ageing past 24 hours during a failed refresh, and replaced by a fresh
+ * revision.
+ *
+ * Beta L2 (docs/beta.md §14): the ECS task, service, security groups, Cloud Map, IAM, alarms and
+ * the scheduled signature workflow are removed with AWS. Their vendor-neutral requirements are
+ * checked against the import specification deploy/import/compose.yaml: ClamAV in its own
+ * container, without environment, credential or internet; reachable only from the worker on an
+ * internal network at the worker's fixed endpoint; built on the approved engine by digest with
+ * fresh official signatures.
  */
 
 const root = path.resolve(__dirname, "../..");
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 const json = <T>(file: string) => JSON.parse(read(file)) as T;
-type Statement = { Sid?: string; Action: string | string[]; Resource: string | string[]; Condition?: unknown };
-const list = (value: string | string[]) => (Array.isArray(value) ? value : [value]);
-const actions = (file: string) => json<{ Statement: Statement[] }>(file).Statement.flatMap((statement) => list(statement.Action));
+type Service = { [key: string]: YamlValue };
+const compose = parseComposeYaml(read("deploy/import/compose.yaml")) as { services: Record<string, Service>; networks: Record<string, { internal?: boolean } | null> };
 
-interface Container {
-  name: string;
-  image: string;
-  user: string;
-  readonlyRootFilesystem: boolean;
-  privileged: boolean;
-  linuxParameters: unknown;
-  environment: unknown[];
-  secrets?: unknown;
-  portMappings: { containerPort: number; hostPort?: number }[];
-  mountPoints: { containerPath: string }[];
-}
-interface TaskDefinition {
-  family: string;
-  executionRoleArn: string;
-  taskRoleArn?: string;
-  containerDefinitions: Container[];
-}
-interface Rule {
-  FromPort: number;
-  ToPort: number;
-  SourceSecurityGroupId?: string;
-  DestinationSecurityGroupId?: string;
-  DestinationPrefixListId?: string;
-  CidrIp?: string;
-  CidrIpv6?: string;
-}
+describe("ClamAV is its own container (deploy/import/compose.yaml)", () => {
+  const scanner = compose.services.clamav!;
+  const worker = compose.services.worker!;
 
-describe("ClamAV is its own task and service (deploy/clamav)", () => {
-  const scanner = json<TaskDefinition>("deploy/clamav/task-definition.json");
-  const worker = json<TaskDefinition>("deploy/ingestion-worker/task-definition.json");
-  const container = scanner.containerDefinitions[0]!;
-
-  it("is not part of the worker task", () => {
-    expect(scanner.family).toBe("ipa-clamav");
-    expect(worker.family).toBe("ipa-ingestion-worker");
-    expect(worker.containerDefinitions.map((definition) => definition.name)).toEqual(["ingestion-worker"]);
-    expect(scanner.containerDefinitions.map((definition) => definition.name)).toEqual(["clamav"]);
+  it("is not part of the worker's container or image", () => {
+    // Beta L3: the import runs the worker's image as its own service — without the scanner.
+    expect(Object.keys(compose.services).sort()).toEqual(["clamav", "import", "worker"]);
+    expect(scanner.build).toMatchObject({ context: "../..", dockerfile: "deploy/clamav/Dockerfile" });
+    expect(worker.build).toMatchObject({ context: "../..", dockerfile: "deploy/ingestion-worker/Dockerfile" });
+    // No scanner engine, signature database or scanner image in the worker's image — it carries
+    // only the clamd protocol client and the approved engine's version number (engine.json).
+    const workerImage = read("deploy/ingestion-worker/Dockerfile").replace(/^#.*$/gm, "");
+    expect(workerImage).not.toMatch(/freshclam|clamscan|clamdscan|apt-get|apk add|\/var\/lib\/clamav|clamd\.conf|COPY --from=(?!deps)/i);
+    expect([...workerImage.matchAll(/^FROM (\S+)/gm)].map((match) => match[1]!.split("@")[0])).toEqual([
+      "docker.io/library/node:22.22.2-bookworm-slim",
+      "docker.io/library/node:22.22.2-bookworm-slim",
+    ]);
+    expect(workerImage.split("\n").filter((line) => /clamav/i.test(line))).toEqual([
+      "COPY scripts/verify-clamav-scanner.ts ./scripts/",
+      "COPY deploy/clamav/engine.json ./deploy/clamav/",
+    ]);
   });
 
-  it("has NO task role — so no AWS credentials at all, and in particular not the worker's Bedrock role", () => {
-    expect(scanner.taskRoleArn).toBeUndefined();
-    expect(scanner.executionRoleArn).toBe("arn:aws:iam::${AWS_ACCOUNT_ID}:role/ipa-clamav-execution");
-    expect(scanner.executionRoleArn).not.toBe(worker.executionRoleArn);
-    expect(worker.taskRoleArn).toMatch(/role\/ipa-ingestion-worker-task$/);
-    // Nothing about the scanner names the worker's roles or Bedrock.
-    for (const file of readdirSync(path.join(root, "deploy/clamav"), { recursive: true }).map(String).filter((name) => name.endsWith(".json"))) {
-      expect(read(`deploy/clamav/${file}`), file).not.toMatch(/ipa-ingestion-worker-(task|execution)|bedrock/i);
+  it("has NO environment and NO credential — in particular none of the worker's", () => {
+    expect(scanner.environment).toEqual({});
+    for (const key of ["env_file", "secrets", "configs", "volumes", "devices", "privileged", "cap_add", "pid", "ipc", "network_mode"]) {
+      expect(scanner, key).not.toHaveProperty(key);
+    }
+    for (const file of readdirSync(path.join(root, "deploy/clamav"), { recursive: true }).map(String)) {
+      expect(read(`deploy/clamav/${file}`), file).not.toMatch(/IPA_WORKER_DB|PASSWORD|SERVICE_ROLE|ingestion_worker_login|bedrock|anthropic/i);
     }
   });
 
-  it("its execution role (ECS' own) only pulls the scanner image and writes its log group — no secrets, no keys", () => {
-    expect(actions("deploy/clamav/iam/execution-role-policy.json").sort()).toEqual([
-      "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetAuthorizationToken", "ecr:GetDownloadUrlForLayer", "logs:CreateLogStream", "logs:PutLogEvents",
-    ]);
-    const policy = read("deploy/clamav/iam/execution-role-policy.json");
-    expect(policy).toContain("repository/ipa-clamav\"");
-    expect(policy).toContain("log-group:/ipa/clamav:*");
-    expect(policy).not.toMatch(/secretsmanager|kms:|ssm:|s3:|bedrock|ingestion-worker/);
+  it("runs as a non-root, read-only, capability-less container with a /tmp tmpfs only", () => {
+    expect(scanner.user).toBe("10001:10001");
+    expect(scanner.read_only).toBe(true);
+    expect(scanner.cap_drop).toEqual(["ALL"]);
+    expect(scanner.security_opt).toEqual(["no-new-privileges:true"]);
+    expect(scanner.tmpfs).toEqual(["/tmp"]);
+    expect(read("deploy/clamav/Dockerfile")).toMatch(/^USER 10001:10001$/m);
   });
 
-  it("runs as a non-root, read-only, capability-less container with no credential and no environment", () => {
-    expect(container.user).toBe("10001:10001");
-    expect(container.readonlyRootFilesystem).toBe(true);
-    expect(container.privileged).toBe(false);
-    expect(container.linuxParameters).toEqual({ initProcessEnabled: true, capabilities: { drop: ["ALL"] } });
-    expect(container.secrets).toBeUndefined();
-    expect(container.environment).toEqual([]);
-    expect(container.mountPoints.map((mount) => mount.containerPath)).toEqual(["/tmp"]);
-    expect(container.portMappings).toEqual([{ containerPort: 3310, protocol: "tcp", name: "clamd" }]);
-    // The exact image a revision ran is pinned by digest (reproducible verdicts).
-    expect(container.image).toMatch(/\/ipa-clamav@\$\{CLAMAV_IMAGE_DIGEST\}$/);
+  it("is reachable only by the worker, on an internal network without a route out, and publishes no port", () => {
+    expect(scanner.networks).toEqual(["scan"]);
+    expect(compose.networks.scan).toEqual({ internal: true });
+    const onScan = Object.entries(compose.services).filter(([, service]) => (service.networks as string[]).includes("scan")).map(([name]) => name).sort();
+    expect(onScan).toEqual(["clamav", "worker"]);
+    expect(scanner).not.toHaveProperty("ports");
+    expect(scanner).not.toHaveProperty("expose");
+    // The worker's way out is a different network, which the scanner does not join.
+    expect(compose.networks.egress).toEqual({});
+    expect(scanner.networks).not.toContain("egress");
   });
 
-  it("runs in private subnets without a public IP and without ECS Exec, replacing a scanner only when the new one is healthy", () => {
-    const service = json<{ networkConfiguration: { awsvpcConfiguration: { subnets: string[]; assignPublicIp: string; securityGroups: string[] } }; enableExecuteCommand: boolean; deploymentConfiguration: unknown; serviceRegistries: unknown[] }>("deploy/clamav/service.json");
-    expect(service.networkConfiguration.awsvpcConfiguration).toEqual({ subnets: ["${SCANNER_SUBNET_A}", "${SCANNER_SUBNET_B}"], securityGroups: ["${CLAMAV_SECURITY_GROUP_ID}"], assignPublicIp: "DISABLED" });
-    expect(service.enableExecuteCommand).toBe(false);
-    expect(service.deploymentConfiguration).toEqual({ minimumHealthyPercent: 100, maximumPercent: 200, deploymentCircuitBreaker: { enable: true, rollback: true } });
-    expect(service.serviceRegistries).toEqual([{ registryArn: "${CLAMAV_CLOUD_MAP_SERVICE_ARN}" }]);
-  });
-
-  it("accepts TCP 3310 from the worker's security group only, and has no internet egress", () => {
-    const group = json<{ Ingress: Rule[]; Egress: Rule[] }>("deploy/clamav/security-group.json");
-    expect(group.Ingress).toEqual([
-      { IpProtocol: "tcp", FromPort: 3310, ToPort: 3310, SourceSecurityGroupId: "${WORKER_SECURITY_GROUP_ID}", Description: expect.any(String) },
-    ]);
-    for (const rule of [...group.Ingress, ...group.Egress]) {
-      expect(rule.CidrIp, JSON.stringify(rule)).toBeUndefined();
-      expect(rule.CidrIpv6, JSON.stringify(rule)).toBeUndefined();
-    }
-    // Only HTTPS to the VPC endpoints ECS needs (image pull, logs) — no 0.0.0.0/0, no NAT.
-    expect(group.Egress.map((rule) => [rule.FromPort, rule.DestinationSecurityGroupId ?? rule.DestinationPrefixListId])).toEqual([
-      [443, "${VPC_ENDPOINT_SECURITY_GROUP_ID}"],
-      [443, "${S3_GATEWAY_PREFIX_LIST_ID}"],
-    ]);
-    const workerGroup = json<{ Egress: Rule[] }>("deploy/ingestion-worker/security-group.json");
-    expect(workerGroup.Egress.filter((rule) => rule.FromPort === 3310)).toEqual([expect.objectContaining({ SourceSecurityGroupId: "${CLAMAV_SECURITY_GROUP_ID}" })]);
-  });
-
-  it("is found by private DNS (Cloud Map) at the worker's fixed endpoint; only healthy tasks are registered", () => {
-    const discovery = json<{ namespace: { Name: string }; service: { Name: string; DnsConfig: { DnsRecords: { Type: string; TTL: number }[] }; HealthCheckCustomConfig: unknown } }>("deploy/clamav/service-discovery.json");
-    expect(`${discovery.service.Name}.${discovery.namespace.Name}`).toBe(PRODUCTION_SCANNER.host);
-    expect(discovery.service.DnsConfig.DnsRecords).toEqual([{ Type: "A", TTL: 10 }]);
-    expect(discovery.service.HealthCheckCustomConfig).toEqual({ FailureThreshold: 1 });
-    expect(read("deploy/clamav/clamd.conf")).toMatch(/^TCPSocket 3310$/m);
+  it("is found at the worker's fixed endpoint, and only a healthy scanner is used", () => {
+    expect(PRODUCTION_SCANNER.host).toBe("clamav");
+    expect(Object.keys(compose.services)).toContain(PRODUCTION_SCANNER.host);
+    expect(read("deploy/clamav/clamd.conf")).toMatch(new RegExp(`^TCPSocket ${PRODUCTION_SCANNER.port}$`, "m"));
+    // Beta L3: explicitly IPv4, so the health check reaches it in a container without IPv6.
+    expect(read("deploy/clamav/clamd.conf")).toMatch(/^TCPAddr 0\.0\.0\.0$/m);
+    expect(scanner.healthcheck).toMatchObject({ test: ["CMD", "clamdscan", "--config-file=/etc/clamav/clamd.conf", "--ping", "1"] });
+    expect(worker.depends_on).toEqual({ clamav: { condition: "service_healthy" } });
   });
 });
 
 describe("the approved ClamAV engine (8B-I5.6)", () => {
   const engine = json<{ lts_line: string; production: string; approved: string[]; base_image: string; base_image_digest: string | null }>("deploy/clamav/engine.json");
-  const refresh = read(".github/workflows/clamav-signatures.yml");
   const candidate = read(".github/workflows/clamav-engine-candidate.yml");
   const migration = read("supabase/migrations/20261006000200_approved_scanner_engines.sql");
 
@@ -155,21 +117,17 @@ describe("the approved ClamAV engine (8B-I5.6)", () => {
     expect(read("scripts/verify-clamav-scanner.ts")).toMatch(/arg\("engine", approvedEngine\(\)\.production\)/);
   });
 
-  it("the 6-hourly signature refresh cannot change the engine", () => {
-    expect(refresh).toMatch(/ENGINE=\$\(jq -r \.production deploy\/clamav\/engine\.json\)/);
-    expect(refresh).toMatch(/test -n "\$DIGEST" \|\|/);
-    expect(refresh).toMatch(/--build-arg "CLAMAV_BASE=\$CLAMAV_BASE"/);
-    expect(refresh).toMatch(/--engine "\$CLAMAV_ENGINE"/);
-    // No engine version is written into the refresh itself.
-    expect(refresh).not.toMatch(/\b1\.4\.\d+\b/);
+  it("the import builds the approved engine by digest — fresh signatures never change the engine (beta L2)", () => {
+    const scanner = compose.services.clamav!;
+    expect((scanner.build as { args: Record<string, string> }).args).toEqual({ CLAMAV_BASE: `${engine.base_image}@${engine.base_image_digest}` });
   });
 
   it("an engine upgrade is a manual candidate that is tested and never deployed by itself", () => {
     expect(candidate).toMatch(/workflow_dispatch:/);
     expect(candidate).not.toMatch(/schedule:/);
-    expect(candidate).not.toMatch(/update-service|register-task-definition/);
+    expect(candidate).not.toMatch(/update-service|register-task-definition|docker push|aws-actions|id-token/);
     expect(candidate).toMatch(/not in the approved LTS line/);
-    for (const step of ["scripts/verify-clamav-scanner.ts", "src/tests/clamav-candidate.test.ts", "src/tests/worker-security-pdf.test.ts", "candidate-"]) {
+    for (const step of ["scripts/verify-clamav-scanner.ts", "src/tests/clamav-candidate.test.ts", "src/tests/worker-security-pdf.test.ts", "ipa-clamav:engine-candidate"]) {
       expect(candidate, step).toContain(step);
     }
   });
@@ -180,36 +138,8 @@ describe("the approved ClamAV engine (8B-I5.6)", () => {
   });
 });
 
-describe("signature supply (scheduled image build)", () => {
-  const workflow = read(".github/workflows/clamav-signatures.yml");
+describe("signature supply (image built right before each import)", () => {
   const dockerfile = read("deploy/clamav/Dockerfile");
-
-  it("builds on a schedule with margin to the 24-hour limit, verifies before pushing, deploys by digest", () => {
-    expect(workflow).toMatch(/cron: "17 \*\/6 \* \* \*"/);
-    const order = ["docker build", "scripts/verify-clamav-scanner.ts", "docker push", "register-task-definition", "update-service", "services-stable"].map((step) => workflow.indexOf(step));
-    expect(order.every((index) => index > 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(workflow).toMatch(/--max-age-hours "\$MAX_BUILD_AGE_HOURS"/);
-    expect(workflow).toMatch(/MAX_BUILD_AGE_HOURS: "8"/);
-    expect(workflow).toMatch(/CLAMAV_IMAGE_DIGEST=\$DIGEST/);
-  });
-
-  it("stores no credential and does nothing until the production account is configured", () => {
-    expect(workflow).not.toMatch(/secrets\./);
-    expect(workflow).toMatch(/if: \$\{\{ vars\.IPA_AWS_ACCOUNT_ID != '' \}\}/);
-    expect(workflow).toMatch(/id-token: write/);
-    expect(workflow).toMatch(/role-to-assume: arn:aws:iam::\$\{\{ vars\.IPA_AWS_ACCOUNT_ID \}\}:role\/ipa-clamav-publisher/);
-  });
-
-  it("the CI role can push this one repository, deploy this one service and pass only the scanner's execution role", () => {
-    const policy = read("deploy/clamav/iam/ci-publisher-policy.json");
-    expect(policy).toContain("repository/ipa-clamav\"");
-    expect(policy).toContain("service/${ECS_CLUSTER}/ipa-clamav\"");
-    expect(policy).toContain("role/ipa-clamav-execution\"");
-    expect(policy).not.toMatch(/ingestion-worker|bedrock|secretsmanager|iam:\*|ecs:\*|ecr:\*/);
-    const trust = read("deploy/clamav/iam/ci-publisher-trust-policy.json");
-    expect(trust).toContain("repo:aymanfadail2860-art/IPA:ref:refs/heads/main");
-  });
 
   it("takes only official signatures at build time and records the build", () => {
     expect(dockerfile).toMatch(/freshclam --foreground --stdout --show-progress=no --config-file=\/etc\/clamav\/freshclam\.conf/);
@@ -218,11 +148,18 @@ describe("signature supply (scheduled image build)", () => {
     expect(read("deploy/clamav/clamd.conf")).not.toMatch(/^(SelfCheck [1-9]|DatabaseMirror)/m);
   });
 
-  it("alarms on ageing signatures, technical scan failures and a failed scanner deployment", () => {
-    const alarms = read("deploy/clamav/alarms.json");
-    expect(alarms).toContain("ipa-scanner-signatures-ageing");
-    expect(alarms).toContain("ipa-scanner-technical-failures");
-    expect(alarms).toContain("SERVICE_DEPLOYMENT_FAILED");
+  it("stores no credential and downloads nothing at run time", () => {
+    const instructions = dockerfile.replace(/^#.*$/gm, "");
+    expect(instructions).not.toMatch(/^\s*ENV\s|secret|PASSWORD|TOKEN/im);
+    // freshclam runs only in the build stage; the running container starts clamd.
+    expect(dockerfile).toMatch(/^ENTRYPOINT \["clamd", "--foreground", "--config-file=\/etc\/clamav\/clamd\.conf"\]$/m);
+    expect(dockerfile.slice(dockerfile.lastIndexOf("FROM "))).not.toMatch(/freshclam/);
+  });
+
+  it("technical scan failures and found infections are alarms and visible in Systemstatus (vendor-neutral, 8B-I7)", () => {
+    expect(read("src/lib/observability/health.ts")).toMatch(/conditions\.set\("scanner_failures"/);
+    expect(read("src/lib/observability/health.ts")).toMatch(/conditions\.set\("malware_found"/);
+    expect(read("src/lib/observability/system-status.ts")).toContain("Virusscanning (24 t)");
   });
 
   it("has no switch anywhere to ignore stale signatures", () => {
@@ -230,7 +167,7 @@ describe("signature supply (scheduled image build)", () => {
       ...readdirSync(path.join(root, "workers/ingestion"), { recursive: true }).map(String).filter((file) => file.endsWith(".ts")).map((file) => `workers/ingestion/${file}`),
       "supabase/migrations/20261005000100_upload_security.sql",
       "supabase/migrations/20261006000100_scanner_revision.sql",
-      ".github/workflows/clamav-signatures.yml",
+      "deploy/import/compose.yaml",
     ];
     for (const file of sources) expect(read(file), file).not.toMatch(/IGNORE_STALE|ALLOW_STALE|SKIP_SIGNATURE|stale_ok|ignoreStale/i);
     // The maximum age lives in the policy row (≤ 7 days by constraint), not in the environment.
