@@ -20,6 +20,10 @@ security groups, IAM og CloudWatch) er fjernet i L2 og kan gendannes fra Git-his
 - kun det interne netværk `scan`, som ingen andre end workeren er på, og ingen internetadgang;
 - workeren når den kun på det faste endpoint `clamav:3310`.
 
-**Signaturer:** imaget bygges lige før hver import med friske officielle signaturer. Workeren
-afviser signaturer, der er ældre end 24 timer, og fejler lukket, hvis scanneren ikke svarer.
-Runbooken følger i L3.
+**Signaturer:** imaget bygges uden cache lige før hver import med friske officielle signaturer
+(`deploy/import/ipa-import.sh forbered`). Scannerkontrollen kræver signaturer under 8 timer, og
+workeren afviser signaturer, der er ældre end 24 timer. Den fejler lukket, hvis scanneren ikke
+svarer. Runbooken er `docs/import-runbook.md`.
+
+**Netværk:** clamd lytter eksplicit på IPv4 (`TCPAddr 0.0.0.0` i `clamd.conf`), så
+sundhedskontrollen også virker i containere uden IPv6 (L3).

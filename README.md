@@ -29,9 +29,12 @@ Engine-administrationen.
 
 **Fast beta uden AWS (B-035, `docs/beta.md`):** på branchen `beta/fast-beta-without-aws` er AWS
 fjernet fra den aktive kode og konfiguration (L2, B-037). Bedrock-adapterne, credential-vejene,
-ECS/IAM/CloudWatch-specifikationerne og de AWS-baserede workflows findes kun i historikken. Scanner
-og worker køres som dokumentimport via `deploy/import/compose.yaml`. Betaen skjuler Advise,
-Analytics og Min profil server-side.
+ECS/IAM/CloudWatch-specifikationerne og de AWS-baserede workflows findes kun i historikken. Betaen
+skjuler Advise, Analytics og Min profil server-side.
+
+**Dokumentimport (L3):** administratoren importerer PDF'er med `deploy/import/ipa-import.sh`.
+Scanner, worker og import kører i Docker efter `deploy/import/compose.yaml`. Runbooken er
+`docs/import-runbook.md`, og detaljerne står i `docs/beta.md` §15.
 
 ## Kom i gang
 

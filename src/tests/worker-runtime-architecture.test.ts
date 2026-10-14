@@ -188,6 +188,11 @@ describe("production image (8B-I4)", () => {
     expect(instructions.indexOf("USER node")).toBeGreaterThan(instructions.lastIndexOf("RUN "));
     expect(instructions).toMatch(/^ENTRYPOINT \["node", "workers\/ingestion\/main\.ts"\]$/m);
     expect(instructions).toMatch(/^STOPSIGNAL SIGTERM$/m);
+    // Beta L3: both stages on the same base image, pinned by digest (docs/beta.md §15.5).
+    const bases = [...instructions.matchAll(/^FROM (\S+)/gm)].map((match) => match[1]!);
+    expect(bases).toHaveLength(2);
+    for (const base of bases) expect(base).toMatch(/^docker\.io\/library\/node:22\.22\.2-bookworm-slim@sha256:[0-9a-f]{64}$/);
+    expect(new Set(bases).size).toBe(1);
   });
 
   it("copies only the worker, its shared core and its runtime dependencies — never .env or the dev adapter", () => {
@@ -197,17 +202,28 @@ describe("production image (8B-I4)", () => {
       "/app/node_modules",
       "deploy/ingestion-worker/package.json",
       "workers/ingestion/",
+      // Beta L3: the administrator's import (no dependencies) and the Admin upload's validation.
+      "workers/import/",
       "src/lib/egress/",
       "src/lib/knowledge/core/",
+      "src/lib/knowledge/upload-validation.ts",
       // 8B-I7: the alarm sink and the health evaluation (no dependencies).
       "src/lib/observability/",
+      // Beta L3: the scanner verification and the approved engine it checks against.
+      "scripts/verify-clamav-scanner.ts",
+      "deploy/clamav/engine.json",
       "deploy/ingestion-worker/certs/",
     ]);
+    expect(instructions).toMatch(/^COPY src\/lib\/knowledge\/upload-validation\.ts src\/lib\/knowledge\/document-types\.ts src\/lib\/knowledge\/admin-types\.ts \.\/src\/lib\/knowledge\/$/m);
     expect(instructions).toMatch(/npm ci --omit=dev --omit=optional --ignore-scripts/);
     expect(instructions).toMatch(/^RUN rm -f workers\/ingestion\/dev-service-role\.ts$/m);
     expect(instructions).not.toMatch(/src\/lib\/knowledge\/providers/);
     const ignore = read(".dockerignore");
     for (const entry of ["**/.env", "**/.env.*", "workers/ingestion/dev-service-role.ts", "node_modules", ".git"]) expect(ignore).toContain(entry);
+    // Beta L3: no document or import list ever enters a build context or an image layer.
+    for (const entry of ["**/*.pdf", "**/*.PDF", "**/importliste.csv"]) expect(ignore.split("\n")).toContain(entry);
+    // …nor the repository.
+    for (const entry of ["*.pdf", "*.PDF", "importliste.csv"]) expect(read(".gitignore").split("\n")).toContain(entry);
   });
 
   it("the image's dependency manifest is minimal and matches the root lockfile", () => {
@@ -283,6 +299,125 @@ describe("import specification (beta L2, deploy/import/compose.yaml)", () => {
     expect(environment.IPA_RUNTIME_ENV).toBe("production");
     expect(environment.IPA_WORKER_DB_PORT).toBe("6543");
     expect(environment.IPA_WORKER_DB_SSL).toBe("verify-full");
+  });
+});
+
+describe("the administrator's import (beta L3, deploy/import/)", () => {
+  type Service = { [key: string]: YamlValue };
+  const composeText = read("deploy/import/compose.yaml");
+  const compose = parseComposeYaml(composeText) as { services: Record<string, Service> };
+  const importer = compose.services.import!;
+  const hardening = (service: Service) => {
+    expect(service.read_only).toBe(true);
+    expect(service.cap_drop).toEqual(["ALL"]);
+    expect(service.security_opt).toEqual(["no-new-privileges:true"]);
+    expect(service.tmpfs).toEqual(["/tmp"]);
+    for (const key of ["privileged", "devices", "pid", "ipc", "network_mode", "cap_add", "env_file", "secrets", "configs", "ports", "expose", "build"]) expect(service, key).not.toHaveProperty(key);
+  };
+
+  it("the import runs the worker's image as the operator's own login — on egress only, never with a database credential", () => {
+    hardening(importer);
+    expect(importer.image).toBe("ipa-ingestion-worker:import");
+    expect(importer.pull_policy).toBe("never");
+    expect(importer.entrypoint).toEqual(["node", "workers/import/main.ts"]);
+    expect(importer.user).toBe("${IPA_IMPORT_UID:-1000}:${IPA_IMPORT_GID:-1000}");
+    expect(importer.networks).toEqual(["egress"]);
+    expect(importer).not.toHaveProperty("depends_on");
+    // The import folder read-only; only the reports folder is written.
+    expect(importer.volumes).toEqual(["${IPA_IMPORT_FOLDER:?}:/import:ro", "${IPA_IMPORT_REPORTS:?}:/reports"]);
+    const environment = importer.environment as Record<string, YamlValue>;
+    expect(environment).toEqual({
+      IPA_RUNTIME_ENV: "production",
+      IPA_IMPORT_SUPABASE_URL: "${IPA_IMPORT_SUPABASE_URL:?}",
+      IPA_IMPORT_PUBLISHABLE_KEY: "${IPA_IMPORT_PUBLISHABLE_KEY:?}",
+      IPA_IMPORT_EMAIL: "${IPA_IMPORT_EMAIL:?}",
+      // Asked for at run time (ipa-import.sh, or the container's own prompt) — never a value here.
+      IPA_IMPORT_PASSWORD: "${IPA_IMPORT_PASSWORD:-}",
+      IPA_IMPORT_DIR: "/import",
+      IPA_IMPORT_REPORT_DIR: "/reports",
+    });
+  });
+
+  it("the scanner check runs in the worker's service — the only one that reaches the scanner", () => {
+    expect(Object.keys(compose.services).sort()).toEqual(["clamav", "import", "worker"]);
+    const script = read("deploy/import/ipa-import.sh");
+    // The worker's own fixed endpoint; the expected engine is the approved one (engine.json).
+    expect(script).toMatch(/dc run --rm -T --entrypoint node worker scripts\/verify-clamav-scanner\.ts --host clamav --port 3310 \|\|\n\s+die "Scannerkontrollen fejlede/);
+    expect(read(".github/workflows/ci.yml")).toContain("run --rm -T --entrypoint node worker scripts/verify-clamav-scanner.ts --host clamav --port 3310");
+  });
+
+  it("the import needs no package, never parses a PDF and reaches only its own code and the Admin upload's validation", () => {
+    const graph = importGraph("workers/import/main.ts", true);
+    expect([...graph.packages].filter((name) => !name.startsWith("node:"))).toEqual([]);
+    expect(graph.dynamic).toEqual([]);
+    expect([...graph.files].sort()).toEqual([
+      "src/lib/knowledge/admin-types.ts",
+      "src/lib/knowledge/core/grade.ts",
+      "src/lib/knowledge/document-types.ts",
+      "src/lib/knowledge/upload-validation.ts",
+      "workers/import/api.ts",
+      "workers/import/completeness.ts",
+      "workers/import/importer.ts",
+      "workers/import/journal.ts",
+      "workers/import/main.ts",
+      "workers/import/manifest.ts",
+      "workers/import/report.ts",
+    ]);
+    // Every file it needs is in the image.
+    const image = stripComments(read(`${DEPLOY}/Dockerfile`).replace(/^#.*$/gm, ""));
+    for (const file of graph.files) {
+      expect(image.includes(`COPY ${path.dirname(file)}/ `) || image.includes(` ${file} `) || image.includes(`COPY ${file} `) || /^COPY workers\/import\/ /m.test(image) && file.startsWith("workers/import/") || file.startsWith("src/lib/knowledge/core/"), file).toBe(true);
+    }
+    // The scanner verification needs only the clamd client and the approved engine's file.
+    const verify = importGraph("scripts/verify-clamav-scanner.ts", true);
+    expect([...verify.files].sort()).toEqual(["scripts/verify-clamav-scanner.ts", "workers/ingestion/security/scanner.ts"]);
+  });
+
+  it("the import only uploads and registers — it never approves, publishes, overwrites or uses a secret key", () => {
+    const code = ["api.ts", "importer.ts", "main.ts", "manifest.ts", "journal.ts", "completeness.ts", "report.ts"].map((file) => stripComments(read(`workers/import/${file}`))).join("\n");
+    const rpcs = [...code.matchAll(/rpc(?:<[^>(]*>)?\(\s*"(knowledge|identity)",\s*"([a-z_]+)"/g)].map((match) => `${match[1]}.${match[2]}`);
+    expect([...new Set(rpcs)].sort()).toEqual([
+      "identity.current_user_id",
+      "identity.has_permission",
+      "knowledge.find_versions_by_checksum",
+      "knowledge.log_original_download",
+      "knowledge.register_upload",
+      "knowledge.review_state",
+      "knowledge.version_security_status",
+    ]);
+    expect(code).not.toMatch(/\b(approve_version|start_review|reject_version|withdraw_version|discard_version|request_reprocess|publish_[a-z_]+)\b/);
+    expect(code).toMatch(/"x-upsert": "false"/);
+    expect(code).not.toMatch(/SUPABASE_SERVICE_ROLE_KEY|IPA_WORKER_DB/);
+    // The only bucket it writes is the quarantine; it reads only released originals.
+    expect([...code.matchAll(/api\.upload\((\w+)/g)].map((match) => match[1])).toEqual(["INTAKE_BUCKET"]);
+    expect([...code.matchAll(/api\.download\((\w+)/g)].map((match) => match[1])).toEqual(["ORIGINALS_BUCKET"]);
+  });
+
+  it("the operator script builds a fresh scanner, verifies it before every import and never stores a password", () => {
+    const script = read("deploy/import/ipa-import.sh");
+    expect(script).toMatch(/^set -euo pipefail$/m);
+    expect(script).not.toMatch(/set -x|xtrace/);
+    expect(script).toMatch(/dc build --no-cache clamav/);
+    // The settings file: yours only, and without passwords or secret keys.
+    expect(script).toMatch(/600 \| 400\) ;;/);
+    expect(script).toMatch(/\(PASSWORD\|SECRET\|SERVICE_ROLE\)/);
+    // Passwords are read without echo and only exported to this run's processes.
+    expect(script).toMatch(/read -rsp "\$prompt" value/);
+    expect(script).not.toMatch(/echo[^\n]*PASSWORD|printf[^\n]*\$\{?IPA_[A-Z_]*PASSWORD|PASSWORD[^\n]*>>?\s*["$\w/]/);
+    // importer: the scanner check, then upload, then the worker, then status — in that order.
+    const steps = script.slice(script.indexOf("  importer)"));
+    const order = ["scanner_check", "dc run --rm import upload", "dc run --rm worker", "dc run --rm import status"].map((step) => steps.indexOf(step));
+    expect(order.every((index) => index > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("the settings template names every required setting and holds no password or key", () => {
+    const template = read("deploy/import/ipa-import.env.example");
+    const settings = Object.fromEntries([...template.matchAll(/^([A-Z0-9_]+)=(.*)$/gm)].map((match) => [match[1], match[2]]));
+    const required = [...new Set([...composeText.matchAll(/\$\{([A-Z0-9_]+):\?\}/g)].map((match) => match[1]!))].sort();
+    expect(Object.keys(settings).sort()).toEqual(required.filter((name) => !/PASSWORD/.test(name)));
+    expect(template).not.toMatch(/^[A-Z0-9_]*(PASSWORD|SECRET|SERVICE_ROLE)[A-Z0-9_]*=/m);
+    expect(settings.IPA_IMPORT_PUBLISHABLE_KEY).toMatch(/^sb_publishable_/);
   });
 });
 

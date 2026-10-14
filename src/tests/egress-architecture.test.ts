@@ -86,6 +86,10 @@ const NON_AI_NETWORK: Record<string, RegExp> = {
   // 8B-I7: the evaluation provisioning downloads a PUBLIC source named in the manifest and
   // refuses it unless its SHA-256 matches. It sends nothing.
   "evals/engine/provision.ts": /^ {2}const download = options\.download \?\? \(async \(url: string\) => new Uint8Array\(await \(await fetch\(url\)\)\.arrayBuffer\(\)\)\);$/m,
+  // Beta L3: the administrator's document import reaches only the platform's own Supabase API
+  // (auth, PostgREST, Storage) as the signed-in operator — the Admin upload's path, from the
+  // operator's machine. It never talks to an AI provider.
+  "workers/import/api.ts": /^ {2}const fetchImpl = options\.fetchImpl \?\? fetch;$/m,
 };
 
 describe("external transports: only allowlisted, and only behind the egress check", () => {

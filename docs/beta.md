@@ -1,9 +1,10 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
-**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026.
-**Status:** L0 og L1 er godkendt (B-036). L1.1 (gate-sæt for `product_documents`, §13) og L2
-(AWS fjernet, skjulte områder, §14, B-037) er gennemført på branchen `beta/fast-beta-without-aws`
-og afventer godkendelse. L3–L9 er ikke påbegyndt.
+**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026; B-038,
+14. oktober 2026.
+**Status:** L0 og L1 er godkendt (B-036). L1.1 (§13) og L2 (§14, B-037) er godkendt (B-038). L3
+(sikker dokumentimport, §15) er gennemført på branchen `beta/fast-beta-without-aws` og afventer
+godkendelse. L4–L9 er ikke påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -69,7 +70,7 @@ gælder:
 | P1/P2: production-embedder og production-reranker | Gælder uændret for hybride konfigurationer. For `product_documents` er P1/P2 tilpasset eksplicit (§5.1) |
 | H6: evidensen skal komme fra production-implementeringer | Tilpasset eksplicit for `product_documents` (§5.1); uændret for hybride |
 | Embeddings som krav for publicering (docs/07) | Kræves kun, når en embedding-model er aktiv (L1, §12). Betaen har ingen |
-| Ingestion-worker på ECS/Fargate med ClamAV som ECS-service (I4, I5.5) | Samme worker og scanner som engangskørsel i Docker på en betroet maskine. Containerspecifikationen er `deploy/import/compose.yaml` (L2); runbooken er L3 |
+| Ingestion-worker på ECS/Fargate med ClamAV som ECS-service (I4, I5.5) | Samme worker og scanner som engangskørsel i Docker på en betroet maskine. Containerspecifikationen er `deploy/import/compose.yaml` (L2, L3); runbooken er `docs/import-runbook.md` (L3, §15) |
 | Credentials via Vercel OIDC / ECS-taskrolle / GitHub OIDC → AWS (C1) | Ingen AWS-credentials. Claude-nøglen i Vercels servermiljø; workerens databaserolle i operatørens miljø |
 | Evaluering i en AWS-evalueringskonto (I7) | Evalueringsmiljøet uden AWS (L9). Workflowet og IAM er fjernet i L2 |
 | Alarmer som CloudWatch-specs (B-033) | Log- og webhook-alarmerne (`AlertSink`) bevares. De aggregerede alarmer er version 2 uden Bedrock- og CloudWatch-delene (L2, B-037) |
@@ -348,8 +349,13 @@ automatisk. Dokumenter uploades ikke til GitHub Actions eller andre hostede runn
 
 Workeren forbinder som sin least-privilege login-rolle (8B-I3) og aldrig som service_role.
 Rollens credential findes kun i operatørens lokale miljø og aldrig i repoet. Operatørmaskinen er en
-del af sikkerhedsgrænsen; kravene til den (diskkryptering, adgang, sletning efter kørsel) fastlægges
-i runbooken i L3. **[AFKLARES]** Hvem der er betroet operatør, og hvilken maskine der bruges.
+del af sikkerhedsgrænsen. Kravene til den står i runbooken (`docs/import-runbook.md`):
+- krypteret disk og en personlig konto;
+- adgangskoderne spørges om ved hver kørsel og gemmes ikke;
+- PDF'erne slettes, når versionerne er publiceret.
+
+Importen selv er bygget i L3 (§15). **[AFKLARES]** Hvem der er betroet operatør, og hvilken maskine
+der bruges.
 
 ---
 
@@ -478,9 +484,9 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 |---|---|---|
 | L0 | B-035, dette dokument, rollback-punkt, beta-branch | Gennemført |
 | L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Godkendt (B-036) |
-| L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Gennemført, afventer godkendelse (§13) |
-| L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Gennemført, afventer godkendelse (§14) |
-| L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Ikke påbegyndt |
+| L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Godkendt (B-038) |
+| L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Godkendt (B-038) |
+| L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Gennemført, afventer godkendelse (§15) |
 | L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Ikke påbegyndt |
 | L4b | Første rigtige Claude-kald (kun efter særskilt godkendelse) | Ikke påbegyndt |
 | L5 | Copilot (produktvalg, svarkontrakt med dækning/undtagelser/begrænsninger, kildevalidering) | Ikke påbegyndt |
@@ -525,8 +531,13 @@ sker med en ny, fremadrettet migration.
   sendes til modellen.
 - **[AFKLARES]** Betroet operatør og maskine for dokumentimport (§6).
 - **[AFKLARES]** Afvigelserne i permission-reglerne (§8.1), før L6–L8 implementerer dem.
-- **[AFKLARES]** Det faktiske tegn- og tokenomfang af de rigtige dokumenter. Det måles ved import
-  (L3) og med tokentælling (L4) og afgør budgettet (§5.3).
+- **[AFKLARES]** Det faktiske tegn- og tokenomfang af de rigtige dokumenter. Importens status viser
+  tegnene pr. version (L3, §15.4). Tokentællingen kommer i L4, og tilsammen afgør de budgettet
+  (§5.3).
+- **[AFKLARES]** Selskab/udgiver for et dokument. Datamodellen har intet felt til det, og importen
+  afviser en kolonne for det (§15.3). Et nyt felt kræver en beslutning og en migration.
+- **[AFKLARES]** De hostede forudsætninger for den første rigtige import (§15.7). De udføres af en
+  person med adgang og ikke af importen.
 - **[AFKLARES]** Evalueringssættet for betaen (L9): netop ét produkt pr. spørgsmål og mindst minimum
   pr. type (§5.1).
 - **[AFKLARES]** Bekræftelse af de udledte punkter i B-036 (invarianter uden usikkerhed, nul
@@ -825,9 +836,10 @@ betaen og beholder alle områder. Gatewayens spærre mod kundesagsdata er uændr
    undervisningsindhold viser stadig udviklingsdata med notits, til L5–L8 erstatter dem. Betaen kan
    ikke åbnes for rådgivere før da (K5, §11).
 5. **Scanneren verificeres før import** med `scripts/verify-clamav-scanner.ts` (EICAR, motor og
-   signaturalder) som et trin i runbooken (L3). Uafhængigt heraf afviser hver scanning signaturer
-   over 24 timer, og databasen registrerer kun verdicts fra en godkendt motor.
-6. **Workerens base-image** skal låses efter digest før den første rigtige import **[AFKLARES, L3]**.
+   signaturalder) som et trin i runbooken. Uafhængigt heraf afviser hver scanning signaturer over
+   24 timer, og databasen registrerer kun verdicts fra en godkendt motor. *Lukket i L3 (§15.5).*
+6. **Workerens base-image** skal låses efter digest før den første rigtige import. *Lukket i L3:
+   låst efter digest (§15.5).*
 
 ### 14.6 Mutationer
 
@@ -862,3 +874,209 @@ L2 ændrer ingen SQL. pgTAP er kørt uændret.
 - ingen migration, ingen ændring i hosted Supabase, ingen betalbare ressourcer og ingen
   Claude-kald.
 
+
+---
+
+## 15. L3 — sikker dokumentimport uden AWS (gennemført, afventer godkendelse)
+
+Importen er den enklest mulige administratorimport til 40–100 PDF'er. Den genbruger den eksisterende
+sikkerhedskæde uændret og bygger ikke en parallel pipeline. Runbooken for administratoren er
+`docs/import-runbook.md`.
+
+### 15.1 Hvad er bygget
+
+| Del | Fil | Indhold |
+|---|---|---|
+| Importen | `workers/import/` | Importliste, kontrol, upload og registrering, status og bevis for fuldstændighed. Ingen dependencies |
+| Containerspecifikationen | `deploy/import/compose.yaml` | Ny tjeneste `import`. Scanner og worker er uændrede i isolation |
+| Operatørens script | `deploy/import/ipa-import.sh` | Trinene `forbered`, `produkter`, `kontroller`, `importer`, `status` og `stop` |
+| Indstillinger | `deploy/import/ipa-import.env.example` | Skabelon uden adgangskoder |
+| Image | `deploy/ingestion-worker/Dockerfile` | Samme image til worker, import og scannerkontrol. Base-image låst efter digest |
+| Scanner | `deploy/clamav/clamd.conf` | `TCPAddr 0.0.0.0`, så sundhedskontrollen virker uden IPv6 (§15.8) |
+| CI | `.github/workflows/ci.yml` | Jobbet `import-scanner` bygger den rigtige scanner og kontrollerer den |
+
+### 15.2 Kæden
+
+PDF → karantæne (`knowledge-intake`) → validering → ClamAV → sikkerhedsvurdering i databasen →
+frigivelse (samme SHA-256) → tekstudtræk → registrering → faglig godkendelse i Admin → publicering.
+
+Importen er en ny klient af den eksisterende uploadvej:
+- **Importen** logger ind som operatørens egen administratorkonto gennem platformens offentlige API.
+  Den uploader til karantænen og kalder `knowledge.register_upload` som Admin-uploaden. Bucket-
+  politikkerne, RLS og databasefunktionerne afgør adgangen, og auditloggen navngiver operatøren.
+  Importen afviser en service-role- eller hemmelig nøgle.
+- **Importen læser aldrig dokumenternes tekst og parser aldrig en PDF.** Den beregner kun SHA-256
+  og uploader. Indholdet behandles først i workeren efter frigivelsen og er data, aldrig
+  instruktioner.
+- **Workeren** scanner, frigiver og udtrækker uændret som sin least-privilege login-rolle.
+- **Intet godkendes eller publiceres automatisk.** Importen kalder kun `register_upload` som
+  skrivende funktion. En arkitekturtest håndhæver det.
+
+Ingen migration, ingen ny databasefunktion og ingen ændring af sikkerhedskæden.
+
+### 15.3 Importliste, idempotens og genoptagelse
+
+**Importlisten** (`importliste.csv`) har én række pr. PDF. Kolonnerne er beskrevet i runbookens
+trin 3. Hver række valideres to gange:
+- med Admin-uploadens egen validering (`src/lib/knowledge/upload-validation.ts`);
+- mod datamodellen: produktet findes og er aktivt, dokumenttypen er en af de otte, og et angivet
+  dokument findes.
+
+Importen gætter aldrig. Et produkt angives med id, og en dokumenttype med nøgle eller præcist navn.
+Ukendte kolonner afvises. **Selskab/udgiver** har intet felt i datamodellen. En kolonne for det
+afvises i stedet for at blive ignoreret stiltiende **[AFKLARES]**.
+
+`version` og `gyldig_fra` er påkrævede, fordi godkendelsen kræver dem (`knowledge.review_state`).
+
+**Idempotens:** en fil, hvis SHA-256 allerede findes som version, sendes aldrig igen
+(`knowledge.find_versions_by_checksum`). En gentaget import opretter derfor ingen ny version, heller
+ikke fra en anden maskine eller uden journal.
+
+**Genoptagelse:** journalen (`import-journal.json` i rapportmappen) skrives atomisk, før noget
+sendes. Den holder kun id'er, SHA-256 og filnavne. En import, der afbrydes efter upload og før
+registrering, fortsætter med samme id'er. Afbrydes den efter registrering, findes filen på sin
+SHA-256. En worker, der stoppes midt i et job, mister sin lease, og næste kørsel tager jobbet over
+(8B-I4). Ingen afbrydelse fører til publicering.
+
+### 15.4 Bevis for fuldstændighed
+
+`status` beviser for hver frigivet version (`workers/import/completeness.ts`):
+- **Originalen** i `knowledge-originals` har samme SHA-256 som filen i importmappen og som den
+  registrerede version. Downloaden er auditeret.
+- **Siderne** er præcis 1..N, hvor N er PDF'ens sideantal. Hver side har tekstlag, og N svarer til
+  `sider` i importlisten, når kolonnen er udfyldt.
+- **Rækkefølgen:** sider og tekstsegmenter følger dokumentets rækkefølge, og hver side med tekst er
+  dækket af et segment.
+- **Identiteten:** produkt, dokumenttype, titel, version, gyldighed, sprog og filnavn er dem i
+  importlisten.
+
+En version, der fejler et af punkterne, vises som "Ufuldstændig – kan ikke godkendes". Databasen
+blokerer uafhængigt godkendelsen af ulæste sider (`pages_unread`). Status viser også tegnene pr.
+version til betaens budget (§5.3) og adgangstildelingerne.
+
+### 15.5 Docker og isolation
+
+- **Scanneren** er uændret: egen container, kun på det interne net `scan`, ingen miljøvariabler,
+  ingen credentials, ingen offentliggjort port, read-only, uden capabilities. Kun workeren når den.
+- **Scannerkontrollen** kører i workerens tjeneste, som er den eneste, der når scanneren
+  (`scripts/verify-clamav-scanner.ts`). Den kræver:
+  - den godkendte motor 1.4.6;
+  - signaturer under 8 timer;
+  - at EICAR bliver fundet, og at en ren fil er ren.
+
+  Den kører ved `forbered` og igen før hver `importer`.
+- **Scanneren bygges uden cache** før hver import. Et cachet `freshclam`-lag ville ellers genbruge
+  gamle signaturer (§15.8).
+- **Importen** kører som tjenesten `import`:
+  - kun på `egress`, uden databasecredential;
+  - som operatørens bruger-id;
+  - read-only med importmappen skrivebeskyttet;
+  - den skriver kun rapporter og journal.
+- **Adgangskoder** spørges om af scriptet og findes kun i kørslens containere. De står aldrig i
+  indstillingsfilen, og scriptet afviser en fil med en adgangskode. De står heller aldrig i repoet,
+  i et image eller i en log.
+- **Workerens base-image** er låst efter digest (lukker §14.5 pkt. 6). `.dockerignore` udelukker
+  PDF'er og importlister fra enhver build.
+
+### 15.6 De ni sikkerhedstests
+
+Alle filer er syntetiske. Ingen rigtige forsikringsvilkår er brugt.
+
+| # | Krav | Test |
+|---|---|---|
+| 1 | Ren PDF scannes og når faglig godkendelse | Docker, stand-in med friske signaturer: frigivet, komplet, godkendt af en person og læst tilbage. Integration: det samme med udviklingsscanneren. Den rigtige motor med friske officielle signaturer: CI-jobbet `import-scanner` (ren fil ren, EICAR fundet) |
+| 2 | EICAR afvises | Docker, rigtig ClamAV 1.4.6 med officielle signaturer: EICAR i et arkiv kaldet `.pdf` afvises som malware. Verdict fra ClamAV 1.4.6 |
+| 3 | Scanner utilgængelig → blokeret | Docker, rigtig ClamAV: scanneren stoppes, `scan_failed`/`scanner_unavailable`, ingen sider |
+| 4 | Signaturer for gamle → blokeret | Docker, rigtig ClamAV med officielle signaturer ældre end 24 timer: scannerkontrollen afviser, og en ren fil frigives ikke (`stale_signatures`) |
+| 5 | Fil ændret efter scanning → frigivelse afvises | Docker og integration: bytes udskiftes mellem verdict og frigivelse. Verdict ugyldiggøres (`checksum_changed`), ny scanning afviser (`checksum_mismatch`) |
+| 6 | Ødelagt PDF afvises | Docker og integration: afkortet PDF afvises eller kan ikke behandles. Ingen sider |
+| 7 | Krypteret PDF afvises | Docker og integration: afvist som ugyldig PDF efter politik `pdf-v1` |
+| 8 | Gentaget import → ingen dobbeltpublicering | Integration og Docker: intet sendes igen, ingen ny version. Enhed: også uden journal |
+| 9 | Delvist fejlet import → sikker genoptagelse | Integration: afbrudt efter upload og efter registrering. Docker: workeren dræbes midt i en scanning. Ingen ny kopi, intet publiceret |
+
+**Hvorfor en stand-in.** Sandkassen kan ikke nå `database.clamav.net`, fordi netværkspolitikken
+afviser værten. Docker-testen bruger derfor de officielle signaturer fra det officielle image
+`clamav/clamav:1.4.6`, som var omkring 3 døgn gamle. Det giver de rigtige test 2–4. Hvor friske
+signaturer er nødvendige, bruger testen en tydeligt markeret clamd-protokol-stand-in
+(`src/tests/fixtures/clamd-stand-in.mjs`) på samme endpoint. Den rigtige motor med friske officielle
+signaturer kontrolleres i CI-jobbet `import-scanner` og af operatøren før hver import.
+
+### 15.7 Hostede forudsætninger (ikke udført)
+
+Hosted Supabase "IPA" er ikke ændret. Før den første rigtige import skal en person med adgang:
+1. anvende migrationerne på projektet;
+2. deploye Edge Function `worker-storage` med dens hemmeligheder;
+3. sætte en adgangskode på workerens login-rolle og forberede den (`ops.ingestion_worker_prepare`);
+4. lægge Supabases CA-certifikat i `deploy/ingestion-worker/certs/`;
+5. oprette operatørens administratorkonto med `knowledge.document.write`;
+6. oprette produkterne i Admin;
+7. sikre, at operatørmaskinen kan nå projektet og `database.clamav.net`.
+
+### 15.8 Fund
+
+1. **Scannerens sundhedskontrol virkede ikke uden IPv6.** `clamdscan --ping` forsøgte IPv6
+   "localhost", og scanneren blev aldrig "healthy". Rettet med `TCPAddr 0.0.0.0` i `clamd.conf`.
+   Scanneren er stadig kun på det interne net. Det officielle `clamdcheck.sh` kræver `nc`, som
+   imaget ikke har.
+2. **`docker compose build` gav ikke nødvendigvis friske signaturer.** Lagcachen genbruger
+   `freshclam`-laget. Scriptet bygger scanneren med `--no-cache`, og scannerkontrollen afviser
+   signaturer over 8 timer.
+3. **`docker compose` kræver alle tjenesters indstillinger,** også i trin, der ikke starter
+   workeren. Scriptet giver de trin en pladsholder, som workeren ville afvise, så workerens
+   adgangskode kun spørges om, hvor workeren kører.
+4. **En separat scannerkontrol-tjeneste uden credentials blev overvejet og fravalgt.** Den ville
+   gøre en anden container til medlem af `scan` og dermed ændre reglen fra L2 om, at kun workeren
+   når scanneren.
+
+### 15.9 Mutationer
+
+**49 af 49 fanget.** De dækker:
+- importlisten (7): ukendte kolonner, en selskabskolonne, der ignoreres, upræcis dokumenttype,
+  valgfri version og gyldighed, filnavne med mappe og dokument samtidig med produkt;
+- upload og genoptagelse (8): ingen dubletkontrol, journalen skrevet for sent, ingen genoptagelse,
+  overskrivning, en ændret fil, et udgået produkt, godkendelse efter registrering og upload til
+  `knowledge-originals`;
+- API-klienten (4): service-role-nøgle, http i produktion, serverens tekst i loginfejlen og ingen
+  logout;
+- beviset (7): manglende sider, sider uden tekst, originalen ikke sammenlignet, sideantallet
+  ignoreret, segmenternes rækkefølge, udækkede sider og produktet;
+- journal og importmappe (4): ødelagt journal brugt, journal læsbar for andre, links fulgt og
+  filer uden for mappen;
+- containerspecifikationen og imaget (10): importen på `scan`, importmappen skrivbar, workerens
+  adgangskode til importen, bogstavelig adgangskode, offentliggjort port, en anden container på
+  `scan`, base-image uden digest, PDF'er i build-konteksten, ingen IPv4-binding og en ekstra
+  netværksklient;
+- operatørens script (6): scanner bygget med cache, ingen scannerkontrol før upload, læsbar eller
+  adgangskodeholdig indstillingsfil og fortsat kørsel efter en fejlet kontrol eller import;
+- status mod den lokale stak (3): ufuldstændig vist som klar, originalen ikke læst tilbage og
+  afvist vist som ventende.
+
+To huller blev fundet og lukket før den endelige kørsel:
+- status kunne springe downloaden af originalen over uden at blive opdaget. Lukket med en test,
+  der ændrer den gemte original;
+- base-imagets digest var ikke kontrolleret. Lukket med en assertion.
+
+### 15.10 Verifikation (lokalt)
+
+- **lint, typecheck og build:** bestået, også typecheck af workers.
+- **Enhedstests:** 965 bestået og 4 sprunget over. Der var 931 i L2. De fire er
+  motorkandidat-testene, som kræver en kørende clamd. De er kørt særskilt mod den rigtige ClamAV
+  1.4.6-container: 4 bestået.
+- **pgTAP:** 1005 bestået, uændret, for L3 ændrer ingen SQL. Kørt på en frisk database og igen efter
+  alle integrations- og Docker-tests.
+- **Integration:** 168 bestået og 6 sprunget over. Der var 161 og 2 i L2. De seks er:
+  - de fire Docker-tests, som kører på opfordring;
+  - de to upload-sikkerhedstests mod en rigtig clamd.
+
+  Begge grupper er kørt særskilt: Docker 4 af 4 bestået, og upload-sikkerhed mod den rigtige
+  ClamAV 1.4.6 8 af 8 bestået.
+- **Docker ende til ende:** 4 af 4 bestået med images bygget fra repoets Dockerfiles. To afvigelser
+  er nødvendige i sandkassen:
+  - workerens deps-trin stoler på sandkassens proxy-CA under `npm ci`. Runtime-trinnet er uændret,
+    og det endelige image er kontrolleret uden CA'en;
+  - scannerens signaturtrin tager de officielle signaturer fra det officielle image, fordi
+    `database.clamav.net` er blokeret.
+- **Ikke kørt her:** scannerens build med `freshclam`, fordi værten er blokeret. Den køres af
+  CI-jobbet `import-scanner` og af operatøren med `forbered`.
+- Ingen migration, ingen ændring i hosted Supabase, ingen betalbare ressourcer og ingen
+  Claude-kald.

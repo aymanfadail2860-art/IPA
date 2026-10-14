@@ -2,9 +2,10 @@
 
 Workeren kører som en selvstændig Node-proces uden for Next.js-appen (`docs/08b` §6.1 og
 §21.5). I betaen kører den som **administratorens engangsimport på en betroet maskine**
-(`--once`, `deploy/import/compose.yaml`, `docs/beta.md` §6). Runbooken og den første rigtige
-import hører til L3. AWS-specifikationerne fra 8B er fjernet i L2 og kan gendannes fra
-Git-historikken:
+(`--once`, `deploy/import/compose.yaml`, `docs/beta.md` §6). Runbooken er
+`docs/import-runbook.md` (L3). Samme image kører også administratorens import
+(`workers/import/`, tjenesten `import`) og scannerkontrollen før en import. AWS-specifikationerne
+fra 8B er fjernet i L2 og kan gendannes fra Git-historikken:
 - ECS-task og -service, security group og IAM-roller;
 - Bedrock-embedder og credentials;
 - CloudWatch-alarmer.
@@ -19,7 +20,7 @@ Git-historikken:
 
 | Fil | Indhold |
 |-----|---------|
-| `Dockerfile` | Image i flere trin, kun runtime-dependencies (`postgres`, `pdfjs-dist`), ikke-root, ingen build-argumenter eller hemmeligheder, ingen cloud-SDK |
+| `Dockerfile` | Image i flere trin, kun runtime-dependencies (`postgres`, `pdfjs-dist`), ikke-root, ingen build-argumenter eller hemmeligheder, ingen cloud-SDK. Base-image låst efter digest (L3) |
 | `package.json`, `package-lock.json` | Imagets eneste dependencies (samme versioner som rodens lockfil) |
 | `certs/` | Supabases CA (offentligt certifikat), som lægges her, før imaget bygges |
 

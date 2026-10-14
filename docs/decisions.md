@@ -10,6 +10,74 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-038 — L1.1 og L2 godkendt; sikker dokumentimport uden AWS (beta L3)
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §6, §9, §11, §15; `docs/import-runbook.md`; `workers/import/`;
+`deploy/import/`; `deploy/ingestion-worker/Dockerfile`; `deploy/clamav/clamd.conf`; CI-jobbet
+`import-scanner`
+
+**Beslutning:**
+- **L1.1 og L2 er godkendt** på grundlag af statusrapporten for commit `717cc98`. Godkendt er
+  betaens dokumentmetode, den AWS-frie runtime, server-side skjulning af ufærdige moduler,
+  midlertidige udviklingsdata indtil L5–L8 og bevarelse af sikkerhed og testdækning. De øvrige
+  selvstændige beslutninger i B-036 og B-037 er opregnet i L3-rapporten og afventer fortsat deres
+  egne bekræftelser (`docs/beta.md` §11).
+- **Dokumentimporten er en administratorimport i Docker** (L3, `docs/beta.md` §15). Den genbruger
+  Admin-uploadens vej:
+  - karantæne og `knowledge.register_upload`;
+  - Admin-uploadens validering;
+  - den uændrede sikkerhedskæde i workeren.
+
+  Importen logger ind som operatørens egen konto og aldrig som service_role. Den læser ikke
+  dokumenternes tekst, godkender og publicerer intet. Ingen migration.
+- **Importlisten** er en CSV med danske kolonnenavne, én række pr. PDF. `version` og `gyldig_fra`
+  er påkrævede. Den valgfri kolonne `sider` giver et uafhængigt tjek af sideantallet. Ukendte
+  kolonner afvises.
+- **Selskab/udgiver understøttes ikke.** Datamodellen har intet felt til det. Importen afviser en
+  kolonne for det **[AFKLARES]**.
+- **En fil importeres højst én gang.** Findes dens SHA-256 som version, sendes den ikke igen.
+  Journalen gør en afbrudt import genoptagelig med samme id'er.
+- **Bevis for fuldstændighed** er en del af status (`docs/beta.md` §15.4):
+  - den gemte original har filens SHA-256;
+  - siderne er 1..N med tekstlag;
+  - tekstsegmenterne følger dokumentets rækkefølge og dækker hver side med tekst;
+  - identiteten svarer til importlisten.
+
+  En version, der fejler, vises som ufuldstændig.
+- **Scannerkontrollen kører i workerens tjeneste** før hver import. Kun workeren når scanneren,
+  som i L2.
+- **Scanneren bygges uden cache før hver import.** `clamd.conf` får `TCPAddr 0.0.0.0`, så
+  sundhedskontrollen virker uden IPv6.
+- **Workerens base-image er låst efter digest.**
+- **CI-jobbet `import-scanner`** bygger den rigtige scanner med friske officielle signaturer og
+  kører scannerkontrollen. Jobbet bruger ingen dokumenter, ingen database og ingen credentials.
+
+**Overvejede alternativer:**
+- *Importen som databasefunktion eller med service-rollen.* Fravalgt. Service-rollen omgår RLS og
+  auditloggens operatør. Den er ikke tilladt som genvej.
+- *En separat scannerkontrol-tjeneste uden credentials på det interne net.* Fravalgt. Den ville
+  ændre reglen fra L2 om, at kun workeren når scanneren.
+- *Parse PDF'en i importen for at tælle sider før upload.* Fravalgt. En PDF parses først efter
+  frigivelsen. Sideantallet kontrolleres efter udtrækket.
+- *Et nyt felt til selskab/udgiver eller brug af `external_ref`.* Fravalgt uden beslutning. Det ville
+  være et opfundet krav eller en ændret betydning af et eksisterende felt.
+- *Tillade dubletter som Admin-uploaden med en advarsel.* Fravalgt for importen. En gentaget kørsel
+  må ikke skabe en ny version.
+
+**Begrundelse:** Importen skal være så enkel som muligt og må ikke svække sikkerhedskæden. Ved at
+bruge Admin-uploadens egen vej som operatøren selv gælder alle eksisterende regler uændret. Det
+gælder adgang, karantæne, sikkerhedsvurdering, frigivelse, godkendelse og audit. Det eneste nye er
+en klient, der kan genoptages, og et bevis for, at hele versionen er gemt.
+
+**Udledt (til bekræftelse):**
+1. `version` og `gyldig_fra` er påkrævede i importlisten, fordi godkendelsen kræver dem.
+2. En fil, der findes som version, importeres ikke igen, heller ikke som et andet dokument.
+3. `sider` er valgfri, men anbefalet.
+4. Der køres én import ad gangen og fra én maskine.
+
+---
+
 ## B-037 — AWS fjernet fra den aktive beta; skjulte områder (beta L2)
 
 **Dato:** 13. oktober 2026

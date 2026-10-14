@@ -37,10 +37,22 @@ describe("ClamAV is its own container (deploy/import/compose.yaml)", () => {
   const worker = compose.services.worker!;
 
   it("is not part of the worker's container or image", () => {
-    expect(Object.keys(compose.services).sort()).toEqual(["clamav", "worker"]);
+    // Beta L3: the import runs the worker's image as its own service — without the scanner.
+    expect(Object.keys(compose.services).sort()).toEqual(["clamav", "import", "worker"]);
     expect(scanner.build).toMatchObject({ context: "../..", dockerfile: "deploy/clamav/Dockerfile" });
     expect(worker.build).toMatchObject({ context: "../..", dockerfile: "deploy/ingestion-worker/Dockerfile" });
-    expect(read("deploy/ingestion-worker/Dockerfile")).not.toMatch(/clamav|clamd|freshclam/i);
+    // No scanner engine, signature database or scanner image in the worker's image — it carries
+    // only the clamd protocol client and the approved engine's version number (engine.json).
+    const workerImage = read("deploy/ingestion-worker/Dockerfile").replace(/^#.*$/gm, "");
+    expect(workerImage).not.toMatch(/freshclam|clamscan|clamdscan|apt-get|apk add|\/var\/lib\/clamav|clamd\.conf|COPY --from=(?!deps)/i);
+    expect([...workerImage.matchAll(/^FROM (\S+)/gm)].map((match) => match[1]!.split("@")[0])).toEqual([
+      "docker.io/library/node:22.22.2-bookworm-slim",
+      "docker.io/library/node:22.22.2-bookworm-slim",
+    ]);
+    expect(workerImage.split("\n").filter((line) => /clamav/i.test(line))).toEqual([
+      "COPY scripts/verify-clamav-scanner.ts ./scripts/",
+      "COPY deploy/clamav/engine.json ./deploy/clamav/",
+    ]);
   });
 
   it("has NO environment and NO credential — in particular none of the worker's", () => {
@@ -78,6 +90,8 @@ describe("ClamAV is its own container (deploy/import/compose.yaml)", () => {
     expect(PRODUCTION_SCANNER.host).toBe("clamav");
     expect(Object.keys(compose.services)).toContain(PRODUCTION_SCANNER.host);
     expect(read("deploy/clamav/clamd.conf")).toMatch(new RegExp(`^TCPSocket ${PRODUCTION_SCANNER.port}$`, "m"));
+    // Beta L3: explicitly IPv4, so the health check reaches it in a container without IPv6.
+    expect(read("deploy/clamav/clamd.conf")).toMatch(/^TCPAddr 0\.0\.0\.0$/m);
     expect(scanner.healthcheck).toMatchObject({ test: ["CMD", "clamdscan", "--config-file=/etc/clamav/clamd.conf", "--ping", "1"] });
     expect(worker.depends_on).toEqual({ clamav: { condition: "service_healthy" } });
   });

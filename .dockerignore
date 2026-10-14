@@ -12,3 +12,7 @@ coverage
 supabase/.temp
 supabase/.branches
 workers/ingestion/dev-service-role.ts
+# Beta L3: documents and import lists never enter a build context or an image layer.
+**/*.pdf
+**/*.PDF
+**/importliste.csv

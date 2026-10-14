@@ -34,8 +34,8 @@ function scalar(raw: string, number: number): YamlValue {
     return inner === "" ? [] : inner.split(",").map((part) => scalar(part, number));
   }
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) return text.slice(1, -1);
-  // Plain scalars: braces only in a compose interpolation "${NAME:?}".
-  if (/[{}[\]]/.test(text.replace(/\$\{[A-Z0-9_]+(?::\?)?\}/g, ""))) throw new Error(`compose.yaml:${number}: ikke understøttet: ${text}`);
+  // Plain scalars: braces only in a compose interpolation "${NAME:?}" or "${NAME:-default}".
+  if (/[{}[\]]/.test(text.replace(/\$\{[A-Z0-9_]+(?::\?|:-[^${}]*)?\}/g, ""))) throw new Error(`compose.yaml:${number}: ikke understøttet: ${text}`);
   if (text === "true" || text === "false") return text === "true";
   if (text === "null" || text === "~") return null;
   if (/^-?\d+$/.test(text)) return Number(text);

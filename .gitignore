@@ -46,3 +46,8 @@ next-env.d.ts
 # retrieval evaluation output (docs/08b §4.5) — reports are registered, not committed
 /evals/retrieval/reports/
 /evals/retrieval/control-drafts/
+
+# Beta L3: documents and import lists never belong in the repository (docs/import-runbook.md).
+*.pdf
+*.PDF
+importliste.csv

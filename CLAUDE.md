@@ -30,7 +30,8 @@ deployment, validering, compliance og indhold udestår. 8C er ikke påbegyndt.
 Assessment på Vercel, Supabase og Claude API — uden AWS i den aktive runtime. Advise er udskudt.
 Scope, arkitektur og leverancerne L0–L9 står i `docs/beta.md`. Arbejdet sker på branchen
 `beta/fast-beta-without-aws`; hver leverance godkendes særskilt. L0 og L1 er godkendt (B-036); L1.1
-og L2 (AWS fjernet, skjulte områder, B-037) afventer godkendelse.
+og L2 er godkendt (B-038). L3 (sikker dokumentimport uden AWS, runbook `docs/import-runbook.md`)
+afventer godkendelse.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`
@@ -148,6 +149,7 @@ indhold til den; der laves ikke tomme skabeloner på forhånd.
 | `docs/08-ai-gateway.md` | 8A | Oprettet — gennemført og låst |
 | `docs/08b-production-foundation.md` | 8B | Oprettet — specifikation godkendt og låst |
 | `docs/beta.md` | Beta (B-035) | Oprettet — fast beta uden AWS |
+| `docs/import-runbook.md` | Beta (L3) | Oprettet — runbook for dokumentimport |
 | `docs/decisions.md` | Løbende | Oprettet |
 
 Udestående punkter dokumenteres i det dokument, de vedrører, og gentages i

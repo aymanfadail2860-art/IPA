@@ -8,10 +8,16 @@
 #             started in the test runtime and in the production runtime → integration tests
 #
 # No production credentials, no cloud account, no secrets: the only keys are the ones the local
-# Supabase generates for itself inside the job. ClamAV runs in its own workflow (EICAR against an
-# engine candidate: clamav-engine-candidate.yml); here the upload-security tests use the
+# Supabase generates for itself inside the job. Here the upload-security tests use the
 # development fixture scanner, and the clamd-backed EICAR test is skipped (it needs
 # IPA_TEST_CLAMD_HOST). Beta L2 (docs/beta.md §14): no AWS anywhere.
+#
+#   import-scanner  (beta L3) the import's REAL scanner: deploy/clamav/Dockerfile built through
+#             deploy/import/compose.yaml with fresh official signatures (freshclam), started in
+#             its isolation and verified by the import's scanner check from the worker's service (approved engine,
+#             signatures under 8 hours, EICAR found, a clean file clean). No database, no
+#             document, no credential. The import end to end in Docker is
+#             src/tests/integration/import-docker.integration.test.ts (opt-in, local).
 #
 # Branch protection (an external prerequisite, set in GitHub): require both jobs on main.
 
@@ -142,3 +148,43 @@ jobs:
       - name: App logs on failure
         if: failure()
         run: tail -n 100 "$RUNNER_TEMP"/app-*.log || true
+
+  import-scanner:
+    name: Import scanner (ClamAV in Docker, official signatures)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # docker compose reads every service's settings. None of these is a credential, and no
+      # container that would use them is started here.
+      IPA_WORKER_DB_HOST: unused.invalid
+      IPA_WORKER_DB_USER: unused
+      IPA_WORKER_DB_PASSWORD: unused
+      IPA_WORKER_STORAGE_URL: https://unused.invalid
+      IPA_IMPORT_SUPABASE_URL: https://unused.invalid
+      IPA_IMPORT_PUBLISHABLE_KEY: unused
+      IPA_IMPORT_EMAIL: unused@unused.invalid
+      IPA_IMPORT_FOLDER: ${{ runner.temp }}/import
+      IPA_IMPORT_REPORTS: ${{ runner.temp }}/reports
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the scanner with fresh official signatures, and the worker image
+        run: |
+          docker compose -f deploy/import/compose.yaml build --no-cache clamav
+          docker compose -f deploy/import/compose.yaml build worker
+
+      - name: Start the scanner and run the import's scanner check
+        run: |
+          docker compose -f deploy/import/compose.yaml up -d --wait clamav
+          docker compose -f deploy/import/compose.yaml run --rm -T --entrypoint node worker scripts/verify-clamav-scanner.ts --host clamav --port 3310 | tee "$RUNNER_TEMP/scanner-check.json"
+          jq -e '.ok == true and .engineVersion == "1.4.6"' "$RUNNER_TEMP/scanner-check.json"
+
+      - name: The running scanner keeps its isolation
+        run: |
+          id=$(docker compose -f deploy/import/compose.yaml ps -q clamav)
+          docker inspect "$id" | jq -e '.[0] | (.HostConfig.PortBindings // {}) == {} and .HostConfig.ReadonlyRootfs == true and .HostConfig.CapDrop == ["ALL"] and .Config.User == "10001:10001" and (.NetworkSettings.Networks | keys) == ["ipa-import_scan"]'
+          docker network inspect ipa-import_scan | jq -e '.[0].Internal == true'
+
+      - name: Stop
+        if: always()
+        run: docker compose -f deploy/import/compose.yaml down --remove-orphans

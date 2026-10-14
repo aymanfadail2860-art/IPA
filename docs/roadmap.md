@@ -29,7 +29,11 @@ nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9)
 `product_documents` og publicering uden embeddings) er godkendt (B-036). **L1.1** (gate-sættet D1–D6,
 E2E-acceptkontrollen og tre adskilte godkendelser, `docs/beta.md` §13) og **L2** (AWS fjernet fra
 den aktive beta; Advise, Analytics og Min profil skjult server-side; `docs/beta.md` §14, B-037) er
-gennemført og afventer godkendelse. L3 påbegyndes først efter eksplicit godkendelse.
+godkendt (B-038). **L3** (sikker dokumentimport uden AWS; `docs/beta.md` §15, runbook
+`docs/import-runbook.md`, B-038) er gennemført og afventer godkendelse. L4 påbegyndes først efter
+eksplicit godkendelse. Udestående for L3: selskab/udgiver har intet felt i datamodellen
+**[AFKLARES]**, og de hostede forudsætninger for den første rigtige import er ikke udført
+(`docs/beta.md` §15.7).
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på

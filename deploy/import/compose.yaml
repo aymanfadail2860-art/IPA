@@ -1,9 +1,10 @@
-# Beta document import — the scanner and the ingestion worker as a one-off run on a trusted
-# machine (docs/beta.md §6; B-035). No AWS: this replaces the ECS/Fargate specifications of 8B
-# (L2, docs/beta.md §14). The runbook, the operator machine and the first real import are L3.
+# Beta document import — the scanner, the ingestion worker and the administrator's import as
+# one-off runs on a trusted machine (docs/beta.md §6, §15; B-035). No AWS: this replaces the
+# ECS/Fargate specifications of 8B (L2, docs/beta.md §14).
 #
-#   docker compose -f deploy/import/compose.yaml build      # fresh official ClamAV signatures
-#   docker compose -f deploy/import/compose.yaml run --rm worker
+# Run it through deploy/import/ipa-import.sh (runbook: docs/import-runbook.md), not by hand: the
+# script builds the scanner without cache (fresh signatures), verifies it, asks for the passwords
+# without storing them and runs the steps in order.
 #
 # The isolation of 8B-I5.5 carries over, vendor-neutral:
 #   * ClamAV runs in its OWN container — never in the worker's. It has no environment, no
@@ -12,12 +13,16 @@
 #   * The worker reaches the scanner only at the fixed endpoint clamav:3310 (production refuses
 #     any other, workers/ingestion/config.ts) and the database and storage only through "egress".
 #     It connects as its least-privilege login role; the service-role key is refused.
+#   * The import (beta L3) runs as the operator's own administrator login through the platform's
+#     public API — never the service-role key, no database credential — and only on "egress".
+#     It reads the import folder read-only and writes only reports and its journal.
 #   * Credentials come from the operator's environment at run time — never from this file, an
-#     image layer or the repository.
-#   * Before an import the operator verifies the running scanner with
-#     scripts/verify-clamav-scanner.ts (engine, fresh signatures, EICAR) — the runbook is L3.
-#     Independently of that, every scan refuses signatures older than 24 hours and the database
-#     records verdicts only from an approved engine.
+#     image layer or the repository. No service publishes a port.
+#   * Before an import ipa-import.sh verifies the running scanner from the worker's service —
+#     the only one that reaches it — with scripts/verify-clamav-scanner.ts: the approved engine,
+#     signatures at most 8 hours old, EICAR found, a clean file clean. Independently of that,
+#     every scan refuses signatures older than 24 hours and the database records verdicts only
+#     from an approved engine.
 
 name: ipa-import
 
@@ -77,9 +82,35 @@ services:
       clamav:
         condition: service_healthy
 
+  # Beta L3: the administrator's document import (workers/import/main.ts) — upload to quarantine
+  # and registration as the operator's own login; status and the proof of completeness. The
+  # password is asked for at run time (ipa-import.sh) and never stored.
+  import:
+    image: ipa-ingestion-worker:import
+    pull_policy: never
+    entrypoint: ["node", "workers/import/main.ts"]
+    command: ["kontroller"]
+    user: "${IPA_IMPORT_UID:-1000}:${IPA_IMPORT_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    environment:
+      IPA_RUNTIME_ENV: production
+      IPA_IMPORT_SUPABASE_URL: ${IPA_IMPORT_SUPABASE_URL:?}
+      IPA_IMPORT_PUBLISHABLE_KEY: ${IPA_IMPORT_PUBLISHABLE_KEY:?}
+      IPA_IMPORT_EMAIL: ${IPA_IMPORT_EMAIL:?}
+      IPA_IMPORT_PASSWORD: ${IPA_IMPORT_PASSWORD:-}
+      IPA_IMPORT_DIR: /import
+      IPA_IMPORT_REPORT_DIR: /reports
+    volumes:
+      - ${IPA_IMPORT_FOLDER:?}:/import:ro
+      - ${IPA_IMPORT_REPORTS:?}:/reports
+    networks: [egress]
+
 networks:
   # Only the worker and the scanner; no route out.
   scan:
     internal: true
-  # The worker's way to the database and storage.
+  # The worker's and the import's way to the database, storage and the platform's API.
   egress: {}
