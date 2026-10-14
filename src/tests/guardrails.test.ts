@@ -59,7 +59,14 @@ describe("secrets and AI boundary (docs/03 §9, §11)", () => {
   });
 
   it("contains no API keys or client-side AI calls", () => {
+    // Beta L4 (B-039): the server-only Anthropic configuration names its environment variable and
+    // the fixed API host — exactly these two lines, in exactly that file. A key never appears.
+    const CONFIG = path.join("lib", "ai", "providers", "anthropic", "config.ts");
+    const allowedInConfig = [/^export const ANTHROPIC_API_BASE_URL = "https:\/\/api\.anthropic\.com";$/m, /^export const API_KEY_ENV_NAME = "IPA_ANTHROPIC_API_KEY";$/m];
+    const config = sources.find(({ file }) => file === CONFIG);
+    for (const line of allowedInConfig) expect(config?.text).toMatch(line);
     const offenders = sources
+      .map(({ file, text }) => ({ file, text: file === CONFIG ? allowedInConfig.reduce((rest, line) => rest.replace(line, ""), text) : text }))
       .filter(({ text }) =>
         /sk-ant-|ANTHROPIC_API_KEY|api\.anthropic\.com|eyJhbGciOi|sb_secret_|NEXT_PUBLIC_(?!SUPABASE_ANON_KEY\b)[A-Z_]*(KEY|SECRET|TOKEN)/.test(text),
       )

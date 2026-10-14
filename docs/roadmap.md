@@ -30,10 +30,14 @@ nedenfor er uændrede og beholder deres identitet. Scope og leverancer (L0–L9)
 E2E-acceptkontrollen og tre adskilte godkendelser, `docs/beta.md` §13) og **L2** (AWS fjernet fra
 den aktive beta; Advise, Analytics og Min profil skjult server-side; `docs/beta.md` §14, B-037) er
 godkendt (B-038). **L3** (sikker dokumentimport uden AWS; `docs/beta.md` §15, runbook
-`docs/import-runbook.md`, B-038) er gennemført og afventer godkendelse. L4 påbegyndes først efter
-eksplicit godkendelse. Udestående for L3: selskab/udgiver har intet felt i datamodellen
-**[AFKLARES]**, og de hostede forudsætninger for den første rigtige import er ikke udført
-(`docs/beta.md` §15.7).
+`docs/import-runbook.md`, B-038) er godkendt (B-039). Udestående for L3: selskab/udgiver har intet
+felt i datamodellen **[AFKLARES]**, og de hostede forudsætninger for den første rigtige import er
+ikke udført (`docs/beta.md` §15.7). **L4** (Claude-adapter, egress pr. profil, budget og
+forbrugsgrænser; `docs/beta.md` §16, B-039) er gennemført med fake transport og afventer
+godkendelse. Betaen bruger projektejerens egen Anthropic Console-organisation med en dedikeret
+server-side API-nøgle (B-039). Ingen rigtige betalbare Claude-kald før L4b er særskilt godkendt.
+Udestående før rigtig betadrift (`docs/beta.md` §11, §16.20): indholdsloggen over for L4's
+logkrav, retentionsperioder og rigtige brugeres fritekst til Claude **[AFKLARES]**.
 
 > **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt **uden login** på fiktive data,
 > fordi den ikke er koblet til en database. Når projektet er færdigt, skal demoen kobles på

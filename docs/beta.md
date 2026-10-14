@@ -1,10 +1,11 @@
 # Fast beta uden AWS — Insurance Partners (IPA)
 
-**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026; B-038,
-14. oktober 2026.
+**Beslutning:** B-035 (`docs/decisions.md`), 12. oktober 2026; B-036, 13. oktober 2026; B-038 og
+B-039, 14. oktober 2026.
 **Status:** L0 og L1 er godkendt (B-036). L1.1 (§13) og L2 (§14, B-037) er godkendt (B-038). L3
-(sikker dokumentimport, §15) er gennemført på branchen `beta/fast-beta-without-aws` og afventer
-godkendelse. L4–L9 er ikke påbegyndt.
+(sikker dokumentimport, §15) er godkendt (B-039). L4 (Claude-adapter, egress pr. profil, budget og
+forbrugsgrænser, §16) er gennemført på branchen `beta/fast-beta-without-aws` med fake transport og
+afventer godkendelse. L4b–L9 er ikke påbegyndt.
 
 Dokumentet beskriver betaens scope, arkitektur og leverancer. Det erstatter ikke de låste
 fasedokumenter. Hvor betaen afviger fra dem, står det her og i B-035. Den historiske tekst i
@@ -52,7 +53,9 @@ Browser ─► Vercel (Next.js, alt AI og al retrieval server-side)
   rollback-punktet (§10).
 - **Claude API direkte** (Anthropic), kaldt server-side gennem den eksisterende AI Gateway.
   - Platformen bruger en separat API-organisation. Den private Claude Code-konto må aldrig blive
-    platformens produktionskonto.
+    platformens produktionskonto. I betaen er det projektejerens egen Anthropic
+    Console-organisation med en dedikeret server-side API-nøgle, som IPA senere udskifter med sin
+    egen uden ændring af forretningslogik (B-039).
   - Det indebærer **ikke** behandling udelukkende i EU. Prompts og svar behandles hos Anthropic
     efter deres vilkår og DPA. Det direkte API har efter de kilder, B-035 bygger på, ikke et
     EU-only-valg.
@@ -75,6 +78,7 @@ gælder:
 | Evaluering i en AWS-evalueringskonto (I7) | Evalueringsmiljøet uden AWS (L9). Workflowet og IAM er fjernet i L2 |
 | Alarmer som CloudWatch-specs (B-033) | Log- og webhook-alarmerne (`AlertSink`) bevares. De aggregerede alarmer er version 2 uden Bedrock- og CloudWatch-delene (L2, B-037) |
 | Kontrolsæt af embedding-vektorer (C6) | Uden betydning uden embeddings. Koden og testene bliver (L2) |
+| Egress for generering: én regel for alle kald (spørgsmål og kontekst = `user_question`, evidens = `knowledge`; §21.3) | Én række pr. formål (L4, §16.17): Copilot, Learn og Practice-feedback som før, rollespillet kun brugerens replik og fiktivt scenarie (`training_fictional`). Advise og Assessment sender intet |
 
 P3–P9, H1–H5, H7, egress-grænsen, RLS, workerens least-privilege-identitet, upload-sikkerheden og
 publisherens isolation gælder uændret.
@@ -317,7 +321,8 @@ valideringen. Tabellerne kan kun skrives gennem funktionerne, og alle handlinger
 
   Copilot-profilens nuværende grænser (8 uddrag à 2.000 tegn) er lavet til den hybride top-8 og
   afviser derfor rigtige produktgrundlag, indtil L4 erstatter dem med et tokenbaseret budget for
-  metoden. Det er fail-closed og ønsket.
+  metoden. Det er fail-closed og ønsket. **L4 har erstattet dem** for `product_documents`: hele
+  grundlaget sendes uafkortet, og tokenbudgettet afgør (§16.18).
 - **Dokumenter med instruktioner.** Dokumentindhold er kildedata, aldrig systeminstruktioner.
   - Systemprompten er profilens og fastlagt i koden.
   - Dokumenttekst sendes kun som en `evidence`-del med kategori `knowledge` og evidens-id.
@@ -486,8 +491,8 @@ Hver leverance har egne tests, grøn CI og et commit og godkendes, før den næs
 | L1 | Retrieval-metoden `product_documents` og publicering uden embeddings | Godkendt (B-036) |
 | L1.1 | Gate-sæt D1–D6, E2E-acceptkontrol, tre adskilte godkendelser | Godkendt (B-038) |
 | L2 | AWS-kode og -dependencies fjernes. Advise, Analytics og mock-sider skjules server-side | Godkendt (B-038) |
-| L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Gennemført, afventer godkendelse (§15) |
-| L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Ikke påbegyndt |
+| L3 | Dokumentimport uden AWS (Docker-engangskørsel, runbook) | Godkendt (B-039) |
+| L4 | Claude-adapter, egress-rækker pr. profil, budget og forbrugsgrænser (uden betalte kald) | Gennemført, afventer godkendelse (§16) |
 | L4b | Første rigtige Claude-kald (kun efter særskilt godkendelse) | Ikke påbegyndt |
 | L5 | Copilot (produktvalg, svarkontrakt med dækning/undtagelser/begrænsninger, kildevalidering) | Ikke påbegyndt |
 | L6 | Learn | Ikke påbegyndt |
@@ -546,6 +551,15 @@ sker med en ny, fremadrettet migration.
   profil skjules, rutetestene for de skjulte områder).
 - **[AFKLARES]** Home og kernemodulerne viser stadig udviklingsdata med notits, indtil L5–L8
   erstatter dem (§14.5). Betaen kan ikke åbnes for rådgivere før da (K5).
+- **[AFKLARES]** Indholdsloggen (`ai.gateway_payloads`, docs/08 §11.1) gemmer det sendte indhold,
+  inkl. dokumentgrundlaget, mens L4 siger "log ikke dokumenttekst eller fulde prompts" (§16.20,
+  punkt 1). Beslutning nødvendig før rigtig betadrift.
+- **[AFKLARES]** Retentionsperioder for AI-logs og forbrugsrækker. Der er ingen juridisk godkendt
+  periode, og ingen er opfundet (§16.19). Beslutning nødvendig før rigtig betadrift.
+- **[AFKLARES]** Rigtige brugeres fritekst til Claude: restrisikoen ved indhold, redaction ikke
+  finder, og databehandlingen (K7). Indtil da bruger L4b kun syntetiske testprompter (§16.20,
+  punkt 2).
+- **[AFKLARES]** Udledt: et HTTP-fejlsvar fra Anthropic faktureres ikke (§16.20, punkt 3).
 
 ---
 
@@ -877,7 +891,7 @@ L2 ændrer ingen SQL. pgTAP er kørt uændret.
 
 ---
 
-## 15. L3 — sikker dokumentimport uden AWS (gennemført, afventer godkendelse)
+## 15. L3 — sikker dokumentimport uden AWS (godkendt, B-039)
 
 Importen er den enklest mulige administratorimport til 40–100 PDF'er. Den genbruger den eksisterende
 sikkerhedskæde uændret og bygger ikke en parallel pipeline. Runbooken for administratoren er
@@ -1080,3 +1094,482 @@ To huller blev fundet og lukket før den endelige kørsel:
   CI-jobbet `import-scanner` og af operatøren med `forbered`.
 - Ingen migration, ingen ændring i hosted Supabase, ingen betalbare ressourcer og ingen
   Claude-kald.
+
+---
+
+## 16. L4 — Claude-adapter, egress pr. profil, budget og forbrugsgrænser (gennemført, afventer godkendelse; B-039)
+
+Specifikationen er godkendt til implementering 14. oktober 2026 (B-039). Den gengives her, så
+repoet og ikke en chatlog er kilden. Implementeringen står i §16.14 ff.
+
+L4 etablerer den fælles, sikre AI-infrastruktur for Copilot, Learn, Practice og Assessment. Advise
+er udskudt. L4 bygger AI-infrastrukturen, men ikke de fire modulers funktionalitet (L5–L8). Målet er
+en rigtig Anthropic Claude API-adapter, der virker gennem den eksisterende AI Gateway og kan
+afprøves fuldt ud med fake transport.
+
+**Ingen rigtige betalbare Claude-kald før L4b.** L4b kræver særskilt godkendelse.
+
+### 16.1 Godkendelser og forudsætninger
+
+- **L3 er godkendt** med grøn CI på commit `628430e`.
+- **B-039:** betaen bruger projektejerens egen Anthropic Console-organisation med en dedikeret
+  API-nøgle, som kun bruges af Insurance Partners. Det er hverken projektejerens Claude
+  Code-session eller Claude-abonnement. Når IPA overtager platformen, udskiftes API-nøglen og den
+  relevante model- og budgetkonfiguration uden ændring af forretningslogik.
+- Betademonstrationer bruger kun syntetiske eller særskilt godkendte dokumenter og oplysninger,
+  indtil dokumentrettigheder og databehandling er afklaret (§11, K7).
+- Der bygges hverken et selvbetjeningssystem til API-nøgler eller understøttelse af flere
+  AI-leverandører i betaen.
+
+### 16.2 Teknologi og afgrænsning
+
+- Next.js og TypeScript, Supabase Auth, PostgreSQL og RLS, Vercel, Anthropic Messages API, den
+  eksisterende AI Gateway og retrieval-metoden `product_documents`.
+- Ingen AWS, Bedrock, Fargate eller Cohere.
+- Ingen implementering af L5–L8. Den faglige svarkontrakt og den endelige visning af citater hører
+  til L5.
+
+### 16.3 Adapteren
+
+- Server-only adapter til Anthropics Messages API i det aktuelle, officielle API-format.
+- **Model-id** er eksplicit konfigureret og verificeret mod officiel dokumentation. Intet modelvalg
+  er hardcoded i forretningslogikken, og kun godkendte model-id'er kan bruges.
+- Ingen automatisk fallback til en anden AI-model og ingen production-fallback til stubben.
+- **API-nøglen** kommer fra servermiljøets secrets. Den findes aldrig i browserbundlen, Git,
+  almindelige tabeller eller logs.
+- **Timeout, fejlklassifikation og kontrollerede retries:**
+  - 401, 403, 429, 5xx og netværksfejl håndteres hver for sig;
+  - providerens `retry-after` respekteres;
+  - der stoppes ved budgetfejl.
+- Ingen rigtige API-kald i L4. Tests bruger fake transport.
+- Adapteren genbruges af Copilot, Learn og Practice gennem de eksisterende gateway-profiler.
+  Assessment følger fortsat sine særskilte prøveregler.
+
+### 16.4 Gatewayen bevares
+
+Al ekstern AI-kommunikation passerer:
+- AI Gateway og permissions;
+- profil- og matrixpolitik;
+- `ClassifiedText`, `authorizeEgress`, `AuthorizedEgress` og `assertTransmittable`;
+- dokumentrettigheder;
+- budget og rate limiting;
+- logging og audit.
+
+Der findes ingen alternativ vej fra en route eller en UI-komponent direkte til Anthropic API.
+Parringsreglen (B-012) bevares: en production-model får kun production-evidens. Copilot bruger den
+aktive, godkendte `product_documents`-konfiguration og ikke et selvoplyst production-flag.
+
+### 16.5 Data-egress og fritekst
+
+- **Eksplicitte rækker** pr. profil og handling:
+  - Copilot-produktspørgsmål;
+  - Learn-forklaringer;
+  - Practice-rollespil med fiktive scenarier;
+  - Practice-feedback.
+- **Ingen generel tilladelse** til al brugerindtastet fritekst.
+- Sendes aldrig: kundesagsdata, konkrete kundepolicer, identificerbare kundeoplysninger,
+  fortrolige samtalenoter og tekst med ukendt eller uautoriseret proveniens.
+- Et regex-filter eller en afkrydsning af "ingen persondata" er ikke tilstrækkelig sikkerhed. Kan
+  arkitekturen ikke sikre den nødvendige proveniens for fri tekst, afvises den konkrete overførsel.
+  L4b begrænses derfor til kontrollerede, syntetiske testprompter, hvis den generelle
+  fritekstproblematik ikke er løst.
+- Ingen administrator-override kan ophæve spærren for kundedata.
+- Dokumenttekst fra PDF'er er ubetroet kildemateriale og får aldrig systeminstruktionens autoritet.
+
+### 16.6 Dokumentgrundlag og citationer
+
+- Brugeren vælger et produkt. Systemet finder de komplette, publicerede, gyldige og
+  adgangsgodkendte dokumentversioner. Claude modtager kun materiale, brugeren må anvende. Der sker
+  ingen skjult afkortning.
+- Metadata bevares: produkt-id, dokument-id, versions-id, titel, side, afsnit og kildeindhold.
+- Anthropics officielle citationsfunktion bruges. De native citationsdata bevares i adapterens
+  output og knyttes til de faktiske, udsendte dokumentversioner.
+- Native citationer og streng JSON-struktureret output kan ikke kombineres i samme kald. Der vælges
+  en dokumenteret, kompatibel strategi (§16.16).
+
+### 16.7 Godkendte startgrænser
+
+Grænserne er konfigurerbare startværdier til demo. De ændres via godkendt konfiguration uden at
+ændre AI-forretningslogikken. Alle perioder beregnes i UTC.
+
+| Grænse | Startværdi |
+|---|---|
+| Inputbudget pr. kald (systemprompt, dokumenter, samtalehistorik og metadata tæller med) | 100.000 tokens |
+| Outputbudget pr. kald | 3.000 tokens |
+| AI-kald pr. bruger pr. minut | 3 |
+| AI-kald pr. bruger pr. døgn | 20 |
+| AI-kald globalt pr. minut | 10 |
+| Aktive AI-kald pr. bruger | 1 |
+| Samtidige AI-kald globalt | 3 |
+| Budget globalt pr. døgn | 10 USD |
+| Budget globalt pr. kalendermåned | 30 USD |
+| Budget pr. bruger pr. døgn | 2 USD |
+
+- Overstiger et kald modellens reelle kapacitet eller vores eget loft, afvises det sikkert.
+- **Udviklingsloftet på 360.000 tegn** (§5.3) erstattes som autoritativ kontrol af en tokenbaseret
+  budgetmekanisme. Modelafhængig tokenoptælling bruges, når den rigtige API-forbindelse aktiveres.
+  En lokal tokenestimator må bruges til foreløbige kontroller, men fremstilles aldrig som nøjagtig
+  provideroptælling.
+
+### 16.8 Budgetmekanismen
+
+- Databasebaseret og transaktionel, så den virker på tværs af samtidige Vercel-instanser.
+- Den konservativt estimerede maksimale omkostning reserveres før modelkaldet og afstemmes efter
+  den kendte, faktiske usage.
+- Der tages højde for inputtokens, outputtokens, cache read, cache creation, retries, samtidige
+  kald og fejlede og afbrudte kald.
+- Ukendt modelpris eller ukendt maksimal omkostning fejler lukket.
+- En reservation frigives ikke ukritisk efter en netværksfejl, hvis provideren muligvis har
+  behandlet kaldet.
+- Retries giver hverken dobbeltbetaling eller dobbeltregistrering.
+- En manglende eller fejlende budgetdatabase fører aldrig til ubegrænset AI-forbrug.
+- Konkurrente kald og budgetgrænser testes med fake transport.
+- **L4b-forudsætning:** projektets månedlige grænse sættes også uafhængigt i Anthropic Console.
+
+### 16.9 Prompt caching
+
+Caching er kun tilladt, hvis:
+- versionen er korrekt;
+- RLS kontrolleres igen ved hvert kald;
+- en ændret version ikke genbruger en forkert cache;
+- forskellige brugeres rettigheder respekteres;
+- usage og omkostning registreres korrekt.
+
+Det er acceptabelt at gøre adapteren cache-klar uden at aktivere caching i L4. Ingen ekstra kompleks
+cache-infrastruktur.
+
+### 16.10 Profiler
+
+- **Copilot:** kun autoriserede, godkendte vilkår og godkendt evidens. Citater, undtagelser og
+  forbehold kommer i L5.
+- **Learn:** forklaringer med grundlag i kilderne.
+- **Practice:** fiktivt rollespil og feedback. Den server-side spærring af Copilot under rollespil
+  består, men den autoriserede Practice-profil skal kunne virke under en aktiv rollespilssession.
+- **Assessment:** spærringen af AI-hjælp under prøver bevares. Resultatgivende scoring overlades
+  ikke til frie Claude-vurderinger.
+
+### 16.11 Logging og retention
+
+- **Struktureret log:**
+  - request-id og en brugerreference uden direkte persondata;
+  - AI-profil, model-id, udfald og latency;
+  - tokenforbrug og cache-usage;
+  - estimerede og faktiske omkostninger;
+  - budgetstatus, rate-limit-status og fejlkategori.
+- **Logges ikke:** dokumenttekst, rå brugerforespørgsler, fulde prompts, API-nøgler, kundedata og
+  fortrolige fejlbeskeder fra provideren.
+- Logopbevaring og sletningsmekanisme dokumenteres. Er en konkret retentionsperiode ikke juridisk
+  godkendt, opfindes der ingen virksomhedspolitik. Dataopsamlingen begrænses, og beslutningen
+  markeres som nødvendig før rigtig betadrift.
+
+### 16.12 Testkrav (fake transport)
+
+1. En godkendt Copilot-request kan passere gatewayen.
+2. Kundesagsdata blokeres før transport.
+3. Ukendt proveniens blokeres.
+4. Ikke-godkendt evidens blokeres.
+5. Ikke-autoriserede dokumenter blokeres.
+6. Et forkert model-id afvises.
+7. En manglende API-nøgle afvises.
+8. API-nøglen findes ikke i browserbundlen.
+9. Brugerens rate limit håndhæves.
+10. Den globale rate limit håndhæves.
+11. De daglige budgetter håndhæves.
+12. Det månedlige budget håndhæves.
+13. Samtidige kald kan ikke omgå budgetterne.
+14. Tokenbudgettet håndhæves uden stille afkortning.
+15. Timeouts og 429/5xx håndteres korrekt.
+16. Retries kan ikke omgå reservationer.
+17. Prompt injection kan ikke ændre autorisationsbeslutningen.
+18. Native citationer kan knyttes til udsendt evidens.
+19. Assessment-låsen bevares.
+20. Practice-profilen kan senere virke under rollespil uden at åbne Copilot.
+21. Ingen følsomme oplysninger i logs.
+22. Ingen stub-model som production-fallback.
+23. Ingen faktiske betalbare Anthropic-kald.
+
+Dertil mutationstests af egress, modelvalg, budget og rate limiting. Lint, typecheck, build, unit,
+pgTAP, integration og CI køres.
+
+### 16.13 Leverance og stop
+
+- Arbejdet sker på `beta/fast-beta-without-aws`. Ingen direkte merge til `main`.
+- Ingen hostede Supabase-migrations, ingen rigtige Claude API-kald, ingen rigtige
+  forsikringsdokumenter og ingen betalte cloudressourcer.
+- Commit og push med grønne tests. Der stoppes efter L4.
+
+### 16.14 Hvad er bygget
+
+| Del | Fil | Indhold |
+|---|---|---|
+| Adapter | `src/lib/ai/providers/anthropic/model.ts` | Claude-modellen (grad production): reservation, tokenoptælling, forsøg, afstemning. Ingen fallback |
+| Transport | `src/lib/ai/providers/anthropic/transport.ts` | Det eneste modul, der taler med Anthropic. Officielt SDK, fast host, ingen SDK-retries, ingen SDK-log. `assertTransmittable` før hvert kald |
+| Request og svar | `request.ts`, `response.ts`, `api-types.ts`, `errors.ts` | Dokumentblokke med citationer, deterministisk konvertering til outputkontrakten, normaliserede fejl |
+| Konfiguration | `config.ts`, `server.ts` | Model-id fra `IPA_AI_MODEL`, nøglen fra servermiljøet (server-only), valgfri `IPA_AI_EFFORT` |
+| Instruktioner | `src/lib/ai/core/instructions.ts` | Alle faste instruktionstekster, der må forlade platformen (reviewet kode) |
+| Egress | `src/lib/egress/policy.ts` | Rækker pr. formål (`GENERATE_PURPOSES`), Anthropics protokolkonstanter |
+| Gateway | `gateway-core.ts`, `invoke.ts`, `registry.ts`, `gateway.ts` | Ledger og formål ind i kaldet, tokenbudget for `product_documents`, struktureret log |
+| Forbrug | `src/lib/ai/core/usage.ts`, `src/lib/ai/usage-ledger.ts` | Ledger-interface, faste brugerbeskeder, lokal estimator |
+| Database | `supabase/migrations/20261014000100_ai_usage_limits.sql` | `ai.usage_limits`, `ai.model_prices`, `ai.usage_reservations` og funktionerne. Kun lokalt; ingen hostet migration |
+| Bundle-kontrol | `scripts/check-client-bundle.ts`, CI | Builden med en sentinel-nøgle scannes for nøgle, variabelnavn, SDK og API-host |
+| Dependency | `@anthropic-ai/sdk` 0.131.0 | Låst version (to uger gammel ved valget). Kun transporten importerer den |
+
+### 16.15 Kæden for ét kald
+
+```
+runAiRequest (server-only) → authn → profil/handling → permissions → gating (G1/G2)
+  → redaction og proveniens (userText) → registry (IPA_AI_MODEL; ingen fallback)
+  → retrieval som brugeren (RLS, product_documents) → evidenskrav
+  → minimering: hele grundlaget eller intet; lokal estimering mod tokenloftet
+  → matricen (model × kategori) → invokeModel: parringsregel (kun production-evidens),
+    authorizeEgress for formålet <profil>.<handling> inkl. dokumenttitler
+  → adapter: request bygges → assertTransmittable (før reservation)
+    → ai.reserve_usage (rate limits, samtidighed, budgetter, én global lås)
+    → count_tokens (udbyderens optælling) → over loftet: frigiv og afvis
+    → ai.begin_attempt → messages (højst max_attempts forsøg)
+    → ai.settle_usage / release_usage / mark_usage_uncertain
+  → outputkontrakt (uændret) → re-identifikation → ai.record_call → struktureret log
+```
+
+- Der er ingen anden vej til Anthropic. Arkitekturtesten tillader netværk og SDK i præcis ét
+  modul, transporten, og kræver kontrollen før hvert kald.
+- **Modelvalg er konfiguration.** `IPA_AI_MODEL` vælger modellen. Den kan kun bruges, når databasen
+  har godkendt den med en verificeret pris (`ai.model_prices`, med kilde og dato), og
+  datakategori-matricen har regler for den. Migrationen indsætter ingen modeller. Uden godkendt
+  pris afviser databasen kaldet, før noget sendes.
+- **Ingen fallback.** En ufuldstændig konfiguration, fx en manglende nøgle, gør gatewayen
+  utilgængelig. Den bliver aldrig til stubben eller en anden model.
+- **Nøglen** læses kun i `server.ts` (`import "server-only"`). Den gives kun til transporten.
+  Host, nøgle og auth er faste i transporten, så `ANTHROPIC_*`-miljøvariabler ikke kan omdirigere
+  dem. I `IPA_RUNTIME_ENV=test` afviser transporten den rigtige `fetch`.
+
+### 16.16 Citationsstrategi
+
+Anthropics native citationer og streng JSON-output kan ikke kombineres i samme kald (officiel
+dokumentation: 400-fejl). Valgt strategi:
+
+- **Én dokumentblok pr. dokumentversion** med `source.type = "content"` og `citations.enabled`.
+  Hvert sendt uddrag (chunk) er én indholdsblok. Titlen er dokumentets titel og version; den
+  faste kontekst siger, om versionen er gældende, historisk eller fremtidig, og om den har
+  konflikter.
+- Claude svarer i **almindelig tekst med native citationer**. En citation peger på
+  (dokumentindeks, blokinterval) og knyttes til præcis de evidens-id'er, der blev sendt i de
+  blokke, og til dokumentversionen.
+- **Konverteringen er deterministisk** (`response.ts`) til den eksisterende outputkontrakt.
+  En citation efter tekst bliver et `cite`-segment, og en tom linje starter et nyt afsnit. Copilot
+  markerer svartype og historik på første linje. Learn markerer fiktive eksempler.
+- **Kontrakttjekket er uændret.** En citation uden for de sendte dokumenter, et afsnit uden kilde,
+  en manglende historikmarkering eller en uflagget konflikt gør svaret "kan ikke dokumenteres".
+- **Native citationsdata bevares** i adapterens output. Med svaret logges placeringer og
+  evidens-id'er, men ikke udbyderens kopi af den citerede tekst.
+- Konverteringen er foreløbig. Den endelige svarkontrakt og visningen af citater hører til L5.
+- Rollespilsreplikken har ingen dokumenter og ingen citationer.
+
+### 16.17 Egress pr. profil og handling
+
+Generering er tilladt pr. formål, aldrig generelt (`GENERATE_PURPOSES`):
+
+| Formål | Spørgsmål | Kontekst (sidens etiket) | Evidens | Scenarie |
+|---|---|---|---|---|
+| `copilot.answer_question` | `user_question` | `user_question` | `knowledge` | — |
+| `learn.explain` | `user_question` | `user_question` | `knowledge` | — |
+| `practice.roleplay_turn` | `user_question` | — | — | `training_fictional` |
+| `practice.feedback` | `user_question` | `user_question` | `knowledge` | — |
+
+- Advise og Assessment har ingen række og intet eksternt format. De sender intet.
+  Resultatgivende scoring overlades aldrig til Claude.
+- Brugerens tekst er kun tilladt redigeret og aldrig sagsbundet. Et kald med en
+  kundesagsreference afvises før transporten, og ingen matrix- eller administratorindstilling kan
+  ændre det.
+- Rollespillets fiktive scenarier (`training_fictional`) kommer fra databasen i L7. Rækken findes,
+  men der er endnu ingen kilde til den.
+- Systemprompten, formatinstruktionen og dokumentkonteksten er reviewede konstanter
+  (`instructions.ts`). Dokumenttekst sendes kun som dokumentindhold og får aldrig systemprompten.
+
+### 16.18 Budget og rate limits
+
+- **Konfiguration** (`ai.usage_limits`, én række) har de godkendte startværdier fra §16.7. Den
+  ændres med `ai.set_usage_limits` (kræver `system.settings.manage`). Priser og godkendte modeller
+  ligger i `ai.model_prices` og ændres med `ai.set_model_price`. Hver ændring auditeres af en
+  trigger, også en ændring direkte i SQL.
+- **Reservation før afsendelse** (`ai.reserve_usage`) sker i én transaktion under én global
+  advisory-lås, så samtidige Vercel-instanser ikke kan omgå grænserne. Rækkefølgen er:
+  1. model og pris;
+  2. outputloft;
+  3. rate limits (de seneste 60 sekunder og UTC-døgnet);
+  4. aktive kald (åbne, ikke udløbne reservationer);
+  5. budgetter: bruger pr. UTC-døgn, globalt pr. UTC-døgn og globalt pr. UTC-kalendermåned.
+- **Den reserverede omkostning** er inputloftet × inputprisen + outputloftet × outputprisen. Med
+  prompt caching bruges cache-skriveprisen. Inputloftet er det mindste af vores loft, prisens
+  gyldighed (fx en dyrere pris for lange prompts) og kontekstvinduet minus output.
+- **Et budget tæller:**
+  - afstemte kald med den faktiske omkostning (input, output, cache creation og cache read til
+    priserne på reservationstidspunktet);
+  - åbne og usikre kald med den fulde reserverede omkostning;
+  - frigivne kald med 0.
+- **Frigivelse** sker kun, når udbyderen beviseligt ikke behandlede kaldet:
+  - et HTTP-fejlsvar;
+  - en afvisning før afsendelse;
+  - tokenoptællingen over loftet.
+- **Netværksfejl og timeout** markerer reservationen som usikker. Den tæller fuldt, frigives
+  aldrig og gentages ikke. Et afbrudt kald, der aldrig afsluttes, tæller også fuldt.
+- **Retries:** 429, 529 og 5xx gentages efter udbyderens `retry-after` (højst 20 sekunder) eller en
+  kort backoff. Det sker under samme reservation og højst `max_attempts` gange, hvilket databasen
+  håndhæver (`ai.begin_attempt`). Andre HTTP-fejl stopper kaldet: 401/403 som konfiguration, 402 som
+  budget og 400/404/413/422 som afvist. Ét request-id giver én reservation, så der sker ingen
+  dobbeltregistrering.
+- **Tokenbudget:** udbyderens egen tokenoptælling (`count_tokens`, gratis) afgør loftet, før
+  beskeden sendes. Gatewayens lokale estimat (4 tegn pr. token, bevidst optimistisk) afviser kun
+  et grundlag, der klart er for stort, før noget forlader platformen. Estimatet fremstilles aldrig
+  som udbyderens optælling. Udviklingsloftet på 360.000 tegn (§5.3) er ikke længere den
+  autoritative kontrol. Der afkortes eller udelades aldrig noget.
+- **Fail-closed:** kan grænserne ikke læses, eller fejler reservationen, sendes intet. Fejler
+  afstemningen, forbliver reservationen åben og tæller fuldt.
+- **Ejerskab:** reservationens hemmelige token returneres kun til gatewayen og gemmes som SHA-256.
+  En bruger kan hverken læse reservationerne, afslutte en andens reservation eller ændre
+  grænserne. Kalder en bruger funktionerne direkte, bruger han kun af sine egne grænser.
+
+### 16.19 Logging og retention
+
+- **Struktureret log:** én JSON-linje pr. kald (`AiCallLogEntry`, `console.info` i Vercels
+  runtime-log) med:
+  - request-id og brugerreference (platformens bruger-id, intet navn eller e-mail);
+  - profil, handling, model-id, udfald, årsagskode og fejlkategori;
+  - latency;
+  - tokens (optalt, input, output, cache creation og cache read);
+  - reserveret og faktisk omkostning;
+  - reservationens status, forsøg, udbyderens request-id og stop-årsag;
+  - budget- og rate-limit-status.
+
+  Den indeholder aldrig spørgsmålet, dokumenttekst, prompts, nøglen, kundedata eller udbyderens
+  fejltekst. Transporten bevarer kun en fejlkode.
+- **Forbrugsrækkerne** (`ai.usage_reservations`) har ingen tekst. Brugerne kan ikke læse dem.
+- **Retention:** der slettes intet automatisk. Sletning af en bruger sætter rækkens bruger-id til
+  null, så forbruget stadig tæller globalt. Runtime-loggens opbevaring følger Vercels plan.
+  **[AFKLARES]** En retentionsperiode er ikke juridisk godkendt, og der er ikke opfundet en. Det
+  skal besluttes før rigtig betadrift (§11).
+- **Indholdsloggen** (`ai.gateway_payloads`) er uændret efter den låste docs/08 §11.1. Se §16.20,
+  punkt 1.
+
+### 16.20 Fund og afvigelser
+
+1. **Konflikt med en låst beslutning (ikke ændret).** docs/08 §11.1 (B-014) kræver, at
+   `ai.gateway_payloads` gemmer det, der blev sendt, og modellens rå svar. Med `product_documents`
+   omfatter det:
+   - hele dokumentgrundlaget;
+   - systemprompten;
+   - det redigerede spørgsmål.
+
+   L4-specifikationen siger "log ikke dokumenttekst eller fulde prompts". Indholdsloggen er ikke
+   ændret stiltiende. Den nye strukturerede log følger L4. **Beslutning nødvendig før rigtig
+   betadrift.** Mulighederne er:
+   - beholde §11.1;
+   - gemme referencer (chunk- og versions-id'er er uforanderlige) i stedet for dokumenttekst;
+   - ikke gemme indhold, før retention er besluttet.
+2. **Fri tekst fra rigtige brugere er ikke løst** i den forstand, specifikationen kræver.
+   Proveniensen er kendt: brugerens egen tekst, uden kundesag og redigeret. Men indholdet kan
+   stadig rumme oplysninger, som redaction ikke finder, fx navne og adresser. Derfor:
+   - L4b begrænses til kontrollerede, syntetiske testprompter (§16.5);
+   - rigtige rådgiveres fritekst må først sendes til Claude efter en beslutning om restrisiko og
+     databehandling (K7, §11).
+3. **Udledt, til bekræftelse:** et HTTP-fejlsvar (429, 5xx, 529) betyder, at udbyderen ikke
+   behandlede kaldet og ikke fakturerer det. Derfor frigives reservationen, og 429/5xx kan
+   gentages. Ved netværksfejl og timeout antages det modsatte.
+4. **Outputloftet og thinking.** Nogle modeller tænker altid, og tænketokens tæller i
+   outputloftet på 3.000. Et svar, der rammer loftet, vises ikke (det er afstemt og betalt). L4b
+   måler det. `IPA_AI_EFFORT` kan sænkes uden kodeændring.
+5. **Varighed på Vercel.** Et forsøg har højst 120 sekunder, og der er op til tre forsøg.
+   Funktionens maksimale varighed på Vercel skal passe til det; ellers afbrydes kaldet, og
+   reservationen tæller fuldt. Det er en L4b-forudsætning.
+6. **Rate limits gælder kun eksterne modeller.** Stubben (kun lokalt og i test) reserverer intet.
+7. **`count_tokens` sender indholdet til Anthropic** (gratis, men det forlader platformen). Kaldet
+   logges derfor som sendt, også når beskeden aldrig sendes.
+
+### 16.21 De 23 testkrav
+
+| # | Krav | Bevis |
+|---|---|---|
+| 1 | Godkendt Copilot-request | `claude-adapter.test.ts` §1 |
+| 2 | Kundesagsdata blokeres | §2–5 og `egress-boundary.test.ts` |
+| 3 | Ukendt proveniens | §2–5: policyen, og transporten for en uautoriseret streng |
+| 4 | Ikke-godkendt evidens | §2–5: udviklings- og fremtvunget evidens |
+| 5 | Ikke-autoriserede dokumenter | §2–5: afvist retrieval og smuglet dokumentdel. RLS i `beta-document-retrieval.integration.test.ts` |
+| 6 | Forkert model-id | §6: format, ikke godkendt i databasen, transportens model. Databasen i pgTAP og integration |
+| 7 | Manglende API-nøgle | §7 |
+| 8 | Nøglen ikke i browserbundle | §8, `scripts/check-client-bundle.ts` og CI-trinnet med sentinel-nøgle |
+| 9 | Brugerens rate limit | §9–13, pgTAP og `ai-usage.integration.test.ts` |
+| 10 | Global rate limit | Samme |
+| 11 | Daglige budgetter | Samme |
+| 12 | Månedligt budget | pgTAP og §9–13 |
+| 13 | Samtidige kald | `ai-usage.integration.test.ts`: parallelle reservationer mod den rigtige database |
+| 14 | Tokenbudget uden afkortning | §14, `beta-document-injection.test.ts` og integration |
+| 15 | Timeouts og 429/5xx | §15–16 og integration |
+| 16 | Retries og reservationer | §15–16, pgTAP (`begin_attempt`) og integration |
+| 17 | Prompt injection | §17 og `beta-document-injection.test.ts` |
+| 18 | Native citationer | §18 |
+| 19 | Assessment-låsen | §19–20 og `ai-gateway.test.ts` |
+| 20 | Practice under rollespil | §19–20 og integration (rollespilsreplik gennem hele kæden) |
+| 21 | Ingen følsomme oplysninger i logs | §21 |
+| 22 | Ingen stub som production-fallback | §6–7, 22 |
+| 23 | Ingen betalbare kald | §23: transporten afviser rigtig `fetch` i test, og den globale `fetch` overvåges |
+
+### 16.22 Mutationer
+
+41 mutationer, alle dræbt. Hver er anvendt alene og derefter rullet tilbage:
+
+- **TypeScript (25):**
+  - **egress (9):** formål for Assessment; formålet ignoreret; ukendt formål ikke afvist;
+    transportens strengkontrol fjernet; fast formål i `invokeModel`; titler ikke autoriseret;
+    `create` uden kontrol; dokumenttekst i systemprompten; chunks afkortet igen;
+  - **modelvalg (5):** fallback til stubben; ethvert model-id; manglende nøgle accepteret; rigtig
+    `fetch` i test; en udviklingsmodel under et Claude-id;
+  - **budget og forsøg (9):** timeout frigivet; timeout gentaget; kald uden reservation; tokenloft
+    ikke håndhævet; `retry-after` ignoreret; forsøg uden databasen; ingen afstemning; ingen ledger
+    fra gatewayen; intet tokenestimat;
+  - **logning (2):** spørgsmålet i loggen; udbyderens fejltekst bevaret.
+
+  Fire overlevede i første omgang: ukendt formål, manglende nøgle, kald uden reservation og
+  udbyderens fejltekst. De blev afvist af et andet lag, men årsagen blev ikke kontrolleret.
+  Testene er skærpet, og alle fire er nu dræbt.
+- **SQL (16):**
+  - frigivet talt som reserveret;
+  - usikker talt som 0;
+  - minutgrænsen forskudt med én;
+  - den globale minutgrænse talt pr. bruger;
+  - ingen forsøgsgrænse;
+  - intet token- eller ejertjek;
+  - ingen global lås (fanget af integrationstesten med parallelle reservationer);
+  - brugerbudgettet ser kun afstemte kald (fanget af integration);
+  - månedsbudgettet over døgnet;
+  - afstemning uden grænser;
+  - grænser uden permission;
+  - inaktiv model brugbar;
+  - cache-skrivning til inputpris;
+  - inputloft uden prisens gyldighed;
+  - dublet-request tilladt.
+
+### 16.23 Verifikation (lokalt)
+
+- **lint, typecheck og build:** bestået. Builden er kørt med en sentinel-nøgle, og
+  bundle-kontrollen finder hverken værdien, variabelnavnet, SDK'et eller API-hosten i browserens
+  filer. Værdien findes heller ikke i serverbuilden. En negativ kontrol med en plantet værdi bliver
+  fanget.
+- **Enhedstests:** 1023 bestået og 4 sprunget over (de fire motorkandidat-tests fra L3). Der var
+  965 i L3.
+- **pgTAP:** 1059 bestået (1005 + 54 nye). Kørt før og igen efter alle integrationstests.
+- **Integration:** 178 bestået og 6 sprunget over (de samme seks som i L3). Der var 168 i L3.
+- Ingen rigtige Anthropic-kald, ingen API-nøgle, ingen hostet migration, ingen rigtige dokumenter
+  og ingen betalte ressourcer.
+
+### 16.24 L4b — forudsætninger (ikke udført)
+
+1. En dedikeret API-nøgle i projektejerens Anthropic Console-organisation, kun til Insurance
+   Partners, med en uafhængig månedlig forbrugsgrænse sat i Console.
+2. Nøglen som server-side secret i det relevante Vercel-miljø (`IPA_ANTHROPIC_API_KEY`, aldrig
+   `NEXT_PUBLIC_`). `IPA_AI_MODEL` sat til den valgte model.
+3. Migrationen fra L4 anvendt i det miljø, L4b kører i. Det kræver særskilt godkendelse for hostet
+   Supabase.
+4. Den valgte model godkendt med verificerede priser (`ai.set_model_price`, med kilde og dato) og
+   regler i datakategori-matricen for modellen.
+5. Funktionens maksimale varighed på Vercel passer til timeouts og forsøg (§16.20, punkt 5).
+6. Kun et syntetisk dokument og kontrollerede, syntetiske testprompter (§16.20, punkt 2).

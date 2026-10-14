@@ -131,10 +131,11 @@ describe("document text is source data, never instructions", () => {
   });
 });
 
-describe("the whole basis or nothing (B-036, docs/beta.md §5.3)", () => {
-  it("a product_documents basis that does not fit the profile is refused — never cut — and the model is not called", async () => {
+describe("the whole basis or nothing (B-036, docs/beta.md §5.3; token budget since L4, §16.7)", () => {
+  it("a product_documents basis over the token budget is refused — never cut — and the model is not called", async () => {
     const model = spy(cited);
-    const items = Array.from({ length: PROFILES.copilot.limits.maxEvidence + 1 }, (_, i) => evidenceItem(i + 1));
+    // 9 chunks of 50.000 characters: an optimistic estimate of 112.500 tokens > 100.000.
+    const items = Array.from({ length: 9 }, (_, i) => evidenceItem(i + 1, { excerpt: { text: `Fiktiv betingelse ${i + 1}. `.repeat(2_500).slice(0, 50_000), leadIn: null } }));
     const { deps: d, records } = deps(model, items);
     d.retrieve = async () => documentEvidence(items);
     const outcome = await runGateway(ask("Er droneskader dækket?"), d);
@@ -143,13 +144,17 @@ describe("the whole basis or nothing (B-036, docs/beta.md §5.3)", () => {
     expect(records[0]!.call.reason_code).toBe("document_basis_too_large");
   });
 
-  it("also a single part over the limit — no silent truncation of a chunk", async () => {
+  it("the profile's old hybrid limits no longer cut a product_documents basis: more parts and longer chunks are sent whole", async () => {
     const model = spy(cited);
     const long = evidenceItem(1, { excerpt: { text: "Fiktiv betingelse. ".repeat(200), leadIn: null } });
-    const { deps: d } = deps(model, [long]);
-    d.retrieve = async () => documentEvidence([long]);
-    expect(await runGateway(ask("Er droneskader dækket?"), d)).toMatchObject({ kind: "invalid_request" });
-    expect(model.received).toHaveLength(0);
+    const items = [long, ...Array.from({ length: PROFILES.copilot.limits.maxEvidence + 1 }, (_, i) => evidenceItem(i + 2))];
+    const { deps: d } = deps(model, items);
+    d.retrieve = async () => documentEvidence(items);
+    expect((await runGateway(ask("Er droneskader dækket?"), d)).kind).toBe("answer");
+    const sent = model.received[0]!.parts.filter((part) => part.kind === "evidence");
+    expect(sent).toHaveLength(items.length);
+    expect(sent[0]!.text).toBe(long.excerpt.text);
+    expect(sent[0]!.text.length).toBeGreaterThan(PROFILES.copilot.limits.maxCharsPerPart);
   });
 
   it("a basis that fits is sent whole", async () => {

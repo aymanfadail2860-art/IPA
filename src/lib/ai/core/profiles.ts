@@ -1,9 +1,13 @@
 import { CONTRACTS, type ContractId } from "./contracts";
+import { PROFILE_SYSTEM } from "./instructions";
 import type { DataCategory, ProfileId } from "./types";
 
 /**
  * Workflow profiles (docs/08 §4, docs/03 §9 and §7). Versioned in the repository and reviewed as
  * code (B-017). A profile can never perform another profile's actions.
+ *
+ * The system prompts live in instructions.ts, the reviewed list of every instruction text that may
+ * leave the platform (docs/beta.md §16).
  *
  * ⚠ The prompts are DRAFTS and NOT VALIDATED. The evaluation set and its infrastructure come in
  * 8B; validation against a real model happens in 8C. Raise `version` when a prompt or contract changes.
@@ -39,11 +43,6 @@ export interface WorkflowProfile {
   limits: { maxEvidence: number; maxCharsPerPart: number; maxTotalChars: number };
 }
 
-const GROUNDING =
-  "Svar kun ud fra de uddrag, du får. Hvert fagligt udsagn skal henvise til det uddrag, det bygger på. " +
-  "Opfind aldrig dækninger, betingelser, acceptregler eller forretningsgange. Er uddragene uenige, så sig det, " +
-  "og vælg ikke selv. Er et uddrag historisk, så marker svaret som historisk. [UDKAST — IKKE VALIDERET]";
-
 const LIMITS = { maxEvidence: 8, maxCharsPerPart: 2000, maxTotalChars: 16000 } as const;
 
 export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.freeze({
@@ -51,7 +50,7 @@ export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.fre
     id: "copilot",
     version: "1",
     userCallable: true,
-    system: `Du er Copilot for erhvervsforsikringsrådgivere. ${GROUNDING}`,
+    system: PROFILE_SYSTEM.copilot,
     actions: { answer_question: { outputContract: CONTRACTS.copilotAnswer, requiresEvidence: true, retrieval: true } },
     retrieval: { allowHistorical: true, topK: 8 },
     categories: ["knowledge", "user_question"],
@@ -62,7 +61,7 @@ export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.fre
     id: "learn",
     version: "1",
     userCallable: true,
-    system: `Du forklarer faglige emner pædagogisk. Eksempler må være opdigtede og skal markeres som fiktive; produktfakta i dem skal have kilde. ${GROUNDING}`,
+    system: PROFILE_SYSTEM.learn,
     actions: { explain: { outputContract: CONTRACTS.learnExplain, requiresEvidence: true, retrieval: true } },
     retrieval: { documentTypes: ["product_description", "guidance", "sales_material"], allowHistorical: false, topK: 8 },
     categories: ["knowledge", "user_question", "learning"],
@@ -73,9 +72,7 @@ export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.fre
     id: "practice",
     version: "1",
     userCallable: true,
-    system:
-      "Du spiller en fiktiv kunde i et træningsrollespil. Du må opfinde virksomheden, indvendinger og personlighed, " +
-      "men aldrig dækninger eller andre produktfakta. Feedback skal henvise til uddragene. [UDKAST — IKKE VALIDERET]",
+    system: PROFILE_SYSTEM.practice,
     actions: {
       roleplay_turn: { outputContract: CONTRACTS.practiceTurn, requiresEvidence: false, retrieval: false },
       feedback: { outputContract: CONTRACTS.practiceFeedback, requiresEvidence: true, retrieval: true },
@@ -89,7 +86,7 @@ export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.fre
     id: "advise",
     version: "1",
     userCallable: true,
-    system: `Du giver forslag til rådgiveren i en kundesag. Alt er forslag; rådgiveren afgør. ${GROUNDING}`,
+    system: PROFILE_SYSTEM.advise,
     actions: { suggest: { outputContract: CONTRACTS.adviseSuggest, requiresEvidence: true, retrieval: true } },
     retrieval: { documentTypes: ["terms", "acceptance_rules", "business_procedure"], allowHistorical: true, topK: 8 },
     // customer_identifiable is NOT in the list: case fields are never sent in phase 8 (docs/08 §6).
@@ -102,7 +99,7 @@ export const PROFILES: Readonly<Record<ProfileId, WorkflowProfile>> = Object.fre
     id: "assessment",
     version: "1",
     userCallable: false,
-    system: `Du vurderer en besvarelse mod facitgrundlaget. ${GROUNDING}`,
+    system: PROFILE_SYSTEM.assessment,
     actions: { evaluate: { outputContract: CONTRACTS.assessmentEvaluate, requiresEvidence: true, retrieval: true } },
     retrieval: { allowHistorical: false, topK: 8 },
     categories: ["knowledge", "learning"],

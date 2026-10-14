@@ -81,6 +81,20 @@ fremtvinge "kan ikke dokumenteres" og "utilstrækkeligt grundlag". Kør migratio
 `20261002000100_ai_gateway.sql`. Skemaerne `ai`, `assessment` og `practice` er eksponeret i
 `supabase/config.toml`.
 
+### Claude API (beta L4)
+
+AI Gateway kan bruge en Claude-model gennem Anthropics Messages API (`docs/beta.md` §16, B-039).
+Det kræver tre ting, og ingen af dem er sat i repoet:
+
+- `IPA_AI_MODEL` sat til et Claude-model-id i servermiljøet;
+- API-nøglen `IPA_ANTHROPIC_API_KEY` som server-side secret (aldrig `NEXT_PUBLIC_`);
+- modellen godkendt med verificerede priser i databasen (`ai.set_model_price`) og regler i
+  datakategori-matricen.
+
+Hvert kald reserverer sin maksimale omkostning i databasen før afsendelse og afstemmes bagefter
+(`ai.usage_limits`, `ai.usage_reservations`). Alle tests bruger en falsk transport, og testmiljøet
+afviser rigtige kald. Det første rigtige kald sker først i L4b efter særskilt godkendelse.
+
 | Script | Formål |
 |--------|--------|
 | `npm run lint` | ESLint |

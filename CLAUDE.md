@@ -31,7 +31,10 @@ Assessment på Vercel, Supabase og Claude API — uden AWS i den aktive runtime.
 Scope, arkitektur og leverancerne L0–L9 står i `docs/beta.md`. Arbejdet sker på branchen
 `beta/fast-beta-without-aws`; hver leverance godkendes særskilt. L0 og L1 er godkendt (B-036); L1.1
 og L2 er godkendt (B-038). L3 (sikker dokumentimport uden AWS, runbook `docs/import-runbook.md`)
-afventer godkendelse.
+er godkendt (B-039). L4 (Claude-adapter, egress pr. profil, budget og forbrugsgrænser,
+`docs/beta.md` §16) er gennemført med fake transport og afventer godkendelse. Betaen bruger
+projektejerens egen Anthropic Console-organisation med en dedikeret server-side API-nøgle (B-039).
+Ingen rigtige betalbare Claude-kald før L4b er særskilt godkendt.
 
 **Husk til sidst (B-003):** Vercel-demoen kører midlertidigt uden login på fiktive data. Når
 projektet er færdigt, kobles den på Supabase, og demo-tilstanden fjernes (`docs/decisions.md`

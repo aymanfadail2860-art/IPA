@@ -86,7 +86,16 @@ jobs:
           test "$CODE" -le 1
 
       - name: Build
+        env:
+          # Beta L4: a sentinel in place of the Claude API key — never a real key. The next step
+          # proves its value never reaches a browser.
+          IPA_ANTHROPIC_API_KEY: ci-bundle-sentinel-not-a-real-key-4f9c2a71
         run: npm run build
+
+      - name: The client bundle carries no API key, SDK or API host (beta L4)
+        env:
+          IPA_BUNDLE_SENTINEL: ci-bundle-sentinel-not-a-real-key-4f9c2a71
+        run: node scripts/check-client-bundle.ts .next
 
   database:
     name: Fresh database, pgTAP and integration

@@ -33,6 +33,7 @@ import type { Reranker, RerankInput } from "@/lib/knowledge/core/reranker";
 import { runRetrieval, type KnowledgeRpcClient, type SearchRow } from "@/lib/knowledge/retrieval-core";
 
 import { evidenceItem, issueEvidence } from "./fixtures/ai-evidence";
+import { memoryLedger } from "./fixtures/memory-ledger";
 
 /**
  * 8B-I2.5 — the external-AI data boundary. Customer-identifiable data may not leave the
@@ -150,8 +151,9 @@ describe("classification and provenance", () => {
 });
 
 describe("the central egress policy", () => {
-  const request = (operation: EgressOperation, parts: { role: EgressRole; content: unknown }[]) =>
-    ({ provider: EXTERNAL, operation, module: "test", parts }) as Parameters<typeof authorizeEgress>[0];
+  // Generation is authorized per purpose since L4 (GENERATE_PURPOSES); the Copilot purpose here.
+  const request = (operation: EgressOperation, parts: { role: EgressRole; content: unknown }[], purpose = "copilot.answer_question") =>
+    ({ provider: EXTERNAL, operation, module: "test", parts, ...(operation === "generate" ? { purpose } : {}) }) as Parameters<typeof authorizeEgress>[0];
 
   it.each([
     ["customer-case text", () => customerCaseText(CASE_TEXT), "case_bound"],
@@ -442,6 +444,8 @@ describe("the gateway end to end: customer data cannot be allowed by configurati
       retrieve: options.retrieve ?? (async () => issueEvidence([evidenceItem(1)], { embedder: "production", reranker: "production" })),
       model: () => options.model,
       record: async (entry) => void records.push(structuredClone(entry)),
+      // An external model spends only through a usage ledger (beta L4).
+      usage: memoryLedger().ledger,
       environment: "test",
     };
     return { value, records };

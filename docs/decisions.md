@@ -10,6 +10,100 @@ er ikke omskrevet, fordi loggen er historik.
 
 ---
 
+## B-039 — L3 godkendt; egen Anthropic Console-organisation til betaen; L4 godkendt til implementering
+
+**Dato:** 14. oktober 2026
+**Område:** `docs/beta.md` §2, §2.1, §5.3, §9, §11, §15, §16; `CLAUDE.md` §1; `docs/roadmap.md`;
+`src/lib/ai/`; `src/lib/egress/policy.ts`; `supabase/migrations/20261014000100_ai_usage_limits.sql`
+
+**Beslutning:**
+- **L3 er godkendt.** L3 er færdig med grøn CI på commit `628430e`.
+- **Betaens API-forbindelse** (projektejerens ordlyd):
+
+  > Betaversionen anvender projektejerens egen Anthropic Console-organisation med en dedikeret,
+  > server-side API-nøgle. Det er tilladt under udvikling og kontrolleret demo med syntetiske
+  > eller særskilt godkendte data. Når IPA overtager platformen, udskiftes API-konfigurationen
+  > med IPA's egen organisation. Den private Claude Code-session er ikke platformens
+  > produktionsidentitet. Ingen API-nøgle må skrives i dokumentation eller kildekode.
+
+  Nøglen er dedikeret og bruges kun af Insurance Partners. Det er hverken projektejerens Claude
+  Code-session eller Claude-abonnement. API-nøglen og den relevante model- og budgetkonfiguration
+  skal kunne udskiftes uden ændring af forretningslogik.
+- **Krav til forbindelsen:**
+  1. Forbindelsen er konfigurationsbaseret og ikke hardcoded til en bestemt konto.
+  2. Nøglen opbevares server-side som secret i det relevante miljø, aldrig i Git, browseren eller
+     almindelige databasetabeller.
+  3. Skift til IPA's nøgle sker uden kodeændringer eller ny arkitektur.
+  4. Budgetgrænser, rate limiting, logging og egress-kontroller bevares.
+  5. Betademonstrationer bruger kun syntetiske eller særskilt godkendte dokumenter og oplysninger,
+     indtil dokumentrettigheder og databehandling er afklaret.
+  6. Der bygges hverken selvbetjening af API-nøgler eller flere AI-leverandører i betaen.
+- **L4 er godkendt til implementering** efter specifikationen i `docs/beta.md` §16, herunder de
+  godkendte startgrænser (§16.7). Implementeringen kræver ikke en ny specifikationsgodkendelse,
+  så længe den holder sig inden for rammerne.
+- **Ingen rigtige betalbare Claude-kald før L4b**, som kræver særskilt godkendelse. Projektets
+  månedlige grænse sættes også uafhængigt i Anthropic Console før L4b.
+- Betaens øvrige scope er uændret: Copilot, Learn, Practice og Assessment er med; Advise er
+  udskudt. Master-roadmap 1–21 er uændret.
+
+**Overvejede alternativer:**
+- *Vente på IPA's egen Anthropic-organisation.* Fravalgt. Betaen skal demonstrere platformen med
+  rigtig AI, før den overdrages.
+- *Bruge projektejerens Claude Code-session eller abonnement.* Fravalgt. Den private konto må
+  aldrig blive platformens produktionsidentitet (B-035).
+- *Selvbetjening af nøgler eller flere leverandører.* Fravalgt for betaen som unødvendig
+  kompleksitet.
+
+**Beslutninger i implementeringen af L4** (`docs/beta.md` §16.14–§16.24):
+- **Officielt SDK, låst version.** `@anthropic-ai/sdk` 0.131.0 er den eneste nye dependency, og kun
+  transporten importerer den. Host, nøgle og auth er faste, og SDK'ets egne retries og logning er
+  slået fra.
+- **Modelvalg er konfiguration i to lag.** `IPA_AI_MODEL` vælger modellen. Databasens
+  `ai.model_prices` godkender den med verificerede priser, kilde og dato. Migrationen indsætter
+  ingen modeller, og intet model-id er skrevet i kode eller dokumentation. Ukendt model eller pris
+  afvises (fail-closed).
+- **Egress pr. formål** (`GENERATE_PURPOSES`): Copilot-spørgsmål, Learn-forklaring,
+  rollespilsreplik (kun brugerens replik og fiktivt scenarie) og Practice-feedback. Den generelle
+  regel for generering er fjernet. Advise og Assessment har intet formål og sender intet.
+- **Instruktioner er reviewede konstanter** (`instructions.ts`) og egress-politikkens
+  protokolkonstanter. Dokumenttekst er altid dokumentindhold og aldrig systemprompt.
+- **Citationer:** én dokumentblok pr. dokumentversion, ét uddrag pr. indholdsblok, native
+  citationer og almindelig tekst. Konverteringen til den eksisterende outputkontrakt er
+  deterministisk og foreløbig (L5).
+- **Forbrug:** én databasetransaktion under én global lås reserverer den maksimale omkostning før
+  afsendelse. Udbyderens tokenoptælling håndhæver inputloftet. Reservationen afstemmes med den
+  faktiske usage, frigives kun ved et HTTP-fejlsvar eller en afvisning før afsendelse, og markeres
+  usikker (tæller fuldt) ved netværksfejl og timeout. Forsøgene begrænses i databasen.
+- **Prompt caching** er forberedt, men ikke aktiv. Aktivering er en reviewet kodeændring.
+- **Struktureret log** uden indhold. Den låste indholdslog (docs/08 §11.1) er ikke ændret; se
+  "Udledt" punkt 1.
+
+**Overvejede alternativer i implementeringen:**
+- *Streng JSON-output (structured outputs) i stedet for native citationer.* Fravalgt.
+  Specifikationen beder om native citationer, og de to kan ikke kombineres.
+- *Godkendte model-id'er og priser i koden.* Fravalgt. Et modelskift ville kræve en kodeændring, og
+  model-id'er skrives ikke i repoet.
+- *Rå `fetch` mod API'et.* Fravalgt. Det officielle SDK giver typede fejl og det aktuelle format.
+- *Reservation efter tokenoptællingen.* Fravalgt. Optællingen sender indholdet til Anthropic, så
+  rate limits og budget kontrolleres før enhver netværkstrafik.
+- *Frigive reservationen efter en timeout.* Fravalgt. Udbyderen kan have behandlet kaldet.
+
+**Begrundelse:** Betaens formål er at demonstrere Insurance Partners med rigtig AI, før løsningen
+overdrages til IPA. En dedikeret nøgle i projektejerens egen organisation gør det muligt nu, og
+fordi forbindelsen kun er konfiguration, kan IPA overtage den uden at røre forretningslogikken.
+
+**Udledt (til bekræftelse):**
+1. **Konflikt med docs/08 §11.1 (B-014), ikke ændret.** Indholdsloggen gemmer det sendte indhold,
+   inkl. dokumentgrundlaget. L4 siger "log ikke dokumenttekst eller fulde prompts". Det skal
+   besluttes før rigtig betadrift (`docs/beta.md` §16.20).
+2. Rigtige brugeres fritekst sendes først til Claude efter en beslutning om restrisiko og
+   databehandling. L4b bruger syntetiske testprompter.
+3. Et HTTP-fejlsvar fra Anthropic faktureres ikke, så reservationen frigives og 429/5xx kan
+   gentages.
+4. Retentionsperioder for AI-logs og forbrugsrækker er ikke besluttet, og ingen er opfundet.
+
+---
+
 ## B-038 — L1.1 og L2 godkendt; sikker dokumentimport uden AWS (beta L3)
 
 **Dato:** 14. oktober 2026

@@ -16,9 +16,9 @@ import { describe, expect, it } from "vitest";
  * Adding a new provider or transport therefore means editing the allowlists below — a change a
  * reviewer sees.
  *
- * Beta L2 (docs/beta.md §14): the Bedrock transport and adapters are removed, so the allowlists
- * are empty — no module may reach an external AI provider until the Claude adapter (L4) is added
- * to them, behind the same checks.
+ * Beta L2 (docs/beta.md §14): the Bedrock transport and adapters are removed. Beta L4 (§16): the
+ * Claude transport is the one allowlisted way out, behind the same checks — and the only module
+ * that imports the Anthropic SDK.
  */
 
 const REPO = path.resolve(__dirname, "../..");
@@ -66,9 +66,9 @@ const NETWORK = [
 
 /**
  * The ONLY modules allowed to talk to an external AI provider. Each must call assertTransmittable.
- * Empty since L2: the Claude adapter (L4) is the next entry.
+ * Since L4 (docs/beta.md §16): the Anthropic Messages API transport.
  */
-const ALLOWED_TRANSPORTS: string[] = [];
+const ALLOWED_TRANSPORTS: string[] = ["src/lib/ai/providers/anthropic/transport.ts"];
 
 /**
  * Network clients that are NOT a way to an AI provider, each with what it may reach. 8B-I5: the
@@ -110,15 +110,24 @@ describe("external transports: only allowlisted, and only behind the egress chec
   });
 
   it("every allowlisted transport checks the authorization before any network I/O", () => {
-    // L2: there is none (the Bedrock transport is removed); the rule stays for the next one.
-    expect(ALLOWED_TRANSPORTS).toEqual([]);
+    expect(ALLOWED_TRANSPORTS).toEqual(["src/lib/ai/providers/anthropic/transport.ts"]);
     for (const file of ALLOWED_TRANSPORTS) {
       const text = read(path.join(REPO, file));
-      expect(text, file).toMatch(/import \{ assertTransmittable \} from ["'][^"']*egress\/policy\.ts["']/);
-      const check = text.indexOf("assertTransmittable(call.egress");
-      const send = text.indexOf("client.send(");
-      expect(check, file).toBeGreaterThan(-1);
-      expect(send, file).toBeGreaterThan(check);
+      expect(text, file).toMatch(/^import \{ assertTransmittable, EgressPolicyError, type AuthorizedEgress \} from "@\/lib\/egress\/policy";$/m);
+      // The one check: the authorization, then this model only.
+      expect(text, file).toMatch(/const authorize = \(egress: AuthorizedEgress, body: ApiMessageRequest\) => \{\n {4}assertTransmittable\(egress, \{ provider: options\.modelId, modelId: options\.modelId, body \}\);/);
+      // Every call to the API is preceded, in its own method, by that check.
+      const calls = [...text.matchAll(/client\.messages\.(countTokens|create)\(/g)];
+      expect(calls.map((match) => match[1]), file).toEqual(["countTokens", "create"]);
+      for (const call of calls) {
+        const method = text.slice(text.lastIndexOf("async ", call.index), call.index);
+        expect(method, file).toMatch(/^async (countTokens|create)\(egress: AuthorizedEgress, body: ApiMessageRequest\) \{\n {6}authorize\(egress, body\);/);
+      }
+      // No SDK retries (the model's own retries run under the reservation), no SDK logging, a fixed host.
+      expect(text, file).toMatch(/maxRetries: 0,/);
+      expect(text, file).toMatch(/logLevel: "off",/);
+      expect(text, file).toMatch(/baseURL: ANTHROPIC_API_BASE_URL,/);
+      expect(text, file).toMatch(/authToken: null,/);
     }
   });
 
@@ -127,13 +136,17 @@ describe("external transports: only allowlisted, and only behind the egress chec
     expect(policy).toMatch(/export function assertTransmittable\(egress: AuthorizedEgress, expected: \{ provider: string; modelId: string; body: unknown; log\?: EgressLog \}\): void \{/);
   });
 
-  it("there is no AI or cloud SDK dependency at all (beta L2: AWS removed)", () => {
+  it("the only AI SDK is the pinned Anthropic SDK, imported only by the transport (beta L2: AWS removed; L4)", () => {
     const pkg = JSON.parse(read(path.join(REPO, "package.json")));
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
-    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual([]);
+    expect(deps.filter((name) => /^(@aws-sdk\/|@anthropic-ai\/|openai$|cohere-ai$|@google\/|@mistralai\/|@azure\/|undici$|axios$)/.test(name))).toEqual(["@anthropic-ai/sdk"]);
+    // An exact version — no range that could pull an unreviewed release.
+    expect(pkg.dependencies["@anthropic-ai/sdk"]).toMatch(/^\d+\.\d+\.\d+$/);
     expect(deps.filter((name) => /^(@smithy\/|@vercel\/)/.test(name))).toEqual([]);
     const lock = read(path.join(REPO, "package-lock.json"));
     expect(lock).not.toMatch(/"node_modules\/@aws-sdk\/|"node_modules\/@smithy\/|"node_modules\/@aws-crypto\/|oidc-aws-credentials-provider/);
+    const importers = sources.filter(({ text }) => /from ["']@anthropic-ai\//.test(text)).map(({ file }) => file);
+    expect(importers).toEqual(["src/lib/ai/providers/anthropic/transport.ts"]);
   });
 });
 
@@ -155,7 +168,7 @@ describe("adapters authorize before they invoke", () => {
     const invoke = read(path.join(REPO, "src/lib/ai/core/invoke.ts"));
     const authorize = invoke.indexOf("authorizeEgress(");
     expect(authorize).toBeGreaterThan(-1);
-    expect(invoke.indexOf("model.generate(input, egress)")).toBeGreaterThan(authorize);
+    expect(invoke.indexOf("model.generate(input, egress, options.call)")).toBeGreaterThan(authorize);
     // The only unauthorized generate() is the development (in-process) branch.
     expect(invoke).toMatch(/if \(developmentModel\) return model\.generate\(input\);/);
     const generators = sources.filter(({ text }) => /\.generate\(/.test(text)).map(({ file }) => file);
